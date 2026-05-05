@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>关键词生成测试</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f5f7fa; padding: 24px; color: #333; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 24px; margin-bottom: 20px; color: #1a1a2e; }
+        .search-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+        .search-row { display: flex; gap: 12px; align-items: flex-end; }
+        .input-group { flex: 1; }
+        .input-group label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #555; }
+        .input-group input { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.2s; }
+        .input-group input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,0.1); }
+        .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .btn-primary { background: #4a90d9; color: #fff; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-primary:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .status { margin-top: 12px; font-size: 13px; color: #666; }
+        .status.error { color: #e74c3c; }
+        .status.success { color: #27ae60; }
+
+        .steps-container { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+        .steps-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; }
+        .step-list { display: flex; flex-direction: column; gap: 8px; }
+        .step-item { display: flex; align-items: center; padding: 10px 16px; border-radius: 8px; background: #f8f9fa; transition: all 0.2s; }
+        .step-item.active { background: #e8f0fe; border-left: 3px solid #4a90d9; }
+        .step-item.completed { background: #e8f5e9; border-left: 3px solid #27ae60; }
+        .step-item.error { background: #fde8e8; border-left: 3px solid #e74c3c; }
+        .step-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; margin-right: 12px; flex-shrink: 0; }
+        .step-item .step-icon { background: #ddd; color: #666; }
+        .step-item.active .step-icon { background: #4a90d9; color: #fff; }
+        .step-item.completed .step-icon { background: #27ae60; color: #fff; }
+        .step-item.error .step-icon { background: #e74c3c; color: #fff; }
+        .step-name { font-size: 14px; font-weight: 500; flex: 1; }
+        .step-detail { font-size: 12px; color: #888; margin-left: 8px; }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #4a90d9; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-left: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .table-container { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 24px; }
+        .table-header { padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .table-header h2 { font-size: 16px; color: #1a1a2e; }
+        .table-header span { font-size: 13px; color: #888; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #555; border-bottom: 2px solid #eee; white-space: nowrap; }
+        td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 13px; vertical-align: top; }
+        tr:hover td { background: #fafbfc; }
+        .idx { text-align: center; color: #888; font-weight: 500; width: 60px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
+        .tag-holder { background: #ffebee; color: #c62828; }
+        .tag-invention { background: #e3f2fd; color: #1565c0; }
+        .tag-scenario { background: #f3e5f5; color: #7b1fa2; }
+        .tag-audience { background: #fff3e0; color: #e65100; }
+        .tag-function { background: #e8f5e9; color: #2e7d32; }
+        .tag-combined { background: #e0f2f1; color: #00695c; }
+        .tag-scene { background: #fce4ec; color: #880e4f; }
+        .tag-feature { background: #e8eaf6; color: #283593; }
+        .empty { text-align: center; padding: 60px 20px; color: #999; }
+        .empty svg { width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.3; }
+        .info-text { font-size: 13px; color: #666; line-height: 1.6; padding: 12px 16px; background: #f8f9fa; border-radius: 8px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📝 关键词生成测试</h1>
+        <div class="search-box">
+            <div class="search-row">
+                <div class="input-group">
+                    <label for="patentRecordId">专利记录ID (patent_record_id)</label>
+                    <input type="number" id="patentRecordId" placeholder="输入专利解析主记录ID，如：1" />
+                </div>
+                <div class="input-group">
+                    <label for="sessionId">分析会话ID（可选）</label>
+                    <input type="text" id="sessionId" placeholder="留空则不限" />
+                </div>
+                <button class="btn btn-primary" id="runBtn" onclick="runWorkflow()">运行关键词生成</button>
+            </div>
+            <div class="status" id="status"></div>
+        </div>
+
+        <div class="steps-container" id="stepsContainer" style="display:none;">
+            <div class="steps-title">流程进度</div>
+            <div class="step-list" id="stepList"></div>
+        </div>
+
+        <div class="table-container" id="keywordsContainer" style="display:none;">
+            <div class="table-header">
+                <h2>📋 生成的关键词</h2>
+                <span id="keywordsCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="idx">序号</th>
+                            <th>关键词</th>
+                            <th>类型</th>
+                            <th>来源</th>
+                            <th>置信度</th>
+                        </tr>
+                    </thead>
+                    <tbody id="keywordsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="empty" id="emptyState">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 1.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <p>输入专利记录ID开始关键词生成</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5102';
+        const STEPS = [
+            { id: 'feishu_data_loader', name: '数据加载', detail: '从数据库加载专利数据' },
+            { id: 'record_process_loop', name: '记录循环处理', detail: '逐条处理权利要求，生成关键词' },
+            { id: 'keyword_writer', name: '关键词写入', detail: '写入数据库' },
+        ];
+        let currentStep = -1;
+
+        function setStatus(msg, type = '') {
+            const el = document.getElementById('status');
+            el.className = 'status' + (type ? ' ' + type : '');
+            el.innerHTML = msg;
+        }
+
+        function esc(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        function renderSteps() {
+            const list = document.getElementById('stepList');
+            list.innerHTML = STEPS.map((s, i) => {
+                let cls = '';
+                if (i < currentStep) cls = 'completed';
+                else if (i === currentStep) cls = 'active';
+                const icon = i < currentStep ? '✓' : i + 1;
+                const suffix = i === currentStep ? '<span class="spinner"></span>' : (i < currentStep ? '<span class="step-detail">完成</span>' : '<span class="step-detail">等待中</span>');
+                return `<div class="step-item ${cls}">
+                    <span class="step-icon">${icon}</span>
+                    <span class="step-name">${s.name}</span>
+                    <span class="step-detail">${s.detail}</span>
+                    ${suffix}
+                </div>`;
+            }).join('');
+            document.getElementById('stepsContainer').style.display = 'block';
+        }
+
+        function getTypeTag(type) {
+            const map = {
+                'HOLDER_BASED': ['品牌同款型', 'tag-holder'],
+                'INVENTION_BASED': ['特征组合型', 'tag-invention'],
+                'SCENARIO_BASED': ['场景型', 'tag-scenario'],
+                'AUDIENCE_BASED': ['人群型', 'tag-audience'],
+                'FUNCTION_BASED': ['功能型', 'tag-function'],
+                'COMBINED': ['组合型', 'tag-combined'],
+                'SCENE_BASED': ['场景型', 'tag-scene'],
+                'FEATURE_BASED': ['功能型', 'tag-feature'],
+            };
+            const [label, cls] = map[type] || [type, 'tag-combined'];
+            return `<span class="tag ${cls}">${esc(label)}</span>`;
+        }
+
+        function renderKeywords(keywords) {
+            const tbody = document.getElementById('keywordsBody');
+            tbody.innerHTML = keywords.map((kw, i) => `<tr>
+                <td class="idx">${i + 1}</td>
+                <td style="font-weight:500;">${esc(kw.keyword_text || kw.text || '-')}</td>
+                <td>${getTypeTag(kw.keyword_type || kw.type || '')}</td>
+                <td style="font-size:12px;color:#888;">${esc(kw.source_location || kw.combination_pattern || '-')}</td>
+                <td>${kw.confidence_score != null ? (typeof kw.confidence_score === 'number' ? (kw.confidence_score * 100).toFixed(0) + '%' : kw.confidence_score) : '-'}</td>
+            </tr>`).join('');
+            document.getElementById('keywordsCount').textContent = `共 ${keywords.length} 个关键词`;
+            document.getElementById('keywordsContainer').style.display = 'block';
+        }
+
+        async function runWorkflow() {
+            const patentRecordId = parseInt(document.getElementById('patentRecordId').value) || 0;
+            const sessionId = document.getElementById('sessionId').value.trim();
+            if (!patentRecordId) { setStatus('请输入专利记录ID', 'error'); return; }
+
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>生成中...';
+            document.getElementById('keywordsContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+
+            currentStep = 0;
+            renderSteps();
+            const startTime = Date.now();
+
+            const payload = { patent_record_id: patentRecordId };
+            if (sessionId) payload.analysis_session_id = sessionId;
+
+            try {
+                setStatus('正在运行关键词生成流程...');
+                currentStep = 1;
+                renderSteps();
+
+                const resp = await fetch(`${API_BASE}/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail?.error_message || err.detail || JSON.stringify(err.detail || err) || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                currentStep = STEPS.length;
+                renderSteps();
+
+                const kwCount = data.keywords_count || 0;
+                setStatus(`✅ 关键词生成完成！共 ${kwCount} 个关键词，耗时 ${elapsed}s`, 'success');
+
+                if (kwCount > 0 && data.all_keywords) {
+                    renderKeywords(data.all_keywords);
+                } else if (kwCount > 0) {
+                    document.getElementById('keywordsContainer').style.display = 'block';
+                    document.getElementById('keywordsCount').textContent = `共 ${kwCount} 个关键词（详情请查看数据库）`;
+                    document.getElementById('keywordsBody').innerHTML = `<tr><td colspan="5" class="empty">关键词已写入数据库 keyword_records 表，共 ${kwCount} 条</td></tr>`;
+                } else {
+                    document.getElementById('emptyState').style.display = 'block';
+                }
+            } catch (e) {
+                setStatus(`❌ 运行失败：${e.message}`, 'error');
+                currentStep = STEPS.length;
+                renderSteps();
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '运行关键词生成';
+            }
+        }
+    </script>
+</body>
+</html>

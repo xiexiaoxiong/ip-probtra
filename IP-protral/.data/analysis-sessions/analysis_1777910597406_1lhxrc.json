@@ -1,0 +1,282 @@
+{
+  "id": "analysis_1777910597406_1lhxrc",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777910597291-0b67d562-b8f6-4661-8ed1-95a300c1825a-CN218484462U_______.pdf",
+    "fileName": "CN218484462U扫地机器人示例.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777910597291-0b67d562-b8f6-4661-8ed1-95a300c1825a-CN218484462U_______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777910597412,
+      "completedAt": 1777910699449
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777910699450,
+      "completedAt": 1777910699453
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777910699454,
+      "completedAt": 1777910762951
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "startedAt": 1777910762952,
+      "completedAt": 1777910835453
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "completed",
+      "startedAt": 1777910835453,
+      "completedAt": 1777910961458
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "completed",
+      "completedAt": 1777910961459,
+      "startedAt": 1777910961459
+    }
+  ],
+  "results": {
+    "dbRecordId": 26,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "34061a95-526c-47a0-a4e4-29651c74d179",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "keywordRunId": 16,
+    "module2RunId": "4ee2f1ad-8363-4ab1-8c4d-662689ca8933",
+    "industryUsed": "general",
+    "products": [
+      {
+        "id": "5",
+        "name": "智能家用扫地机器人吸扫拖一体USB除尘器家居清"
+      },
+      {
+        "id": "6",
+        "name": "爆款 智能扫地机器人 家用充电四合一 吸尘器扫地礼品 批发印logo"
+      },
+      {
+        "id": "9",
+        "name": "智能扫地机器人全自动扫地拖地吸尘三合一体家用清洁吸尘器擦地机"
+      },
+      {
+        "id": "11",
+        "name": "家用多功能扫地机器人 喷雾五合一清洁机充电智能吸尘器 拓客"
+      },
+      {
+        "id": "12",
+        "name": "智能扫地机器人家用扫吸拖三合一带地图APP控制自动回充源头工厂"
+      },
+      {
+        "id": "15",
+        "name": "包邮扫地机器人吸力强劲充电款二合一家用全自动清洁机扫吸拖吸尘"
+      },
+      {
+        "id": "1",
+        "name": "【惠州扫地机器人】_惠州扫地机器人批发_惠州扫地机器人拿货货源 - 阿里巴巴"
+      },
+      {
+        "id": "2",
+        "name": "高性价比家用扫地机：2026春季清洁革命，谁是真·省心王?"
+      },
+      {
+        "id": "3",
+        "name": "百元级扫地机杀疯了？24.74元三合一全自动扫拖机实测"
+      },
+      {
+        "id": "4",
+        "name": "这价格还能有三合一扫地机？真不是智商税？"
+      },
+      {
+        "id": "7",
+        "name": "美的V10扫拖机器人自动集尘大吸力5000Pa家用智能扫地机优惠品"
+      },
+      {
+        "id": "8",
+        "name": "扫地机器人批发价格及图片表"
+      },
+      {
+        "id": "10",
+        "name": "共5975条\"机器人扫地厂家\"信息"
+      },
+      {
+        "id": "13",
+        "name": "批发 2025秋 智能扫地机器人扫拖地三合一体擦地清洗家用全自动超薄除菌吸尘器"
+      },
+      {
+        "id": "14",
+        "name": "云鲸扫地机器人J2水箱版全自动智能延边清洁大吸力强效除污正品"
+      },
+      {
+        "id": "21",
+        "name": "欧堡智能扫地机器人家用三合一扫地机器人充电吸尘器小家电礼品批发 白色 96台/8件相似商品"
+      },
+      {
+        "id": "16",
+        "name": "高效清洁扫吸拖一体全自动扫地机器人懒人智能家用清洁神器新款"
+      },
+      {
+        "id": "20",
+        "name": "扫地机器人批发全自动智能家用扫吸拖三合一吸尘器干湿两用一体机"
+      },
+      {
+        "id": "19",
+        "name": "科沃斯X12 PRO水箱版洗地机器人"
+      },
+      {
+        "id": "17",
+        "name": "全自动家用智能扫拖吸三合一体APP遥控带水箱扫地机器人批发"
+      }
+    ],
+    "searchRunId": 23,
+    "module3RunId": "1fd4b5f6-0993-484a-bb56-7d322364528c",
+    "comparisons": [
+      {
+        "productId": "5",
+        "productName": "智能家用扫地机器人吸扫拖一体USB除尘器家居清",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "6",
+        "productName": "爆款 智能扫地机器人 家用充电四合一 吸尘器扫地礼品 批发印logo",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "9",
+        "productName": "智能扫地机器人全自动扫地拖地吸尘三合一体家用清洁吸尘器擦地机",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "11",
+        "productName": "家用多功能扫地机器人 喷雾五合一清洁机充电智能吸尘器 拓客",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "12",
+        "productName": "智能扫地机器人家用扫吸拖三合一带地图APP控制自动回充源头工厂",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "15",
+        "productName": "包邮扫地机器人吸力强劲充电款二合一家用全自动清洁机扫吸拖吸尘",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "1",
+        "productName": "【惠州扫地机器人】_惠州扫地机器人批发_惠州扫地机器人拿货货源 - 阿里巴巴",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "2",
+        "productName": "高性价比家用扫地机：2026春季清洁革命，谁是真·省心王?",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "3",
+        "productName": "百元级扫地机杀疯了？24.74元三合一全自动扫拖机实测",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "4",
+        "productName": "这价格还能有三合一扫地机？真不是智商税？",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "7",
+        "productName": "美的V10扫拖机器人自动集尘大吸力5000Pa家用智能扫地机优惠品",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "8",
+        "productName": "扫地机器人批发价格及图片表",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "10",
+        "productName": "共5975条\"机器人扫地厂家\"信息",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "13",
+        "productName": "批发 2025秋 智能扫地机器人扫拖地三合一体擦地清洗家用全自动超薄除菌吸尘器",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "14",
+        "productName": "云鲸扫地机器人J2水箱版全自动智能延边清洁大吸力强效除污正品",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "21",
+        "productName": "欧堡智能扫地机器人家用三合一扫地机器人充电吸尘器小家电礼品批发 白色 96台/8件相似商品",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "16",
+        "productName": "高效清洁扫吸拖一体全自动扫地机器人懒人智能家用清洁神器新款",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "20",
+        "productName": "扫地机器人批发全自动智能家用扫吸拖三合一吸尘器干湿两用一体机",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "19",
+        "productName": "科沃斯X12 PRO水箱版洗地机器人",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "17",
+        "productName": "全自动家用智能扫拖吸三合一体APP遥控带水箱扫地机器人批发",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      }
+    ],
+    "claimCompareRunId": 3,
+    "module4RunId": "dcd2a7f8-01e0-409b-b50e-85795c9ed8d6"
+  },
+  "createdAt": 1777910597406,
+  "updatedAt": 1777910961460
+}

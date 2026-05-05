@@ -1,0 +1,83 @@
+{
+  "id": "analysis_1777823988837_engqxm",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777823988824-60ac6c8c-8c20-43f7-be24-423601fb70dc-CN218484462U_______.pdf",
+    "fileName": "CN218484462U扫地机器人示例.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777823988824-60ac6c8c-8c20-43f7-be24-423601fb70dc-CN218484462U_______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777823988840,
+      "completedAt": 1777824088917
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777824088918,
+      "completedAt": 1777824088918
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777824088918,
+      "completedAt": 1777824154262
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "error": "模块3 HTTP 响应中断，但后台任务已完成并写入数据库",
+      "startedAt": 1777824154262,
+      "completedAt": 1777824857271
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777824857272,
+      "completedAt": 1777824870408
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "无比对结果可写入",
+      "completedAt": 1777824870408,
+      "startedAt": 1777824870408
+    }
+  ],
+  "results": {
+    "dbRecordId": 23,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "84f2d27d-4d37-4f61-82a3-aef4dfde7800",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "keywordRunId": 13,
+    "module2RunId": "41df00f9-8a3d-4062-8571-07dfc30ab2be",
+    "industryUsed": "general",
+    "products": [],
+    "searchRunId": 21,
+    "module3RunId": "",
+    "comparisons": [],
+    "claimCompareRunId": 0,
+    "module4RunId": "d61092cd-61b0-4459-8c5b-60d4b3460da9",
+    "module4Exception": "无比对结果可写入"
+  },
+  "createdAt": 1777823988837,
+  "updatedAt": 1777824870408
+}

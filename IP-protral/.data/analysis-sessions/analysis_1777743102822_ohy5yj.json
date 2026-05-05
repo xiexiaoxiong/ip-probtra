@@ -1,0 +1,80 @@
+{
+  "id": "analysis_1777743102822_ohy5yj",
+  "status": "completed",
+  "input": {
+    "type": "text",
+    "value": "扫地机器人 扫地机器人 扫地机器人 扫地机器人 扫地机器人",
+    "text": "扫地机器人 扫地机器人 扫地机器人 扫地机器人 扫地机器人"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777743102825,
+      "completedAt": 1777743104827
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777743104828,
+      "completedAt": 1777743104829
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777743104829,
+      "completedAt": 1777743105116
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "startedAt": 1777743105116,
+      "completedAt": 1777743105589
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777743105589,
+      "completedAt": 1777743105877
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "无比对结果可写入",
+      "completedAt": 1777743105877,
+      "startedAt": 1777743105877
+    }
+  ],
+  "results": {
+    "dbRecordId": 16,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "d33323a9-1266-4f35-a5cf-92b1b10dd313",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2RunId": "b9bda39c-9cde-4c7e-a9f7-f9e5cb157080",
+    "industryUsed": "general",
+    "products": [],
+    "searchRunId": 11,
+    "module3RunId": "626b72d4-002a-431e-8c32-8be75ebf87ad",
+    "comparisons": [],
+    "claimCompareRunId": 0,
+    "module4RunId": "72c8cef6-84c4-452d-a5ed-4428202ea155",
+    "module4Exception": "无比对结果可写入"
+  },
+  "createdAt": 1777743102822,
+  "updatedAt": 1777743105877
+}

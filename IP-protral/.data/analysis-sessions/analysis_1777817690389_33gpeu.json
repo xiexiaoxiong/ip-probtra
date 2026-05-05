@@ -1,0 +1,134 @@
+{
+  "id": "analysis_1777817690389_33gpeu",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777817690379-0097dec5-41cd-43e3-8851-db3c55c36efd-CN218484462U_______.pdf",
+    "fileName": "CN218484462U扫地机器人示例.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777817690379-0097dec5-41cd-43e3-8851-db3c55c36efd-CN218484462U_______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777817690390,
+      "completedAt": 1777817792368
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777817792368,
+      "completedAt": 1777817792368
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777817792369,
+      "completedAt": 1777817859255
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "error": "模块3 HTTP 响应中断，但后台任务已完成并写入数据库",
+      "startedAt": 1777817859255,
+      "completedAt": 1777818331353
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777818331354,
+      "completedAt": 1777818409731
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "completed",
+      "completedAt": 1777818409732,
+      "startedAt": 1777818409732
+    }
+  ],
+  "results": {
+    "dbRecordId": 21,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "29764b42-0a48-4b0f-ac65-f0ec6f504ee6",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "keywordRunId": 11,
+    "module2RunId": "c605c3d4-15ba-4703-a3e8-bd4a47769915",
+    "industryUsed": "general",
+    "products": [
+      {
+        "id": "1",
+        "name": "宠物扫地机_家用_吸尘器迷你_清洁_机吸毛发除尘一体机智能_扫地机器人"
+      },
+      {
+        "id": "2",
+        "name": "康佳_扫地机器人家用_智能自动回充扫地机扫吸拖一体_清洁机器人_跨境"
+      },
+      {
+        "id": "7",
+        "name": "商用_扫地机器人_ 自动洗扫吸一体_设备_ 商场圣仕达_清洁_擦地洗地机"
+      },
+      {
+        "id": "9",
+        "name": "商用_扫地机器人_自动洗扫吸一体_设备_商场_清洁_擦地洗地机"
+      },
+      {
+        "id": "10",
+        "name": "本岗 厂家批发 商用_扫地机器人_ 户外道路_清洁设备_ 操作简单"
+      }
+    ],
+    "searchRunId": 19,
+    "module3RunId": "",
+    "comparisons": [
+      {
+        "productId": "1",
+        "productName": "宠物扫地机_家用_吸尘器迷你_清洁_机吸毛发除尘一体机智能_扫地机器人",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "2",
+        "productName": "康佳_扫地机器人家用_智能自动回充扫地机扫吸拖一体_清洁机器人_跨境",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "7",
+        "productName": "商用_扫地机器人_ 自动洗扫吸一体_设备_ 商场圣仕达_清洁_擦地洗地机",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "9",
+        "productName": "商用_扫地机器人_自动洗扫吸一体_设备_商场_清洁_擦地洗地机",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      },
+      {
+        "productId": "10",
+        "productName": "本岗 厂家批发 商用_扫地机器人_ 户外道路_清洁设备_ 操作简单",
+        "overallVerdict": "uncertain",
+        "claimElements": []
+      }
+    ],
+    "claimCompareRunId": 0,
+    "module4RunId": "203bc691-2784-4faf-9247-9bbd3ef36f80",
+    "module4Exception": "写入比对结果失败: Instance <ClaimCompareRun at 0x112f8d5b0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)"
+  },
+  "createdAt": 1777817690389,
+  "updatedAt": 1777818409733
+}

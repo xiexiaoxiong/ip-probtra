@@ -1,0 +1,78 @@
+{
+  "id": "analysis_1777684500153_jr3xor",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777684499466-eee5a772-ec81-4707-b661-2259cf012374-CN107786922B______.pdf",
+    "fileName": "CN107786922B电器示例专利.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777684499466-eee5a772-ec81-4707-b661-2259cf012374-CN107786922B______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777684500156,
+      "completedAt": 1777684870458
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777684870459,
+      "completedAt": 1777684870460
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "error",
+      "error": "fetch failed",
+      "startedAt": 1777684870460,
+      "completedAt": 1777685475365
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "startedAt": 1777685475366,
+      "completedAt": 1777685476084
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777685476085,
+      "completedAt": 1777685777213
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "fetch failed",
+      "completedAt": 1777685777214,
+      "startedAt": 1777685777214
+    }
+  ],
+  "results": {
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "c03a28cc-7f59-478a-8571-7e02d652f570",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2Exception": "fetch failed",
+    "industryUsed": "general",
+    "products": [],
+    "module3RunId": "970439cd-1b74-4917-98f6-0229a340690a",
+    "comparisons": [],
+    "module4Exception": "fetch failed"
+  },
+  "createdAt": 1777684500153,
+  "updatedAt": 1777685777214
+}

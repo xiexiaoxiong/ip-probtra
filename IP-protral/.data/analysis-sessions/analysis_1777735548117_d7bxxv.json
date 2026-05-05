@@ -1,0 +1,82 @@
+{
+  "id": "analysis_1777735548117_d7bxxv",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777735548015-0530bcb6-7732-4988-a9c1-3c4a5f13a6ab-CN218484462U_______.pdf",
+    "fileName": "CN218484462U扫地机器人示例.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777735548015-0530bcb6-7732-4988-a9c1-3c4a5f13a6ab-CN218484462U_______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777735548120,
+      "completedAt": 1777735658699
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777735658699,
+      "completedAt": 1777735658699
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777735658699,
+      "completedAt": 1777735721405
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "error",
+      "error": "fetch failed",
+      "startedAt": 1777735721405,
+      "completedAt": 1777736444029
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777736444029,
+      "completedAt": 1777736457205
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "无比对结果可写入",
+      "completedAt": 1777736457205,
+      "startedAt": 1777736457205
+    }
+  ],
+  "results": {
+    "dbRecordId": 12,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "d4518db6-2d4d-4d3e-ae40-bb5201605b7d",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "keywordRunId": 5,
+    "module2RunId": "3913f839-861e-4618-a4f1-2a7d9e73e586",
+    "industryUsed": "general",
+    "products": [],
+    "module3Exception": "fetch failed",
+    "comparisons": [],
+    "claimCompareRunId": 0,
+    "module4RunId": "6693e6ba-9884-4d78-9b01-d34a8d518a2a",
+    "module4Exception": "无比对结果可写入"
+  },
+  "createdAt": 1777735548117,
+  "updatedAt": 1777736457205
+}

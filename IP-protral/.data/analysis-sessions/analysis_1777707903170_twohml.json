@@ -1,0 +1,81 @@
+{
+  "id": "analysis_1777707903170_twohml",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777707903127-3e8adc06-a034-4edc-92f5-70a2b8211342-CN111249616B________.pdf",
+    "fileName": "CN111249616B医疗器械示例专利.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777707903127-3e8adc06-a034-4edc-92f5-70a2b8211342-CN111249616B________.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777707903173,
+      "completedAt": 1777708032314
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777708032315,
+      "completedAt": 1777708032318
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "error",
+      "error": "写入关键词时发生错误: Instance <KeywordRun at 0x111c02b70> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)",
+      "startedAt": 1777708032318,
+      "completedAt": 1777708120320
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "error",
+      "error": "fetch failed",
+      "startedAt": 1777708120320,
+      "completedAt": 1777708421497
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777708421498,
+      "completedAt": 1777708459158
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "无比对结果可写入",
+      "completedAt": 1777708459158,
+      "startedAt": 1777708459158
+    }
+  ],
+  "results": {
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "5da04dd3-6372-48fe-bc40-e9105ee52c84",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2RunId": "a27c8082-17e3-4fca-a286-9dfe939f694e",
+    "module2Exception": "KEYWORD_WRITE_ERROR",
+    "industryUsed": "general",
+    "products": [],
+    "module3Exception": "fetch failed",
+    "comparisons": [],
+    "module4RunId": "fc29c1d2-b5d5-4029-8c53-4634840868ab",
+    "module4Exception": "无比对结果可写入"
+  },
+  "createdAt": 1777707903170,
+  "updatedAt": 1777708459159
+}

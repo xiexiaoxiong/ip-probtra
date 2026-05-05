@@ -1,0 +1,78 @@
+{
+  "id": "analysis_1777654235413_j1uldi",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777654234894-f299aec3-5ec1-4ee8-9e37-32d2d9600260-CN107786922B______.pdf",
+    "fileName": "CN107786922B电器示例专利.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777654234894-f299aec3-5ec1-4ee8-9e37-32d2d9600260-CN107786922B______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777654235415,
+      "completedAt": 1777654254852
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777654254852,
+      "completedAt": 1777654254854
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "error",
+      "error": "HTTP 500: {\"detail\":{\"error_code\":701001,\"error_message\":\"运行时错误: 本地模型 HTTP 调用失败: curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to open.bigmodel.cn:443\",\"stack_trace\":[\"Traceback (most recent call last):\",\"File \\\"src/graphs/graph.py\\\", line 78, in record_process_loop_node\",\"    result = reco",
+      "startedAt": 1777654254854,
+      "completedAt": 1777654279192
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "startedAt": 1777654279193,
+      "completedAt": 1777654285449
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "completed",
+      "startedAt": 1777654285451,
+      "completedAt": 1777654352259
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "模块4未返回可用的比对数据",
+      "completedAt": 1777654352259,
+      "startedAt": 1777654352259
+    }
+  ],
+  "results": {
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "dc0ad4f7-fab1-4ec1-80a3-9e672932a405",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2Exception": "HTTP 500: {\"detail\":{\"error_code\":701001,\"error_message\":\"运行时错误: 本地模型 HTTP 调用失败: curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to open.bigmodel.cn:443\",\"stack_trace\":[\"Traceback (most recent call last):\",\"File \\\"src/graphs/graph.py\\\", line 78, in record_process_loop_node\",\"    result = reco",
+    "industryUsed": "general",
+    "products": [],
+    "module3RunId": "5a77f232-a897-437f-b605-aecd02480741",
+    "comparisons": [],
+    "module4RunId": "b46ead28-5b15-4054-98ee-982c8f02534f"
+  },
+  "createdAt": 1777654235413,
+  "updatedAt": 1777654352259
+}

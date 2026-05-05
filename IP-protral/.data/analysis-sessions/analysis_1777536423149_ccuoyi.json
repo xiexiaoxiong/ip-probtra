@@ -1,0 +1,60 @@
+{
+  "id": "analysis_1777536423149_ccuoyi",
+  "status": "error",
+  "input": {
+    "type": "text",
+    "value": "一种测试装置。权利要求1：一种测试装置，包括壳体和控制模块。说明书：本实用新型涉及测试设备技术领域。",
+    "text": "一种测试装置。权利要求1：一种测试装置，包括壳体和控制模块。说明书：本实用新型涉及测试设备技术领域。"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777536423154,
+      "completedAt": 1777536424257
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "error",
+      "error": "模块1已返回结构化解析结果，但当前整条链路仍未完成本地化。",
+      "completedAt": 1777536424258,
+      "startedAt": 1777536424258
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "pending"
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "pending"
+    }
+  ],
+  "results": {
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "2330c662-1ccf-43c7-8dd3-2c04802801d9",
+    "module2Exception": "模块1已返回结构化解析结果，但当前整条链路仍未完成本地化。"
+  },
+  "createdAt": 1777536423149,
+  "updatedAt": 1777536424277
+}

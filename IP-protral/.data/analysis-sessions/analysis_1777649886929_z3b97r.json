@@ -1,0 +1,78 @@
+{
+  "id": "analysis_1777649886929_z3b97r",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777649886916-c3a65e3e-de7b-4d50-b207-6a7456507c67-CN107786922B______.pdf",
+    "fileName": "CN107786922B电器示例专利.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777649886916-c3a65e3e-de7b-4d50-b207-6a7456507c67-CN107786922B______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777649886931,
+      "completedAt": 1777649968225
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777649968225,
+      "completedAt": 1777649968226
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "error",
+      "startedAt": 1777649968226,
+      "completedAt": 1777650018785
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "error",
+      "startedAt": 1777650018785,
+      "completedAt": 1777650024844
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "completed",
+      "startedAt": 1777650024845,
+      "completedAt": 1777650047905
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "模块4未返回可用的比对数据",
+      "completedAt": 1777650047905,
+      "startedAt": 1777650047905
+    }
+  ],
+  "results": {
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "0811956f-6875-4a9b-aae4-185efb1ff984",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2Exception": "HTTP 500: {\"detail\":{\"error_code\":305002,\"error_message\":\"API连接错误: Connection error.\",\"stack_trace\":[\"Traceback (most recent call last):\",\"File \\\"src/main.py\\\", line 198, in run\",\"    return await graph.ainvoke(payload, config=run_config, context=ctx)\",\"File \\\"src/graphs/graph.py\\\", line 78, in record_process",
+    "industryUsed": "general",
+    "products": [],
+    "module3RunId": "0cd031f8-ac62-44ef-bd7d-2226b19076bf",
+    "module3Exception": "保存结果失败: Instance <SearchRun at 0x1120ce2d0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)",
+    "comparisons": [],
+    "module4RunId": "bce50885-2fb4-44a4-b992-b34cf6a1d167"
+  },
+  "createdAt": 1777649886929,
+  "updatedAt": 1777650047905
+}

@@ -1,0 +1,82 @@
+{
+  "id": "analysis_1777727174013_op1dmo",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777727174000-ee4aad4a-7832-408f-b194-97a79db6eac1-CN218484462U_______.pdf",
+    "fileName": "CN218484462U扫地机器人示例.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777727174000-ee4aad4a-7832-408f-b194-97a79db6eac1-CN218484462U_______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777727174014,
+      "completedAt": 1777727176914
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777727176914,
+      "completedAt": 1777727176915
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "error",
+      "error": "HTTP 500: {\"detail\":{\"error_code\":305002,\"error_message\":\"API连接错误: Connection error.\",\"stack_trace\":[\"Traceback (most recent call last):\",\"File \\\"src/main.py\\\", line 584, in run\",\"    return await graph.ainvoke(payload, config=run_config, context=ctx)\",\"File \\\"src/graphs/graph.py\\\", line 78, in record_process",
+      "startedAt": 1777727176915,
+      "completedAt": 1777727181739
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "completed",
+      "startedAt": 1777727181739,
+      "completedAt": 1777727181813
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777727181813,
+      "completedAt": 1777727183171
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "无比对结果可写入",
+      "completedAt": 1777727183172,
+      "startedAt": 1777727183172
+    }
+  ],
+  "results": {
+    "dbRecordId": 11,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "843109c2-447a-4e18-9e30-2f63bf92ae80",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2Exception": "HTTP 500: {\"detail\":{\"error_code\":305002,\"error_message\":\"API连接错误: Connection error.\",\"stack_trace\":[\"Traceback (most recent call last):\",\"File \\\"src/main.py\\\", line 584, in run\",\"    return await graph.ainvoke(payload, config=run_config, context=ctx)\",\"File \\\"src/graphs/graph.py\\\", line 78, in record_process",
+    "industryUsed": "general",
+    "products": [],
+    "searchRunId": 9,
+    "module3RunId": "2d304a1b-e489-476d-9687-1cfe5092302e",
+    "comparisons": [],
+    "claimCompareRunId": 0,
+    "module4RunId": "1e600f5b-031d-4297-9967-ef6863f3bff8",
+    "module4Exception": "无比对结果可写入"
+  },
+  "createdAt": 1777727174013,
+  "updatedAt": 1777727183172
+}

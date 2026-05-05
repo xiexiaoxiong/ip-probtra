@@ -1,0 +1,78 @@
+{
+  "id": "analysis_1777649796276_1abqo6",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777649796225-743637c1-be17-4718-9961-f0092a289435-CN103025390B.pdf",
+    "fileName": "CN103025390B.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777649796225-743637c1-be17-4718-9961-f0092a289435-CN103025390B.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777649796279,
+      "completedAt": 1777649828255
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777649828256,
+      "completedAt": 1777649828259
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777649828262,
+      "completedAt": 1777649835779
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "error",
+      "startedAt": 1777649835779,
+      "completedAt": 1777649846283
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "completed",
+      "startedAt": 1777649846284,
+      "completedAt": 1777649854191
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "模块4未返回可用的比对数据",
+      "completedAt": 1777649854193,
+      "startedAt": 1777649854193
+    }
+  ],
+  "results": {
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "7d16baf1-74a3-4cfd-9e41-eba4afa17de2",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "module2RunId": "aa6fcfb8-d2ea-4125-b47e-5bdbf9dc8f10",
+    "industryUsed": "general",
+    "products": [],
+    "module3RunId": "517fe9d6-382b-47c8-a22e-9fcd9e344bb9",
+    "module3Exception": "保存结果失败: Instance <SearchRun at 0x112311ac0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)",
+    "comparisons": [],
+    "module4RunId": "cdbdd09a-a834-44f0-a0d3-0252aef1ddb2"
+  },
+  "createdAt": 1777649796276,
+  "updatedAt": 1777649854195
+}

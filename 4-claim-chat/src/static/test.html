@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>权利要求比对测试</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f5f7fa; padding: 24px; color: #333; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 24px; margin-bottom: 20px; color: #1a1a2e; }
+        .search-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+        .search-row { display: flex; gap: 12px; align-items: flex-end; }
+        .input-group { flex: 1; }
+        .input-group label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #555; }
+        .input-group input { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.2s; }
+        .input-group input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,0.1); }
+        .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .btn-primary { background: #4a90d9; color: #fff; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-primary:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .status { margin-top: 12px; font-size: 13px; color: #666; }
+        .status.error { color: #e74c3c; }
+        .status.success { color: #27ae60; }
+
+        .steps-container { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+        .steps-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; }
+        .step-list { display: flex; flex-direction: column; gap: 8px; }
+        .step-item { display: flex; align-items: center; padding: 10px 16px; border-radius: 8px; background: #f8f9fa; transition: all 0.2s; }
+        .step-item.active { background: #e8f0fe; border-left: 3px solid #4a90d9; }
+        .step-item.completed { background: #e8f5e9; border-left: 3px solid #27ae60; }
+        .step-item.error { background: #fde8e8; border-left: 3px solid #e74c3c; }
+        .step-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; margin-right: 12px; flex-shrink: 0; }
+        .step-item .step-icon { background: #ddd; color: #666; }
+        .step-item.active .step-icon { background: #4a90d9; color: #fff; }
+        .step-item.completed .step-icon { background: #27ae60; color: #fff; }
+        .step-item.error .step-icon { background: #e74c3c; color: #fff; }
+        .step-name { font-size: 14px; font-weight: 500; flex: 1; }
+        .step-detail { font-size: 12px; color: #888; margin-left: 8px; }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #4a90d9; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-left: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .table-container { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 24px; }
+        .table-header { padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .table-header h2 { font-size: 16px; color: #1a1a2e; }
+        .table-header span { font-size: 13px; color: #888; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #555; border-bottom: 2px solid #eee; white-space: nowrap; }
+        td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 13px; vertical-align: top; }
+        tr:hover td { background: #fafbfc; }
+        .idx { text-align: center; color: #888; font-weight: 500; width: 60px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px; font-weight: 500; }
+        .tag-match { background: #e8f5e9; color: #2e7d32; }
+        .tag-no-match { background: #ffebee; color: #c62828; }
+        .tag-uncertain { background: #fff3e0; color: #e65100; }
+        .empty { text-align: center; padding: 60px 20px; color: #999; }
+        .empty svg { width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚖️ 权利要求比对测试</h1>
+        <div class="search-box">
+            <div class="search-row">
+                <div class="input-group">
+                    <label for="patentRecordId">专利记录ID (patent_record_id)</label>
+                    <input type="number" id="patentRecordId" placeholder="输入专利解析主记录ID，如：1" />
+                </div>
+                <div class="input-group">
+                    <label for="sessionId">分析会话ID（可选）</label>
+                    <input type="text" id="sessionId" placeholder="留空则不限" />
+                </div>
+                <button class="btn btn-primary" id="runBtn" onclick="runWorkflow()">运行权利要求比对</button>
+            </div>
+            <div class="status" id="status"></div>
+        </div>
+
+        <div class="steps-container" id="stepsContainer" style="display:none;">
+            <div class="steps-title">流程进度</div>
+            <div class="step-list" id="stepList"></div>
+        </div>
+
+        <!-- Claims Table -->
+        <div class="table-container" id="claimsContainer" style="display:none;">
+            <div class="table-header">
+                <h2>📋 独立权利要求</h2>
+                <span id="claimsCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr><th class="idx">序号</th><th>权利要求编号</th><th>权利要求原文（摘要）</th></tr>
+                    </thead>
+                    <tbody id="claimsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Features Table -->
+        <div class="table-container" id="featuresContainer" style="display:none;">
+            <div class="table-header">
+                <h2>🔬 技术特征拆解</h2>
+                <span id="featuresCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr><th class="idx">序号</th><th>特征编号</th><th>所属权利要求</th><th>特征内容</th></tr>
+                    </thead>
+                    <tbody id="featuresBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Products Table -->
+        <div class="table-container" id="productsContainer" style="display:none;">
+            <div class="table-header">
+                <h2>🛒 比对商品</h2>
+                <span id="productsCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr><th class="idx">序号</th><th>商品名称</th><th>来源</th><th>描述（摘要）</th></tr>
+                    </thead>
+                    <tbody id="productsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Comparison Results Table -->
+        <div class="table-container" id="resultsContainer" style="display:none;">
+            <div class="table-header">
+                <h2>📊 比对结果</h2>
+                <span id="resultsCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="idx">序号</th>
+                            <th>商品</th>
+                            <th>权利要求</th>
+                            <th>特征编号</th>
+                            <th>特征内容</th>
+                            <th>比对结果</th>
+                            <th>证据</th>
+                            <th>推理类型</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="empty" id="emptyState">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+            <p>输入专利记录ID开始权利要求比对</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5106';
+        const STEPS = [
+            { id: 'parse_and_fetch', name: '获取数据', detail: '从数据库读取专利+商品数据' },
+            { id: 'decompose_claim', name: '权利要求拆解', detail: 'LLM拆解技术特征' },
+            { id: 'compare_products_loop', name: '商品比对', detail: '逐商品比对技术特征' },
+            { id: 'write_feishu_results', name: '写入结果', detail: '保存到数据库' },
+        ];
+        let currentStep = -1;
+
+        function setStatus(msg, type = '') {
+            const el = document.getElementById('status');
+            el.className = 'status' + (type ? ' ' + type : '');
+            el.innerHTML = msg;
+        }
+
+        function esc(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        function renderSteps() {
+            const list = document.getElementById('stepList');
+            list.innerHTML = STEPS.map((s, i) => {
+                let cls = '';
+                if (i < currentStep) cls = 'completed';
+                else if (i === currentStep) cls = 'active';
+                const icon = i < currentStep ? '✓' : i + 1;
+                const suffix = i === currentStep ? '<span class="spinner"></span>' : (i < currentStep ? '<span class="step-detail">完成</span>' : '<span class="step-detail">等待中</span>');
+                return `<div class="step-item ${cls}">
+                    <span class="step-icon">${icon}</span>
+                    <span class="step-name">${s.name}</span>
+                    <span class="step-detail">${s.detail}</span>
+                    ${suffix}
+                </div>`;
+            }).join('');
+            document.getElementById('stepsContainer').style.display = 'block';
+        }
+
+        function renderClaims(claims) {
+            const tbody = document.getElementById('claimsBody');
+            tbody.innerHTML = claims.map((c, i) => `<tr>
+                <td class="idx">${i + 1}</td>
+                <td style="font-weight:500;">${esc(c.claim_id || '-')}</td>
+                <td style="max-width:600px;line-height:1.4;color:#555;">${esc((c.claim_text || '').substring(0, 200))}${(c.claim_text || '').length > 200 ? '...' : ''}</td>
+            </tr>`).join('');
+            document.getElementById('claimsCount').textContent = `共 ${claims.length} 条独立权利要求`;
+            document.getElementById('claimsContainer').style.display = 'block';
+        }
+
+        function renderFeatures(features) {
+            const tbody = document.getElementById('featuresBody');
+            tbody.innerHTML = features.map((f, i) => `<tr>
+                <td class="idx">${i + 1}</td>
+                <td style="font-weight:500;color:#4a90d9;">${esc(f.feature_id || '-')}</td>
+                <td>${esc(f.claim_id || '-')}</td>
+                <td style="max-width:500px;line-height:1.4;">${esc(f.feature_text || '-')}</td>
+            </tr>`).join('');
+            document.getElementById('featuresCount').textContent = `共 ${features.length} 个技术特征`;
+            document.getElementById('featuresContainer').style.display = 'block';
+        }
+
+        function renderProducts(products) {
+            const tbody = document.getElementById('productsBody');
+            tbody.innerHTML = products.map((p, i) => `<tr>
+                <td class="idx">${i + 1}</td>
+                <td style="font-weight:500;">${esc(p.name || '-')}</td>
+                <td>${esc((p.raw_data || {}).product_source || '-')}</td>
+                <td style="max-width:400px;line-height:1.4;color:#666;">${esc((p.description || '').substring(0, 150))}${(p.description || '').length > 150 ? '...' : ''}</td>
+            </tr>`).join('');
+            document.getElementById('productsCount').textContent = `共 ${products.length} 个商品`;
+            document.getElementById('productsContainer').style.display = 'block';
+        }
+
+        function renderResults(results) {
+            const tbody = document.getElementById('resultsBody');
+            let idx = 0;
+            tbody.innerHTML = results.flatMap(r => {
+                const productName = r.product_name || '-';
+                const features = r.features || [];
+                return features.map(f => {
+                    idx++;
+                    const resultClass = (f.comparison_result || '').toLowerCase();
+                    const tagClass = resultClass === 'match' ? 'tag-match' : resultClass === 'no_match' ? 'tag-no-match' : 'tag-uncertain';
+                    const tagText = resultClass === 'match' ? 'MATCH' : resultClass === 'no_match' ? 'NO_MATCH' : 'UNCERTAIN';
+                    return `<tr>
+                        <td class="idx">${idx}</td>
+                        <td>${esc(productName)}</td>
+                        <td>${esc(f.claim_id || '-')}</td>
+                        <td style="font-weight:500;color:#4a90d9;">${esc(f.feature_id || '-')}</td>
+                        <td style="max-width:300px;line-height:1.4;">${esc(f.feature_text || '-')}</td>
+                        <td><span class="tag ${tagClass}">${tagText}</span></td>
+                        <td style="max-width:250px;line-height:1.4;color:#666;">${esc((f.evidence || '-').substring(0, 150))}</td>
+                        <td style="font-size:12px;color:#888;">${esc(f.reasoning_type || '-')}</td>
+                    </tr>`;
+                });
+            }).join('');
+            const totalFeatures = results.reduce((sum, r) => sum + (r.features || []).length, 0);
+            document.getElementById('resultsCount').textContent = `${results.length} 个商品 × ${totalFeatures} 个特征`;
+            document.getElementById('resultsContainer').style.display = 'block';
+        }
+
+        async function runWorkflow() {
+            const patentRecordId = parseInt(document.getElementById('patentRecordId').value) || 0;
+            const sessionId = document.getElementById('sessionId').value.trim();
+            if (!patentRecordId) { setStatus('请输入专利记录ID', 'error'); return; }
+
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>比对中...';
+            document.getElementById('claimsContainer').style.display = 'none';
+            document.getElementById('featuresContainer').style.display = 'none';
+            document.getElementById('productsContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+
+            currentStep = 0;
+            renderSteps();
+            const startTime = Date.now();
+
+            const payload = { patent_record_id: patentRecordId };
+            if (sessionId) payload.analysis_session_id = sessionId;
+
+            try {
+                setStatus('正在运行权利要求比对流程，这可能需要几分钟...');
+                currentStep = 1;
+                renderSteps();
+
+                const resp = await fetch(`${API_BASE}/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail?.error_message || err.detail || JSON.stringify(err.detail || err) || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                currentStep = STEPS.length;
+                renderSteps();
+
+                setStatus(`✅ 比对完成！耗时 ${elapsed}s`, 'success');
+
+                if (data.independent_claims) renderClaims(data.independent_claims);
+                if (data.features) renderFeatures(data.features);
+                if (data.all_comparison_results) renderResults(data.all_comparison_results);
+
+            } catch (e) {
+                setStatus(`❌ 运行失败：${e.message}`, 'error');
+                currentStep = STEPS.length;
+                renderSteps();
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '运行权利要求比对';
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+{
+  "id": "analysis_1777808627224_q7wram",
+  "status": "completed",
+  "input": {
+    "type": "file",
+    "value": "1777808627203-16bf3fe0-b55c-4063-9d57-f1644f8549c0-CN218484462U_______.pdf",
+    "fileName": "CN218484462U扫地机器人示例.pdf",
+    "fileUrl": "/Users/xiexiaoxiong/Documents/patent/IP-protral/.data/uploads/1777808627203-16bf3fe0-b55c-4063-9d57-f1644f8549c0-CN218484462U_______.pdf"
+  },
+  "steps": [
+    {
+      "id": 1,
+      "name": "专利文本解析",
+      "description": "解析专利文件，提取权利要求、说明书和附图",
+      "status": "completed",
+      "startedAt": 1777808627226,
+      "completedAt": 1777808730107
+    },
+    {
+      "id": 2,
+      "name": "行业识别与路由",
+      "description": "判断专利所属行业，选择对应的关键词生成工作流",
+      "status": "completed",
+      "startedAt": 1777808730107,
+      "completedAt": 1777808730107
+    },
+    {
+      "id": 3,
+      "name": "技术关键词生成",
+      "description": "基于专利内容生成检索关键词",
+      "status": "completed",
+      "startedAt": 1777808730107,
+      "completedAt": 1777808793118
+    },
+    {
+      "id": 4,
+      "name": "商品信息检索",
+      "description": "使用关键词检索市场商品信息",
+      "status": "error",
+      "error": "保存结果失败: sleep length must be non-negative",
+      "startedAt": 1777808793118,
+      "completedAt": 1777808913524
+    },
+    {
+      "id": 5,
+      "name": "技术特征比对",
+      "description": "拆解技术特征，进行权利要求-商品特征比对",
+      "status": "error",
+      "startedAt": 1777808913524,
+      "completedAt": 1777808926230
+    },
+    {
+      "id": 6,
+      "name": "结果汇总",
+      "description": "优先读取工作流响应，并按需回补飞书结果数据",
+      "status": "error",
+      "error": "无比对结果可写入",
+      "completedAt": 1777808926230,
+      "startedAt": 1777808926230
+    }
+  ],
+  "results": {
+    "dbRecordId": 18,
+    "feishuUrl": "",
+    "feishuAppToken": "",
+    "module1RunId": "0bb1f530-87a9-4a33-b547-423e9844984d",
+    "detectedIndustry": "general",
+    "industryReasoning": "未命中健身器材或家用电器的高置信度关键词，回退到通用工作流。",
+    "keywords": [],
+    "keywordRunId": 8,
+    "module2RunId": "94ac5cf1-7185-4323-80d3-6956c3a58daa",
+    "industryUsed": "general",
+    "products": [],
+    "searchRunId": 0,
+    "module3RunId": "3d219423-05f3-4893-8e4f-a56fa0f27d6c",
+    "module3Exception": "保存结果失败: sleep length must be non-negative",
+    "comparisons": [],
+    "claimCompareRunId": 0,
+    "module4RunId": "19b4988b-c616-4257-b6b9-d6bb5d34cded",
+    "module4Exception": "无比对结果可写入"
+  },
+  "createdAt": 1777808627224,
+  "updatedAt": 1777808926230
+}

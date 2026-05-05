@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商品检索测试</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f5f7fa; padding: 24px; color: #333; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 24px; margin-bottom: 20px; color: #1a1a2e; }
+        .search-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+        .search-row { display: flex; gap: 12px; align-items: flex-end; }
+        .input-group { flex: 1; }
+        .input-group label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #555; }
+        .input-group input { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; transition: border-color 0.2s; }
+        .input-group input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,0.1); }
+        .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .btn-primary { background: #4a90d9; color: #fff; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-primary:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .btn-secondary { background: #6c757d; color: #fff; margin-left: 8px; }
+        .btn-secondary:hover { background: #5a6268; }
+        .status { margin-top: 12px; font-size: 13px; color: #666; }
+        .status.error { color: #e74c3c; }
+        .status.success { color: #27ae60; }
+
+        /* Step progress */
+        .steps-container { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+        .steps-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; }
+        .step-list { display: flex; flex-direction: column; gap: 8px; }
+        .step-item { display: flex; align-items: center; padding: 10px 16px; border-radius: 8px; background: #f8f9fa; transition: all 0.2s; }
+        .step-item.active { background: #e8f0fe; border-left: 3px solid #4a90d9; }
+        .step-item.completed { background: #e8f5e9; border-left: 3px solid #27ae60; }
+        .step-item.error { background: #fde8e8; border-left: 3px solid #e74c3c; }
+        .step-icon { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; margin-right: 12px; flex-shrink: 0; }
+        .step-item .step-icon { background: #ddd; color: #666; }
+        .step-item.active .step-icon { background: #4a90d9; color: #fff; }
+        .step-item.completed .step-icon { background: #27ae60; color: #fff; }
+        .step-item.error .step-icon { background: #e74c3c; color: #fff; }
+        .step-name { font-size: 14px; font-weight: 500; flex: 1; }
+        .step-detail { font-size: 12px; color: #888; margin-left: 8px; }
+        .step-time { font-size: 12px; color: #999; margin-left: 8px; white-space: nowrap; }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #4a90d9; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-left: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Tables */
+        .table-container { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 24px; }
+        .table-header { padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .table-header h2 { font-size: 16px; color: #1a1a2e; }
+        .table-header span { font-size: 13px; color: #888; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #555; border-bottom: 2px solid #eee; white-space: nowrap; }
+        td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 13px; vertical-align: top; }
+        tr:hover td { background: #fafbfc; }
+        .idx { text-align: center; color: #888; font-weight: 500; width: 60px; }
+        .product-name { max-width: 250px; line-height: 1.4; }
+        .keyword { color: #4a90d9; font-weight: 500; white-space: nowrap; }
+        .description { max-width: 200px; color: #666; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .source { white-space: nowrap; }
+        .price { font-weight: 600; color: #e74c3c; white-space: nowrap; }
+        .brand { color: #555; }
+        .images { display: flex; gap: 6px; flex-wrap: wrap; }
+        .images img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #eee; cursor: pointer; transition: transform 0.2s; }
+        .images img:hover { transform: scale(1.5); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .no-images { color: #ccc; font-size: 12px; }
+        .empty { text-align: center; padding: 60px 20px; color: #999; }
+        .empty svg { width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.3; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 2px; }
+        .tag-industry { background: #e3f2fd; color: #1565c0; }
+        .tag-keyword { background: #f3e5f5; color: #7b1fa2; }
+        .tag-site { background: #e8f5e9; color: #2e7d32; }
+        .tag-domain { background: #fff3e0; color: #e65100; }
+        .filters { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+        .filter-group { display: flex; align-items: center; gap: 4px; }
+        .filter-group label { font-size: 13px; color: #555; }
+        .filter-group select, .filter-group input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; cursor: pointer; }
+        .modal.active { display: flex; }
+        .modal img { max-width: 90%; max-height: 90%; object-fit: contain; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 商品检索测试</h1>
+        <div class="search-box">
+            <div class="search-row">
+                <div class="input-group">
+                    <label for="patentRecordId">专利记录ID (patent_record_id)</label>
+                    <input type="number" id="patentRecordId" placeholder="输入专利解析主记录ID，如：1" />
+                </div>
+                <div class="input-group">
+                    <label for="sessionId">分析会话ID（可选）</label>
+                    <input type="text" id="sessionId" placeholder="留空则不限" />
+                </div>
+                <div class="input-group" style="flex:0.8">
+                    <label for="keyword">关键词（逗号/换行分隔，支持多个）</label>
+                    <textarea id="keyword" rows="3" style="width:100%;padding:10px 14px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:vertical;font-family:inherit;" placeholder="如：计时器，电动螺丝刀，血压袋&#10;或换行输入多个关键词"></textarea>
+                </div>
+                <button class="btn btn-primary" id="runBtn" onclick="runWorkflow()">运行完整流程</button>
+                <button class="btn btn-secondary" id="searchBtn" onclick="doSearch()">仅搜索</button>
+            </div>
+            <div class="status" id="status"></div>
+        </div>
+
+        <!-- Step Progress -->
+        <div class="steps-container" id="stepsContainer" style="display:none;">
+            <div class="steps-title">流程进度</div>
+            <div class="step-list" id="stepList"></div>
+        </div>
+
+        <!-- Step 1: Keywords -->
+        <div class="table-container" id="keywordsContainer" style="display:none;">
+            <div class="table-header">
+                <h2>📋 获取到的关键词</h2>
+                <span id="keywordsCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead><tr><th class="idx">序号</th><th>关键词</th></tr></thead>
+                    <tbody id="keywordsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Step 2: Industry Analysis -->
+        <div class="table-container" id="industryContainer" style="display:none;">
+            <div class="table-header">
+                <h2>🏭 行业分析结果</h2>
+            </div>
+            <div style="padding: 16px 20px;" id="industryBody"></div>
+        </div>
+
+        <!-- Step 3: Search Results -->
+        <div class="table-container" id="tableContainer" style="display:none;">
+            <div class="table-header">
+                <h2>🛒 检索到的商品</h2>
+                <span id="resultCount"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="idx">序号</th>
+                            <th>商品名称</th>
+                            <th>关键词</th>
+                            <th>来源</th>
+                            <th>价格</th>
+                            <th>品牌</th>
+                            <th>描述</th>
+                            <th>图片</th>
+                            <th>商品链接</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="empty" id="emptyState">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <p>输入专利记录ID或关键词开始检索</p>
+        </div>
+    </div>
+    <div class="modal" id="imageModal" onclick="this.classList.remove('active')">
+        <img id="modalImage" src="" alt="" />
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5105';
+        const STEPS = [
+            { id: 'entry', name: '初始化', detail: '生成数据集ID' },
+            { id: 'get_keywords', name: '获取关键词', detail: '从数据库读取关键词' },
+            { id: 'analyze_search_sites', name: '行业分析', detail: 'LLM分析行业+推荐站点' },
+            { id: 'search_products', name: '搜索商品', detail: '多平台搜索' },
+            { id: 'filter_products', name: '过滤非商品', detail: '三阶段过滤' },
+            { id: 'relevance_filter', name: '相关性过滤', detail: '排除不相关商品' },
+            { id: 'fetch_details', name: '抓取详情', detail: '提取品牌/工厂信息' },
+            { id: 'save_results', name: '保存结果', detail: '写入数据库' },
+        ];
+        const stepTimes = {};
+        let currentStep = -1;
+
+        function setStatus(msg, type = '') {
+            const el = document.getElementById('status');
+            el.className = 'status' + (type ? ' ' + type : '');
+            el.innerHTML = msg;
+        }
+
+        function showImage(url) {
+            document.getElementById('modalImage').src = url;
+            document.getElementById('imageModal').classList.add('active');
+        }
+
+        function esc(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        function renderSteps() {
+            const list = document.getElementById('stepList');
+            list.innerHTML = STEPS.map((s, i) => {
+                let cls = '';
+                let suffix = '';
+                if (i < currentStep) { cls = 'completed'; suffix = `<span class="step-time">${stepTimes[s.id] || ''}</span>`; }
+                else if (i === currentStep) { cls = 'active'; suffix = '<span class="spinner"></span>'; }
+                else { suffix = '<span class="step-detail">等待中</span>'; }
+                return `<div class="step-item ${cls}" id="step-${s.id}">
+                    <span class="step-icon">${i < currentStep ? '✓' : i + 1}</span>
+                    <span class="step-name">${s.name}</span>
+                    <span class="step-detail">${s.detail}</span>
+                    ${suffix}
+                </div>`;
+            }).join('');
+            document.getElementById('stepsContainer').style.display = 'block';
+        }
+
+        function completeStep(stepId, detail) {
+            const idx = STEPS.findIndex(s => s.id === stepId);
+            if (idx >= 0) {
+                stepTimes[stepId] = detail || '完成';
+                currentStep = idx + 1;
+                renderSteps();
+            }
+        }
+
+        function errorStep(stepId, msg) {
+            const idx = STEPS.findIndex(s => s.id === stepId);
+            if (idx >= 0) {
+                currentStep = idx;
+                renderSteps();
+                const el = document.getElementById(`step-${stepId}`);
+                if (el) { el.classList.remove('active'); el.classList.add('error'); }
+            }
+        }
+
+        function renderKeywords(keywords) {
+            const tbody = document.getElementById('keywordsBody');
+            tbody.innerHTML = keywords.map((kw, i) => `<tr><td class="idx">${i + 1}</td><td class="keyword">${esc(kw)}</td></tr>`).join('');
+            document.getElementById('keywordsCount').textContent = `共 ${keywords.length} 个关键词`;
+            document.getElementById('keywordsContainer').style.display = 'block';
+        }
+
+        function renderIndustry(data) {
+            const body = document.getElementById('industryBody');
+            body.innerHTML = `
+                <p style="margin-bottom:8px;"><strong>行业分类：</strong>${esc(data.industry || '通用')}</p>
+                <p style="margin-bottom:8px;"><strong>补充查询词：</strong>${(data.industry_keywords || []).map(k => `<span class="tag tag-keyword">${esc(k)}</span>`).join('')}</p>
+                <p style="margin-bottom:8px;"><strong>垂直网站：</strong>${(data.vertical_sites || []).map(s => `<span class="tag tag-site">${esc(s)}</span>`).join('')}</p>
+                <p><strong>额外电商域名：</strong>${(data.extra_ecommerce_domains || []).map(d => `<span class="tag tag-domain">${esc(d)}</span>`).join('')}</p>
+            `;
+            document.getElementById('industryContainer').style.display = 'block';
+        }
+
+        function renderProducts(products) {
+            const tbody = document.getElementById('resultBody');
+            document.getElementById('resultCount').textContent = `共 ${products.length} 个商品`;
+
+            tbody.innerHTML = products.map((p, i) => {
+                const images = (p.picture || []).filter(Boolean);
+                const imgsHtml = images.length > 0
+                    ? `<div class="images">${images.slice(0, 5).map(u => `<img src="${u}" onclick="showImage('${u}')" onerror="this.style.display='none'" />`).join('')}${images.length > 5 ? `<span style="font-size:12px;color:#888;line-height:60px;">+${images.length - 5}</span>` : ''}</div>`
+                    : '<span class="no-images">暂无图片</span>';
+                const productUrl = p.product_url || '';
+                const linkHtml = productUrl
+                    ? `<a href="${esc(productUrl)}" target="_blank" rel="noopener" style="color:#4a90d9;font-size:12px;word-break:break-all;text-decoration:none;">${esc(productUrl.length > 50 ? productUrl.substring(0, 50) + '...' : productUrl)}</a>`
+                    : '<span style="color:#ccc;font-size:12px;">无链接</span>';
+                return `<tr>
+                    <td class="idx">${i + 1}</td>
+                    <td class="product-name">${esc(p.product_name || '-')}</td>
+                    <td class="keyword">${esc(p.matched_keywords || '-')}</td>
+                    <td class="source">${esc(p.product_source || '-')}</td>
+                    <td class="price">${p.price > 0 ? '¥' + p.price : '-'}</td>
+                    <td class="brand">${esc(p.brand || '-')}</td>
+                    <td class="description" title="${esc(p.product_raw_text || '')}">${esc(p.product_raw_text || '-')}</td>
+                    <td>${imgsHtml}</td>
+                    <td style="max-width:200px;">${linkHtml}</td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('tableContainer').style.display = 'block';
+        }
+
+        async function runWorkflow() {
+            const patentRecordId = parseInt(document.getElementById('patentRecordId').value) || 0;
+            const sessionId = document.getElementById('sessionId').value.trim();
+            const keyword = document.getElementById('keyword').value.trim();
+
+            if (!patentRecordId && !keyword) {
+                setStatus('请输入专利记录ID或关键词', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>运行中...';
+            document.getElementById('searchBtn').disabled = true;
+
+            currentStep = 0;
+            renderSteps();
+            document.getElementById('keywordsContainer').style.display = 'none';
+            document.getElementById('industryContainer').style.display = 'none';
+            document.getElementById('tableContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+
+            const startTime = Date.now();
+            const payload = {};
+            if (patentRecordId) payload.patent_record_id = patentRecordId;
+            if (sessionId) payload.analysis_session_id = sessionId;
+            if (keyword) payload.input_keywords = [keyword];
+
+            try {
+                setStatus('正在运行完整流程，请稍候...');
+                const resp = await fetch(`${API_BASE}/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail?.error_message || err.detail || `HTTP ${resp.status}`);
+                }
+                const data = await resp.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                currentStep = STEPS.length;
+                renderSteps();
+                setStatus(`✅ 流程完成，耗时 ${elapsed}s — ${data.total_products_count || 0} 个商品`, 'success');
+            } catch (e) {
+                setStatus(`❌ 运行失败：${e.message}`, 'error');
+                errorStep('save_results', e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '运行完整流程';
+                document.getElementById('searchBtn').disabled = false;
+            }
+        }
+
+        function parseKeywords(text) {
+            return text.split(/[，,\n\r]+/).map(k => k.trim()).filter(k => k.length > 0);
+        }
+
+        async function doSearch() {
+            const keywordText = document.getElementById('keyword').value.trim();
+            const keywords = parseKeywords(keywordText);
+            if (!keywords.length) {
+                setStatus('仅搜索模式需输入关键词', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('searchBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>检索中...';
+            document.getElementById('runBtn').disabled = true;
+
+            setStatus(`正在检索 ${keywords.length} 个关键词：${keywords.join('、')}`);
+            document.getElementById('keywordsContainer').style.display = 'none';
+            document.getElementById('industryContainer').style.display = 'none';
+            document.getElementById('tableContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+
+            const startTime = Date.now();
+            document.getElementById('stepsContainer').style.display = 'none';
+
+            try {
+                let industryData = null;
+                if (keywords.length > 0) {
+                    setStatus('正在分析行业...');
+                    try {
+                        const industryResp = await fetch(`${API_BASE}/node_run/analyze_search_sites`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ keywords: keywords })
+                        });
+                        if (industryResp.ok) {
+                            industryData = await industryResp.json();
+                            renderIndustry(industryData);
+                        }
+                    } catch (e) { /* 行业分析失败不影响搜索 */ }
+                }
+
+                setStatus(`正在搜索 ${keywords.length} 个关键词...`);
+                const resp = await fetch(`${API_BASE}/api/direct_search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        keywords: keywords,
+                        industry: industryData?.industry || "通用",
+                        industry_keywords: industryData?.industry_keywords || [],
+                        vertical_sites: industryData?.vertical_sites || [],
+                        extra_ecommerce_domains: industryData?.extra_ecommerce_domains || []
+                    })
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail?.error_message || err.detail || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                const products = data.products || [];
+                renderKeywords(keywords);
+
+                // 按关键词分组统计
+                const kwStats = {};
+                products.forEach(p => {
+                    const kw = p.matched_keywords || '未知';
+                    if (!kwStats[kw]) kwStats[kw] = { count: 0, withImg: 0 };
+                    kwStats[kw].count++;
+                    if (p.picture && p.picture.length > 0) kwStats[kw].withImg++;
+                });
+
+                if (products.length === 0) {
+                    setStatus(`检索完成（耗时 ${elapsed}s），未找到商品`, 'error');
+                    document.getElementById('emptyState').style.display = 'block';
+                } else {
+                    const kwSummary = Object.entries(kwStats).map(([k, v]) => `${k}(${v.count}个,${v.withImg}有图)`).join(' ');
+                    setStatus(`✅ 检索完成：${products.length} 个商品，耗时 ${elapsed}s — ${kwSummary}`, 'success');
+                    renderProducts(products);
+                }
+            } catch (e) {
+                setStatus(`❌ 检索失败：${e.message}`, 'error');
+                document.getElementById('emptyState').style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '仅搜索';
+                document.getElementById('runBtn').disabled = false;
+            }
+        }
+
+        document.getElementById('keyword').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (document.getElementById('patentRecordId').value) runWorkflow();
+                else doSearch();
+            }
+        });
+    </script>
+</body>
+</html>
