@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import type { AuthUser } from '@/lib/types';
 import { PendingUsersTable } from '@/components/admin/pending-users-table';
+import { ErrorReportsTable, type ErrorReportItem } from '@/components/admin/error-reports-table';
 import { Button } from '@/components/ui/button';
 
 interface AdminUser extends AuthUser {
@@ -14,6 +15,7 @@ interface AdminUser extends AuthUser {
 export default function AdminPage() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [reports, setReports] = useState<ErrorReportItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,18 +23,24 @@ export default function AdminPage() {
     setLoading(true);
     setError(null);
     try {
-      const [meRes, usersRes] = await Promise.all([fetch('/api/auth/me'), fetch('/api/admin/users')]);
-      if (meRes.status === 401 || usersRes.status === 401) {
+      const [meRes, usersRes, reportsRes] = await Promise.all([
+        fetch('/api/auth/me'),
+        fetch('/api/admin/users'),
+        fetch('/api/admin/error-reports'),
+      ]);
+      if (meRes.status === 401 || usersRes.status === 401 || reportsRes.status === 401) {
         window.location.href = '/login';
         return;
       }
       const meData = await meRes.json();
       const usersData = await usersRes.json();
-      if (!meRes.ok || !usersRes.ok) {
-        throw new Error(meData.error || usersData.error || '加载管理员数据失败');
+      const reportsData = await reportsRes.json();
+      if (!meRes.ok || !usersRes.ok || !reportsRes.ok) {
+        throw new Error(meData.error || usersData.error || reportsData.error || '加载管理员数据失败');
       }
       setCurrentUser(meData.user);
       setUsers(usersData.users || []);
+      setReports(reportsData.reports || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载管理员数据失败');
     } finally {
@@ -73,6 +81,7 @@ export default function AdminPage() {
           <p className="text-sm text-destructive">{error}</p>
         ) : (
           <>
+            <ErrorReportsTable reports={reports} />
             <PendingUsersTable title="待审批用户" users={pendingUsers} onUpdated={load} />
             <PendingUsersTable title="已处理用户" users={approvedUsers} onUpdated={load} allowActions={false} />
           </>

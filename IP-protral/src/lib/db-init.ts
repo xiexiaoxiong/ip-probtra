@@ -75,6 +75,142 @@ async function ensureCoreTables(): Promise<void> {
     )
   `);
 
+  await pgQuery(`
+    create table if not exists error_reports (
+      id serial primary key,
+      analysis_session_id text references analysis_sessions(id) on delete set null,
+      user_id integer references users(id) on delete set null,
+      step_id integer,
+      step_name text,
+      error_message text not null,
+      error_stack text,
+      patent_text text,
+      input_type text,
+      input_value text,
+      file_url text,
+      meta jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists patent_parse_records (
+      id serial primary key,
+      task_id text not null unique,
+      patent_number text,
+      patent_holder text,
+      title text,
+      application_date text,
+      priority_date text,
+      specification jsonb,
+      parse_errors jsonb,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists keyword_runs (
+      id serial primary key,
+      patent_record_id integer not null,
+      analysis_session_id text,
+      workflow_variant text,
+      keywords_count integer not null default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists keyword_records (
+      id serial primary key,
+      keyword_run_id integer not null,
+      patent_record_id integer not null,
+      analysis_session_id text,
+      keyword_id text,
+      claim_id text,
+      keyword_text text not null,
+      keyword_type text,
+      source_location text,
+      generation_method text,
+      confidence_score double precision,
+      raw_payload jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists search_runs (
+      id serial primary key,
+      patent_record_id integer not null,
+      analysis_session_id text,
+      product_dataset_id text,
+      retrieval_start_time text,
+      successful_keywords_count integer not null default 0,
+      failed_keywords_count integer not null default 0,
+      total_products_count integer not null default 0,
+      platforms_queried jsonb,
+      is_complete boolean not null default true,
+      error_message text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists search_products (
+      id serial primary key,
+      search_run_id integer not null,
+      patent_record_id integer not null,
+      analysis_session_id text,
+      product_id text,
+      product_name text,
+      product_url text,
+      product_source text,
+      price text,
+      brand text,
+      manufacturer text,
+      matched_keywords text,
+      description text,
+      picture jsonb,
+      raw_payload jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists claim_compare_runs (
+      id serial primary key,
+      patent_record_id integer not null,
+      analysis_session_id text,
+      result_summary text,
+      product_count integer not null default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists claim_compare_results (
+      id serial primary key,
+      claim_compare_run_id integer not null,
+      patent_record_id integer not null,
+      analysis_session_id text,
+      product_id text,
+      product_name text,
+      claim_id text,
+      feature_id text,
+      feature_text text,
+      evidence text,
+      comparison_result text,
+      reason text,
+      reasoning_type text,
+      evidence_images jsonb,
+      raw_payload jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+
   await pgQuery(`alter table analysis_sessions add column if not exists user_id integer references users(id) on delete cascade`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_title text`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_number text`);
@@ -88,6 +224,8 @@ async function ensureCoreTables(): Promise<void> {
   await pgQuery(`create index if not exists idx_analysis_sessions_status on analysis_sessions(status)`);
   await pgQuery(`create index if not exists idx_analysis_sessions_created_at on analysis_sessions(created_at desc)`);
   await pgQuery(`create index if not exists idx_analysis_steps_session_id on analysis_steps(session_id)`);
+  await pgQuery(`create index if not exists idx_error_reports_created_at on error_reports(created_at desc)`);
+  await pgQuery(`create index if not exists idx_error_reports_session_id on error_reports(analysis_session_id)`);
 }
 
 async function ensureBootstrapAdmin(): Promise<void> {

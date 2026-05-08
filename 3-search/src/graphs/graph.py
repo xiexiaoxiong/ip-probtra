@@ -121,7 +121,8 @@ def save_results_wrapper(
         retrieval_start_time=state.retrieval_start_time,
         successful_keywords_count=state.successful_keywords_count,
         failed_keywords_count=state.failed_keywords_count,
-        is_complete=state.is_complete
+        is_complete=state.is_complete,
+        error_message=state.error_message,
     )
 
     result = save_results_node(input_data, config, runtime)

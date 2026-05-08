@@ -17,9 +17,9 @@ if command -v uv &>/dev/null && [ -f "pyproject.toml" ]; then
   else
     echo "[setup] Devbox mode (uv): installing to .venv"
     if [ -f "uv.lock" ]; then
-      uv sync --frozen || uv sync
+      uv sync --frozen -p python3.12 || uv sync -p python3.12
     else
-      uv sync
+      uv sync -p python3.12
     fi
     touch .venv/.uv_ready
   fi

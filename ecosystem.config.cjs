@@ -51,6 +51,18 @@ function workflowApp(folderName, port) {
       COZELOOP_DISABLED: '1',
       PGDATABASE_URL: envValue('PGDATABASE_URL') || envValue('DATABASE_URL'),
       DATABASE_URL: envValue('DATABASE_URL') || envValue('PGDATABASE_URL'),
+      COZE_WORKLOAD_IDENTITY_API_KEY:
+        envValue('COZE_WORKLOAD_IDENTITY_API_KEY') ||
+        envValue('LOCAL_LLM_API_KEY') ||
+        envValue('LOCAL_LLM_FALLBACK_API_KEY'),
+      COZE_INTEGRATION_BASE_URL:
+        envValue('COZE_INTEGRATION_BASE_URL') ||
+        envValue('LOCAL_LLM_BASE_URL') ||
+        envValue('LOCAL_LLM_FALLBACK_BASE_URL'),
+      COZE_INTEGRATION_MODEL_BASE_URL:
+        envValue('COZE_INTEGRATION_MODEL_BASE_URL') ||
+        envValue('LOCAL_LLM_BASE_URL') ||
+        envValue('LOCAL_LLM_FALLBACK_BASE_URL'),
       LOCAL_LLM_BASE_URL: envValue('LOCAL_LLM_BASE_URL'),
       LOCAL_LLM_API_KEY: envValue('LOCAL_LLM_API_KEY'),
       LOCAL_LLM_DEFAULT_MODEL: envValue('LOCAL_LLM_DEFAULT_MODEL'),

@@ -1155,13 +1155,15 @@ def parse_input(input_str: str) -> Dict[str, Any]:
         return {"text": input_str}
 
 def start_http_server(port):
+    import os
     workers = 1
     reload = False
     if graph_helper.is_dev_env():
         reload = True
 
+    host = (os.getenv("WORKFLOW_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     logger.info(f"Start HTTP Server, Port: {port}, Workers: {workers}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload, workers=workers)
+    uvicorn.run("main:app", host=host, port=port, reload=reload, workers=workers)
 
 if __name__ == "__main__":
     args = parse_args()

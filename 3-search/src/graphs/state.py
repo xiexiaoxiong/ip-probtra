@@ -93,6 +93,7 @@ class SaveResultsInput(BaseModel):
     successful_keywords_count: int = Field(default=0, description="成功检索的关键词数量")
     failed_keywords_count: int = Field(default=0, description="失败的关键词数量")
     is_complete: bool = Field(default=True, description="检索是否完整")
+    error_message: str = Field(default="", description="错误信息")
 
 
 class SaveResultsOutput(BaseModel):
@@ -160,6 +161,7 @@ class SaveResultsWrapperInput(BaseModel):
     successful_keywords_count: int = Field(default=0, description="成功检索的关键词数量")
     failed_keywords_count: int = Field(default=0, description="失败的关键词数量")
     is_complete: bool = Field(default=True, description="检索是否完整")
+    error_message: str = Field(default="", description="错误信息")
 
 
 class SaveResultsWrapperOutput(BaseModel):

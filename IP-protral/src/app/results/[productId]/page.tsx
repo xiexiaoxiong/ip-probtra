@@ -5,7 +5,7 @@
 // 展示单个商品的 Claim Chart 级别比对表
 // ============================================================
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { AnalysisSession } from '@/lib/types';
 import { VERDICT_CONFIG } from '@/lib/types';
@@ -26,6 +26,23 @@ import {
 import Link from 'next/link';
 
 export default function ProductDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-background">
+          <div className="text-center space-y-3">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+            <p className="text-sm text-muted-foreground">加载中...</p>
+          </div>
+        </div>
+      }
+    >
+      <ProductDetailContent />
+    </Suspense>
+  );
+}
+
+function ProductDetailContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();

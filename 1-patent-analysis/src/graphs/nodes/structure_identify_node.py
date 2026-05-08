@@ -258,11 +258,22 @@ def _fallback_structure_identify(
                     end_position=end_pos
                 ))
         
-        # 提取权利要求书
-        claims_pattern = r"权利要求书[：:\s]*\n?([\s\S]*?)(?=\n\s*(?:说明书|摘要|$))"
-        claims_match = re.search(claims_pattern, raw_text)
-        if claims_match:
-            claims_text = claims_match.group(1).strip()
+        claims_pattern = r"(?:权\s*利\s*要\s*求\s*书|权利要求书|权\s*利\s*要\s*求|权利要求)[：:\s]*([\s\S]*?)(?=(?:\s*(?:说\s*明\s*书\s*全\s*文|说\s*明\s*书|说明书全文|说明书|摘\s*要|摘要|技\s*术\s*领\s*域|技术领域|背\s*景\s*技\s*术|背景技术|发\s*明\s*内\s*容|发明内容|实\s*用\s*新\s*型\s*内\s*容|实用新型内容|附\s*图\s*说\s*明|附图说明))|$)"
+        claim_candidates: List[str] = []
+        for match in re.finditer(claims_pattern, raw_text):
+            candidate = match.group(1).strip()
+            if candidate:
+                claim_candidates.append(candidate)
+
+        if claim_candidates:
+            preferred = [
+                c
+                for c in claim_candidates
+                if len(c) >= 200 and re.search(r'(?m)^\s*1\s*[.、:：]', c) is not None
+            ]
+            claims_text = (preferred or claim_candidates)[0]
+            if not preferred:
+                claims_text = max(claim_candidates, key=len)
             
         logger.info(f"降级方案识别完成，章节数量: {len(sections)}")
         

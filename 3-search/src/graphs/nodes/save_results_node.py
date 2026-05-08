@@ -45,7 +45,7 @@ def save_results_node(
                 total_products_count=len(state.products),
                 platforms_queried=["Coze工作流"],
                 is_complete=state.is_complete,
-                error_message=None,
+                error_message=state.error_message or None,
             )
             session.add(search_run)
             session.flush()
@@ -91,7 +91,7 @@ def save_results_node(
             product_dataset_id=state.product_dataset_id,
             total_products_count=len(state.products),
             is_complete=state.is_complete,
-            error_message="",
+            error_message=state.error_message or "",
         )
     except Exception as error:
         logger.error("保存商品结果失败: %s", error, exc_info=True)

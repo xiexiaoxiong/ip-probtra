@@ -36,13 +36,10 @@
 PGDATABASE_URL=postgresql://user:password@127.0.0.1:5432/patent
 LOCAL_LLM_BASE_URL=
 LOCAL_LLM_API_KEY=
-SEARCH_PROVIDER=brightdata_baidu
-SEARCH_COUNTRY=cn
-SEARCH_TIMEOUT_SECONDS=45
-SEARCH_ALLOW_DIRECT_FETCH_FALLBACK=1
-BRIGHTDATA_API_KEY=
-BRIGHTDATA_SERP_ZONE=serp_api1
-BRIGHTDATA_UNLOCKER_ZONE=web_unlocker1
+COZE_SEARCH_API_URL=https://66vpykvvz2.coze.site/run
+COZE_SEARCH_API_TOKEN=
+COZE_SEARCH_TIMEOUT=120
+COZE_MAX_CONCURRENT=5
 COZE_BUCKET_ENDPOINT_URL=
 COZE_BUCKET_NAME=
 COZE_BUCKET_ACCESS_KEY_ID=
@@ -54,37 +51,35 @@ COZE_BUCKET_REGION=cn-beijing
 
 - `PGDATABASE_URL` 是四段工作流之间的本地数据库通道
 - `LOCAL_LLM_*` 会自动映射到旧的 `LLMClient` 所需环境变量
-- `SEARCH_PROVIDER=brightdata_baidu` 是当前第三阶段默认实现，面向中文互联网和中国电商检索
-- `BRIGHTDATA_SERP_ZONE` 用于百度 SERP 检索，`BRIGHTDATA_UNLOCKER_ZONE` 用于打开商品详情页抓正文
-- `SEARCH_ALLOW_DIRECT_FETCH_FALLBACK=1` 表示 Bright Data 打不开某些页面时，允许直接 HTTP 抓取做兜底
+- 第三阶段（商品检索）由本地 `3-search` 服务调用扣子编程工作流；`COZE_SEARCH_API_TOKEN` 必填
 - `COZE_BUCKET_*` 仍然需要，因为工作流内部会把附图和商品图片上传到对象存储
 - 现在飞书不再是主链路依赖；只要你不再使用飞书节点输出，`FEISHU_*` 可以不配
 
 3. 安装依赖：
 
 ```bash
-cd /Users/xiexiaoxiong/Documents/patent/IP-protral
+cd /Users/adamrainbow/server/ip-probtra/IP-protral
 pnpm install
 
-cd /Users/xiexiaoxiong/Documents/patent/1-patent\ analysis && uv sync
-cd /Users/xiexiaoxiong/Documents/patent/2-keyword && uv sync
-cd /Users/xiexiaoxiong/Documents/patent/2-keyword-fitness && uv sync
-cd /Users/xiexiaoxiong/Documents/patent/2-keyword-electra && uv sync
-cd /Users/xiexiaoxiong/Documents/patent/3-search && uv sync
-cd /Users/xiexiaoxiong/Documents/patent/4-claim\ chat && uv sync
+cd /Users/adamrainbow/server/ip-probtra/1-patent-analysis && uv sync
+cd /Users/adamrainbow/server/ip-probtra/2-keyword && uv sync
+cd /Users/adamrainbow/server/ip-probtra/2-keyword-fitness && uv sync
+cd /Users/adamrainbow/server/ip-probtra/2-keyword-electra && uv sync
+cd /Users/adamrainbow/server/ip-probtra/3-search && uv sync
+cd /Users/adamrainbow/server/ip-probtra/4-claim-chat && uv sync
 ```
 
 4. 构建前端：
 
 ```bash
-cd /Users/xiexiaoxiong/Documents/patent/IP-protral
+cd /Users/adamrainbow/server/ip-probtra/IP-protral
 pnpm build
 ```
 
 5. 用 PM2 启动整套服务：
 
 ```bash
-cd /Users/xiexiaoxiong/Documents/patent
+cd /Users/adamrainbow/server/ip-probtra
 pm2 start ecosystem.config.cjs
 pm2 save
 ```
@@ -124,7 +119,6 @@ sudo systemctl reload nginx
 
 ## 当前限制
 
-- 第三阶段已经切到本地 `search_provider`，当前实装的是 `Bright Data + Baidu + 商品详情抓取`
-- `1688 / 拼多多 / 京东 / 淘宝` 现在通过中国站点优先级和域名定向检索参与召回；如果你后面拿到这些平台的官方开放平台凭证，可以继续往同一个 provider 里加官方 API，不用再改工作流节点
+- 第三阶段（商品检索）依赖扣子编程工作流（外部服务），需要保证 `COZE_SEARCH_API_URL` 可访问且 Token 有效
 - LLM 调用已支持通过 `LOCAL_LLM_*` 做兼容映射，但前提是你的网关支持 OpenAI 兼容协议
 - 图片仍然走对象存储；如果你要连这部分一起本地化，下一步再把 `COZE_BUCKET_*` 替换成本地文件存储

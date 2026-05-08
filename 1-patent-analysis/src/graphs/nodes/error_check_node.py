@@ -29,8 +29,8 @@ def error_check_node(
     # 收集所有错误
     all_errors: List[ParseError] = []
     
-    if state.file_read_error:
-        all_errors.append(state.file_read_error)
+    if state.read_error:
+        all_errors.append(state.read_error)
     
     all_errors.extend(state.identify_errors)
     all_errors.extend(state.claims_errors)

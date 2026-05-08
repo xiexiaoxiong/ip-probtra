@@ -134,22 +134,25 @@ def _fallback_claims_parse(
     claims: List[Claim] = []
     
     try:
-        # 匹配权利要求编号和内容
-        # 常见格式：1. xxx, 2. xxx, 或权利要求1: xxx
-        pattern = r'(?:权利要求\s*)?(\d+(?:\.\d+)?)\s*[.、:：]\s*([^权利要求\d]+?)(?=(?:权利要求\s*)?(?:\d+(?:\.\d+)?)[.、:：]|$)'
-        
-        matches = re.finditer(pattern, claims_text, re.MULTILINE)
-        
-        for match in matches:
+        header_pattern = r'(?m)^\s*(?:权\s*利\s*要\s*求\s*)?(\d+(?:\.\d+)?)\s*[.、:：]\s*'
+        headers = list(re.finditer(header_pattern, claims_text))
+
+        if not headers:
+            legacy_pattern = r'(?:权利要求\s*)?(\d+(?:\.\d+)?)\s*[.、:：]\s*(.+?)(?=(?:权利要求\s*)?(?:\d+(?:\.\d+)?)[.、:：]|$)'
+            headers = list(re.finditer(legacy_pattern, claims_text, re.MULTILINE | re.DOTALL))
+
+        for idx, match in enumerate(headers):
             claim_id = match.group(1)
-            claim_text = match.group(2).strip()
+            start_pos = match.end()
+            end_pos = headers[idx + 1].start() if idx + 1 < len(headers) else len(claims_text)
+            claim_text = claims_text[start_pos:end_pos].strip()
             
             # 判断是独立权利要求还是从属权利要求
             claim_type = "INDEPENDENT"
             parent_claim_id: Optional[str] = None
             
             # 从属权利要求特征：引用其他权利要求
-            dependent_pattern = r'(?:根据|如|引用)\s*权利要求\s*(\d+)'
+            dependent_pattern = r'(?:根据|如|引用)\s*权\s*利\s*要\s*求\s*(\d+)'
             dep_match = re.search(dependent_pattern, claim_text)
             if dep_match:
                 claim_type = "DEPENDENT"

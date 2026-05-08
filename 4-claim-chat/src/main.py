@@ -83,6 +83,10 @@ def resolve_local_model_alias(model_name: Optional[str]) -> str:
     lower = requested.lower()
     last_segment = lower.rsplit("-", 1)[-1]
 
+    if lower.startswith("glm-") and "." in lower:
+        return fast_model
+    if lower.startswith("glm-") and any(tag in lower for tag in ("plus", "air", "airx", "flash", "flashx", "v")):
+        return requested
     if lower.startswith("glm-") and not last_segment.isdigit():
         return requested
     if "vision" in lower:
@@ -95,8 +99,6 @@ def resolve_local_model_alias(model_name: Optional[str]) -> str:
         return default_model
     if lower.startswith("glm-5-0-"):
         return fast_model
-    if lower.startswith("glm-") and last_segment.isdigit():
-        return default_model
     if "mini" in lower or "lite" in lower or "flash" in lower or "air" in lower:
         return fast_model
     return default_model
@@ -123,6 +125,46 @@ def convert_message_content_for_openai(content: Any) -> Any:
         return content
     if not isinstance(content, list):
         return str(content)
+
+    import os
+
+    base_url = (
+        os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+        or os.getenv("LOCAL_LLM_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or ""
+    ).lower()
+
+    has_image = False
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "image_url":
+            has_image = True
+            break
+
+    if "bigmodel.cn" in base_url and not has_image:
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                if item.strip():
+                    text_parts.append(item)
+                continue
+            if isinstance(item, dict):
+                item_type = item.get("type")
+                if item_type == "text":
+                    text = str(item.get("text", "")).strip()
+                    if text:
+                        text_parts.append(text)
+                    continue
+                if "text" in item:
+                    text = str(item.get("text", "")).strip()
+                    if text:
+                        text_parts.append(text)
+                    continue
+            text = str(item).strip()
+            if text:
+                text_parts.append(text)
+
+        return "\n".join(text_parts).strip()
 
     converted: list[Any] = []
     for item in content:
@@ -362,7 +404,7 @@ def invoke_local_llm_via_http(
         raise RuntimeError("本地模型调用失败: 缺少 LOCAL_LLM_API_KEY")
 
     payload: Dict[str, Any] = {
-        "model": model,
+        "model": resolve_local_model_alias("vision"),
         "messages": [
             {
                 "role": convert_message_role_for_openai(message),
@@ -382,6 +424,20 @@ def invoke_local_llm_via_http(
 
     token_limit = max_tokens or max_completion_tokens
     if token_limit:
+        model_name = str(payload.get("model") or "").lower()
+        max_allowed: int | None = None
+        if "glm-4-plus" in model_name:
+            max_allowed = 4096
+        elif "glm-4.6v" in model_name:
+            max_allowed = 32768
+        elif "glm-4.7" in model_name:
+            max_allowed = 131072
+        elif model_name.startswith("glm-5"):
+            max_allowed = 131072
+        elif model_name.startswith("glm-4.6"):
+            max_allowed = 131072
+        if max_allowed is not None and token_limit > max_allowed:
+            token_limit = max_allowed
         payload["max_tokens"] = token_limit
 
     timeout_seconds = float(os.getenv("LOCAL_LLM_HTTP_TIMEOUT_SECONDS", "300") or "300")
@@ -997,13 +1053,15 @@ def parse_input(input_str: str) -> Dict[str, Any]:
         return {"text": input_str}
 
 def start_http_server(port):
+    import os
     workers = 1
     reload = False
     if graph_helper.is_dev_env():
         reload = True
 
+    host = (os.getenv("WORKFLOW_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     logger.info(f"Start HTTP Server, Port: {port}, Workers: {workers}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload, workers=workers)
+    uvicorn.run("main:app", host=host, port=port, reload=reload, workers=workers)
 
 if __name__ == "__main__":
     args = parse_args()

@@ -1,6 +1,15 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { Shield } from 'lucide-react';
 import { LoginForm } from '@/components/auth/login-form';
+
+function LoginFormWithSuspense() {
+  return (
+    <Suspense fallback={<div className="text-center text-muted-foreground">Loading...</div>}>
+      <LoginForm />
+    </Suspense>
+  );
+}
 
 export default function LoginPage() {
   return (
@@ -13,7 +22,7 @@ export default function LoginPage() {
           </div>
           <p className="text-sm text-muted-foreground">登录后可发起分析并查看历史结果</p>
         </div>
-        <LoginForm />
+        <LoginFormWithSuspense />
         <p className="text-center text-sm text-muted-foreground">
           没有账号？
           {' '}

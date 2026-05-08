@@ -27,10 +27,12 @@ import {
   updateSessionStatus,
   updateStepStatus,
   updateResults,
+  getSessionAsync,
 } from '@/lib/analysis-store';
 import type { PatentInfo, ProductInfo, ProductComparison } from '@/lib/types';
 import { getUploadsDir } from '@/lib/runtime-paths';
 import { pgQuery } from '@/lib/postgres';
+import { createErrorReport } from '@/lib/error-reports-store';
 
 // ============================================================
 // 数据映射工具函数
@@ -398,9 +400,108 @@ async function waitForClaimCompareRunRecovery(
   return null;
 }
 
+async function getPatentClaimsCount(patentRecordId: number): Promise<number | null> {
+  try {
+    const exists = await pgQuery<{ exists: string | null }>(
+      `select to_regclass('patent_claims') as exists`,
+    );
+    if (!exists.rows[0]?.exists) {
+      return null;
+    }
+    const result = await pgQuery<{ count: string }>(
+      `select count(*)::text as count from patent_claims where record_id = $1`,
+      [patentRecordId],
+    );
+    const raw = result.rows[0]?.count;
+    return raw ? Number(raw) : 0;
+  } catch {
+    return null;
+  }
+}
+
+async function getKeywordTexts(patentRecordId: number, limit: number = 30): Promise<string[] | null> {
+  try {
+    const exists = await pgQuery<{ exists: string | null }>(
+      `select to_regclass('keyword_records') as exists`,
+    );
+    if (!exists.rows[0]?.exists) {
+      return null;
+    }
+    const result = await pgQuery<{ keyword_text: string | null }>(
+      `select keyword_text
+       from keyword_records
+       where patent_record_id = $1
+       order by id asc
+       limit $2`,
+      [patentRecordId, limit],
+    );
+    const keywords = result.rows
+      .map((r) => (r.keyword_text ? String(r.keyword_text).trim() : ''))
+      .filter((k) => k.length > 0);
+    return Array.from(new Set(keywords));
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================
 // 后台执行分析流水线
 // ============================================================
+
+function buildPatentTextSnippet(
+  params: { text?: string } | null,
+  patent: PatentInfo | null,
+): string | null {
+  if (params?.text && params.text.trim()) {
+    return params.text;
+  }
+  if (!patent) {
+    return null;
+  }
+  const parts = [
+    patent.title,
+    patent.patentNumber,
+    patent.specification,
+    ...(patent.independentClaims || []),
+    ...(patent.dependentClaims || []),
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .join('\n\n');
+  return parts.trim() ? parts : null;
+}
+
+async function reportPipelineFailure(input: {
+  sessionId: string;
+  error: unknown;
+  patentText?: string | null;
+  inputType?: string | null;
+  inputValue?: string | null;
+  fileUrl?: string | null;
+  meta?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const session = await getSessionAsync(input.sessionId);
+    const firstErrorStep = session?.steps?.find((step) => step.status === 'error');
+    const lastRunningStep = [...(session?.steps || [])].reverse().find((step) => step.status === 'running');
+    const step = firstErrorStep || lastRunningStep || null;
+    const errorMessage = input.error instanceof Error ? input.error.message : String(input.error);
+    const errorStack = input.error instanceof Error ? input.error.stack || null : null;
+
+    await createErrorReport({
+      analysisSessionId: input.sessionId,
+      userId: session?.userId ?? null,
+      stepId: step?.id ?? null,
+      stepName: step?.name ?? null,
+      errorMessage,
+      errorStack,
+      patentText: input.patentText ?? null,
+      inputType: input.inputType ?? session?.input.type ?? null,
+      inputValue: input.inputValue ?? session?.input.value ?? null,
+      fileUrl: input.fileUrl ?? session?.input.fileUrl ?? null,
+      meta: input.meta ?? {},
+    });
+  } catch {}
+}
 
 async function executePipeline(
   sessionId: string,
@@ -409,6 +510,10 @@ async function executePipeline(
 ): Promise<void> {
   const pipelineStart = Date.now();
   const stepTimings: Record<string, number> = {};
+  let patentTextForReport: string | null = type === 'text' ? params.text ?? null : null;
+  const inputValueForReport =
+    type === 'url' ? params.url ?? null : type === 'file' ? params.fileKey ?? null : params.text ?? null;
+  const fileUrlForReport = type === 'file' ? params.fileUrl ?? null : null;
 
   try {
     await updateSessionStatus(sessionId, 'running');
@@ -452,8 +557,27 @@ async function executePipeline(
     );
 
     const patentFromModule1 = mapPatentFromModule1(module1Result);
+    let module1ClaimCount = module1Result.finalOutput?.claims?.length ?? 0;
+    if (module1ClaimCount === 0 && module1Result.dbRecordId && module1Result.dbRecordId > 0) {
+      const dbCount = await getPatentClaimsCount(module1Result.dbRecordId);
+      if (typeof dbCount === 'number' && dbCount > 0) {
+        module1ClaimCount = dbCount;
+      }
+    }
 
     stepTimings['step1'] = Date.now() - step1Start;
+    if (type !== 'text' && module1ClaimCount === 0) {
+      const msg =
+        '模块1未提取到任何权利要求（数据库中也未写入权利要求记录），通常是扫描版PDF（无文字层）导致。请先对PDF做OCR（导出“可搜索PDF”）后再上传，或确保本机安装 tesseract 后重试。';
+      await updateStepStatus(sessionId, 1, 'error', msg);
+      await updateSessionStatus(sessionId, 'error');
+      await updateResults(sessionId, {
+        module1RunId: module1Result.runId,
+        dbRecordId: module1Result.dbRecordId,
+      });
+      throw new Error(msg);
+    }
+
     await updateStepStatus(sessionId, 1, 'completed');
     await updateResults(sessionId, {
       patent: patentFromModule1,
@@ -465,6 +589,9 @@ async function executePipeline(
       patentTitle: patentFromModule1?.title ?? null,
       patentNumber: patentFromModule1?.patentNumber ?? null,
     });
+    if (!patentTextForReport) {
+      patentTextForReport = buildPatentTextSnippet(params, patentFromModule1 ?? null);
+    }
     console.log(`[Pipeline ${sessionId}] 步骤1完成 (${stepTimings['step1']}ms), db_record_id: ${module1Result.dbRecordId ?? 'missing'}`);
 
     if (!module1Result.dbRecordId || module1Result.dbRecordId <= 0) {
@@ -557,10 +684,19 @@ async function executePipeline(
       console.warn(`[Pipeline ${sessionId}] 模块2异常: ${module2Error}`);
     }
 
+    const keywordsFromDb =
+      module1Result.dbRecordId && !module2Error
+        ? await getKeywordTexts(module1Result.dbRecordId)
+        : null;
+    const keywordList = keywordsFromDb ?? [];
+    if (!module2Error && keywordList.length === 0) {
+      module2Error = '模块2未生成任何有效关键词，无法进行商品检索';
+    }
+
     stepTimings['step3'] = Date.now() - step3Start;
     await updateStepStatus(sessionId, 3, module2Error ? 'error' : 'completed', module2Error);
     await updateResults(sessionId, {
-      keywords: [],
+      keywords: keywordList,
       keywordRunId: module2Result?.keywordRunId,
       module2RunId: module2Result?.runId,
       module2Exception: module2Result?.exceptionType || module2Error,
@@ -580,7 +716,7 @@ async function executePipeline(
       module3Result = await runModule3(
         module1Result.dbRecordId,
         sessionId,
-        undefined,
+        keywordList,
         (msg) => console.log(`[Pipeline ${sessionId}] 模块3进度: ${msg}`),
       );
       if (module3Result.exceptionMessage) {
@@ -864,6 +1000,18 @@ async function executePipeline(
     await updateResults(sessionId, {
       module2Exception: error instanceof Error ? error.message : String(error),
     });
+    await reportPipelineFailure({
+      sessionId,
+      error,
+      patentText: patentTextForReport ?? buildPatentTextSnippet(params, null),
+      inputType: type,
+      inputValue: inputValueForReport,
+      fileUrl: fileUrlForReport,
+      meta: {
+        totalTimeMs: totalTime,
+        stepTimings,
+      },
+    });
   }
 }
 
@@ -915,6 +1063,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     executePipeline(sessionId, type, { url, fileKey, fileName, fileUrl, text }).catch((err) => {
       console.error(`[Pipeline ${sessionId}] 未捕获异常:`, err);
       void updateSessionStatus(sessionId, 'error');
+      void reportPipelineFailure({
+        sessionId,
+        error: err,
+        inputType: type,
+        inputValue: type === 'url' ? url ?? null : type === 'file' ? fileKey ?? null : text ?? null,
+        fileUrl: type === 'file' ? fileUrl ?? null : null,
+      });
     });
   });
 

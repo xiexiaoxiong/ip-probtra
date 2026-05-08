@@ -233,7 +233,7 @@ class StructuredOutputOutput(BaseModel):
 class ErrorCheckInput(BaseModel):
     """异常检查节点输入"""
     raw_text: str = Field(default="", description="原始文本")
-    file_read_error: Optional[ParseError] = Field(default=None, description="文件读取错误")
+    read_error: Optional[ParseError] = Field(default=None, description="文件读取错误")
     identify_errors: List[ParseError] = Field(default=[], description="结构识别错误")
     claims_errors: List[ParseError] = Field(default=[], description="权利要求解析错误")
 
