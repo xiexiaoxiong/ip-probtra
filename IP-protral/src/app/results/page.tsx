@@ -53,9 +53,21 @@ function ResultsContent() {
       return;
     }
 
-    const fetchResults = async () => {
+    let pollingTimer: ReturnType<typeof setInterval> | null = null;
+    let isDisposed = false;
+
+    const hasStructuredResults = (nextSession: AnalysisSession | null): boolean => {
+      if (!nextSession?.results) return false;
+      const products = nextSession.results.products || [];
+      const comparisons = nextSession.results.comparisons || [];
+      return products.length > 0 || comparisons.length > 0;
+    };
+
+    const fetchResults = async (): Promise<AnalysisSession | null> => {
       try {
-        const response = await fetch(`/api/analysis/${sessionId}`);
+        const response = await fetch(`/api/analysis/${sessionId}?t=${Date.now()}`, {
+          cache: 'no-store',
+        });
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
           throw new Error('服务端返回非 JSON 响应，请检查服务是否正常');
@@ -65,15 +77,52 @@ function ResultsContent() {
           throw new Error((data as Record<string, string>).error || '获取分析结果失败');
         }
         const data = await response.json();
-        setSession(data.session);
+        const nextSession = data.session as AnalysisSession;
+        if (!isDisposed) {
+          setSession(nextSession);
+          setError(null);
+        }
+        return nextSession;
       } catch (err) {
-        setError(err instanceof Error ? err.message : '获取结果时出错');
+        if (!isDisposed) {
+          setError(err instanceof Error ? err.message : '获取结果时出错');
+        }
+        return null;
       } finally {
-        setLoading(false);
+        if (!isDisposed) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchResults();
+    const syncResults = async () => {
+      const nextSession = await fetchResults();
+      if (!nextSession || isDisposed) return;
+
+      const isFinished = nextSession.status === 'completed' || nextSession.status === 'error';
+      if (isFinished && pollingTimer) {
+        clearInterval(pollingTimer);
+        pollingTimer = null;
+      }
+
+      // 即使用户提前进入结果页，也持续刷新直到后台真正完成，避免页面停留在旧快照。
+      if (!isFinished || !hasStructuredResults(nextSession)) {
+        if (!pollingTimer) {
+          pollingTimer = setInterval(() => {
+            void syncResults();
+          }, 3000);
+        }
+      }
+    };
+
+    void syncResults();
+
+    return () => {
+      isDisposed = true;
+      if (pollingTimer) {
+        clearInterval(pollingTimer);
+      }
+    };
   }, [sessionId]);
 
   // 加载状态
@@ -106,6 +155,7 @@ function ResultsContent() {
   const products = importedProducts || session.results?.products || [];
   const comparisons = importedComparisons || session.results?.comparisons || [];
   const feishuUrl = session.results?.feishuUrl;
+  const isSessionFinished = session.status === 'completed' || session.status === 'error';
 
   // 获取商品对应的比对结果
   const getComparison = (productId: string): ProductComparison | undefined =>
@@ -327,6 +377,18 @@ function ResultsContent() {
               })}
             </div>
           </div>
+        ) : !isSessionFinished ? (
+          <Card>
+            <CardContent className="py-8 text-center space-y-4">
+              <Loader2 className="h-10 w-10 text-primary mx-auto animate-spin" />
+              <div>
+                <p className="text-sm font-medium">分析仍在进行中</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  结果页会自动刷新，待后台完成后展示最新的商品和比对结论。
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         ) : feishuUrl ? (
           /* 没有结构化商品数据，但有飞书表格链接 */
           <Card>

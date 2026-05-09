@@ -342,15 +342,15 @@ export function getSession(sessionId: string): AnalysisSession | null {
 }
 
 export async function getSessionAsync(sessionId: string): Promise<AnalysisSession | null> {
-  const cached = memoryStore.get(sessionId);
-  if (cached) {
-    return cached;
-  }
-
   try {
     const dbSession = await loadSessionFromDb(sessionId);
     if (dbSession) {
       return dbSession;
+    }
+
+    const cached = memoryStore.get(sessionId);
+    if (cached) {
+      return cached;
     }
 
     const raw = await readFile(getSessionFilePath(sessionId), 'utf-8');
@@ -358,7 +358,7 @@ export async function getSessionAsync(sessionId: string): Promise<AnalysisSessio
     memoryStore.set(sessionId, session);
     return session;
   } catch {
-    return null;
+    return memoryStore.get(sessionId) || null;
   }
 }
 

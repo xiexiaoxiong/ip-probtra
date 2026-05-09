@@ -48,7 +48,9 @@ export function useAnalysisStream(): UseAnalysisStreamReturn {
   // 轮询单次获取
   const pollOnce = useCallback(async (sid: string) => {
     try {
-      const response = await fetch(`/api/analysis/${sid}`);
+      const response = await fetch(`/api/analysis/${sid}?t=${Date.now()}`, {
+        cache: 'no-store',
+      });
       if (response.status === 401) {
         stopPolling();
         setIsAnalyzing(false);

@@ -24,5 +24,14 @@ export async function GET(
     return NextResponse.json({ error: '无权访问该分析会话' }, { status: 403 });
   }
 
-  return NextResponse.json({ session });
+  return NextResponse.json(
+    { session },
+    {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+      },
+    },
+  );
 }
