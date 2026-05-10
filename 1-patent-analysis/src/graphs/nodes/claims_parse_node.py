@@ -71,7 +71,8 @@ def claims_parse_node(
             messages=messages,
             model=llm_config.get("model", "doubao-seed-1-6-251015"),
             temperature=llm_config.get("temperature", 0.1),
-            max_completion_tokens=llm_config.get("max_completion_tokens", 32768)
+            max_tokens=min(int(llm_config.get("max_tokens", 4096) or 4096), 4096),
+            max_completion_tokens=min(int(llm_config.get("max_tokens", 4096) or 4096), 4096),
         )
         
         # 解析LLM返回的权利要求结构

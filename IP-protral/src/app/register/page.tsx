@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { Shield } from 'lucide-react';
+import { AuthPageGuard } from '@/components/auth/auth-page-guard';
 import { RegisterForm } from '@/components/auth/register-form';
 
 export default function RegisterPage() {
   return (
     <div className="min-h-screen bg-muted/30 flex items-center justify-center px-6">
+      <AuthPageGuard />
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 font-semibold text-lg">

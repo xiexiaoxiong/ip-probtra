@@ -10,7 +10,6 @@ function hasAuthCookie(request: NextRequest): boolean {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authenticated = hasAuthCookie(request);
-  const isAuthPage = pathname === '/login' || pathname === '/register';
   const isProtectedPage =
     pathname === '/'
     || pathname.startsWith('/results')
@@ -22,13 +21,6 @@ export function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(url);
-  }
-
-  if (authenticated && isAuthPage) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    url.search = '';
     return NextResponse.redirect(url);
   }
 

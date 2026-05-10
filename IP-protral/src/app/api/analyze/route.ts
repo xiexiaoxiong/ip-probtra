@@ -11,7 +11,7 @@
 import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserFromRequest } from '@/lib/auth';
+import { createUnauthorizedResponse, getCurrentUserFromRequest } from '@/lib/auth';
 import {
   runModule1,
   runModule2,
@@ -1022,7 +1022,7 @@ async function executePipeline(
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const currentUser = await getCurrentUserFromRequest(request);
   if (!currentUser) {
-    return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    return createUnauthorizedResponse(request);
   }
 
   const body = await request.json();

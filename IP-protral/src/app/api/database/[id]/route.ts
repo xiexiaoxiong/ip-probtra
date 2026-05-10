@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserFromRequest, isAdmin } from '@/lib/auth';
+import { createUnauthorizedResponse, getCurrentUserFromRequest, isAdmin } from '@/lib/auth';
 import { getSessionAsync } from '@/lib/analysis-store';
 import { withPgClient } from '@/lib/postgres';
 
@@ -49,7 +49,7 @@ export async function GET(
 ) {
   const currentUser = await getCurrentUserFromRequest(request);
   if (!currentUser) {
-    return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    return createUnauthorizedResponse(request);
   }
 
   const { id } = await params;

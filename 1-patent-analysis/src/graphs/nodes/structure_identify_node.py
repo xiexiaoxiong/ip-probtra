@@ -58,6 +58,8 @@ def structure_identify_node(
     cn_metadata = _extract_cn_patent_metadata(raw_text)
     
     try:
+        fallback_sections, fallback_claims_text, fallback_metadata = _fallback_structure_identify(raw_text, [])
+
         # 使用LLM识别文档结构
         # 注意：LLM仅用于识别边界，不进行内容解释
         client = LLMClient(ctx=ctx)
@@ -75,7 +77,8 @@ def structure_identify_node(
             messages=messages,
             model=llm_config.get("model", "doubao-seed-1-6-251015"),
             temperature=llm_config.get("temperature", 0.1),
-            max_completion_tokens=llm_config.get("max_completion_tokens", 32768)
+            max_tokens=min(int(llm_config.get("max_tokens", 4096) or 4096), 4096),
+            max_completion_tokens=min(int(llm_config.get("max_tokens", 4096) or 4096), 4096),
         )
         
         # 解析LLM返回的结构信息
@@ -137,6 +140,23 @@ def structure_identify_node(
                     patent_metadata.patent_holder = cn_metadata.patent_holder
                 if not patent_metadata.title and cn_metadata.title:
                     patent_metadata.title = cn_metadata.title
+
+                existing_section_names = {section.section_name for section in specification_sections}
+                for fallback_section in fallback_sections:
+                    if fallback_section.section_name not in existing_section_names:
+                        specification_sections.append(fallback_section)
+                if not claims_section_text and fallback_claims_text:
+                    claims_section_text = fallback_claims_text
+                if not patent_metadata.patent_number and fallback_metadata.patent_number:
+                    patent_metadata.patent_number = fallback_metadata.patent_number
+                if not patent_metadata.application_date and fallback_metadata.application_date:
+                    patent_metadata.application_date = fallback_metadata.application_date
+                if not patent_metadata.priority_date and fallback_metadata.priority_date:
+                    patent_metadata.priority_date = fallback_metadata.priority_date
+                if not patent_metadata.patent_holder and fallback_metadata.patent_holder:
+                    patent_metadata.patent_holder = fallback_metadata.patent_holder
+                if not patent_metadata.title and fallback_metadata.title:
+                    patent_metadata.title = fallback_metadata.title
                     
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"LLM返回结构解析失败，尝试使用正则规则: {str(e)}")
@@ -235,28 +255,46 @@ def _fallback_structure_identify(
     metadata = _extract_cn_patent_metadata(raw_text)
     
     try:
-        # 常见专利文档章节标题模式
-        section_patterns = {
-            "技术领域": r"技术领域[：:\s]*\n?([\s\S]*?)(?=\n\s*(?:背景技术|发明内容|权利要求|$))",
-            "背景技术": r"背景技术[：:\s]*\n?([\s\S]*?)(?=\n\s*(?:发明内容|技术领域|权利要求|$))",
-            "发明内容": r"发明内容[：:\s]*\n?([\s\S]*?)(?=\n\s*(?:附图说明|具体实施方式|权利要求|$))",
-            "实用新型内容": r"实用新型内容[：:\s]*\n?([\s\S]*?)(?=\n\s*(?:附图说明|具体实施方式|权利要求|$))",
+        heading_aliases = {
+            "技术领域": [r"技术领域"],
+            "背景技术": [r"背景技术"],
+            "发明内容": [r"发明内容", r"发明概述", r"发明的内容"],
+            "实用新型内容": [r"实用新型内容"],
+            "附图说明": [r"附图说明", r"说明书附图"],
+            "具体实施方式": [r"具体实施方式", r"具体实施例", r"实施方式"],
         }
-        
-        # 提取各章节
-        for section_name, pattern in section_patterns.items():
-            match = re.search(pattern, raw_text)
-            if match:
-                section_text = match.group(1).strip()
-                start_pos = match.start(1)
-                end_pos = match.end(1)
-                
-                sections.append(SpecificationSection(
-                    section_name=section_name,
-                    section_text=section_text,
-                    start_position=start_pos,
-                    end_position=end_pos
-                ))
+        heading_regex = "|".join(
+            alias
+            for aliases in heading_aliases.values()
+            for alias in aliases
+        )
+        heading_matches = list(re.finditer(
+            rf"(?m)^\s*({heading_regex})\s*$",
+            raw_text,
+        ))
+
+        for idx, match in enumerate(heading_matches):
+            matched_title = match.group(1)
+            section_name = next(
+                (
+                    canonical
+                    for canonical, aliases in heading_aliases.items()
+                    if any(re.fullmatch(alias, matched_title) for alias in aliases)
+                ),
+                matched_title,
+            )
+            content_start = match.end()
+            content_end = heading_matches[idx + 1].start() if idx + 1 < len(heading_matches) else len(raw_text)
+            section_text = raw_text[content_start:content_end].strip()
+            if not section_text:
+                continue
+
+            sections.append(SpecificationSection(
+                section_name=section_name,
+                section_text=section_text,
+                start_position=content_start,
+                end_position=content_end,
+            ))
         
         claims_pattern = r"(?:权\s*利\s*要\s*求\s*书|权利要求书|权\s*利\s*要\s*求|权利要求)[：:\s]*([\s\S]*?)(?=(?:\s*(?:说\s*明\s*书\s*全\s*文|说\s*明\s*书|说明书全文|说明书|摘\s*要|摘要|技\s*术\s*领\s*域|技术领域|背\s*景\s*技\s*术|背景技术|发\s*明\s*内\s*容|发明内容|实\s*用\s*新\s*型\s*内\s*容|实用新型内容|附\s*图\s*说\s*明|附图说明))|$)"
         claim_candidates: List[str] = []

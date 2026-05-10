@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
-import type { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import type { QueryResultRow } from 'pg';
 import { ensureDatabaseReady } from './db-init';
 import { pgQuery } from './postgres';
@@ -118,6 +119,14 @@ export function clearAuthCookie(response: NextResponse): void {
     path: '/',
     maxAge: 0,
   });
+}
+
+export function createUnauthorizedResponse(request: NextRequest, message: string = '请先登录'): NextResponse {
+  const response = NextResponse.json({ error: message }, { status: 401 });
+  if (getAuthCookieValue(request)) {
+    clearAuthCookie(response);
+  }
+  return response;
 }
 
 export function isAdmin(user: AuthUser | null): boolean {

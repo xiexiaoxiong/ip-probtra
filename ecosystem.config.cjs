@@ -121,6 +121,8 @@ module.exports = {
       interpreter: '/bin/bash',
       env: {
         COZE_WORKSPACE_PATH: webCwd,
+        NODE_ENV: envValue('NODE_ENV') || 'production',
+        COZE_PROJECT_ENV: envValue('COZE_PROJECT_ENV') || 'PROD',
         PORT: envValue('PORT') || 5000,
         DEPLOY_RUN_PORT: envValue('DEPLOY_RUN_PORT') || 5000,
         LOCAL_DATA_DIR: envValue('LOCAL_DATA_DIR') || path.join(webCwd, '.data'),
