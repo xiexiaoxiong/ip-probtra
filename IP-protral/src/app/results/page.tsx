@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { Shield, ExternalLink, ArrowLeft, Loader2, AlertCircle, FileSearch, Database } from 'lucide-react';
+import { Shield, ExternalLink, ArrowLeft, Loader2, AlertCircle, FileSearch, Database, Download } from 'lucide-react';
 import Link from 'next/link';
 import { FeishuConfig } from '@/components/feishu-config';
 import type { ProductInfo } from '@/lib/types';
@@ -43,6 +43,8 @@ function ResultsContent() {
   const [session, setSession] = useState<AnalysisSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [importedProducts, setImportedProducts] = useState<ProductInfo[] | null>(null);
   const [importedComparisons, setImportedComparisons] = useState<ProductComparison[] | null>(null);
 
@@ -161,6 +163,50 @@ function ResultsContent() {
   const getComparison = (productId: string): ProductComparison | undefined =>
     comparisons.find((c) => c.productId === productId);
 
+  const handleExportReport = async () => {
+    if (!sessionId || exporting) {
+      return;
+    }
+
+    try {
+      setExporting(true);
+      setExportError(null);
+
+      const response = await fetch(`/api/analysis/${sessionId}/export`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error((data as { error?: string }).error || '导出报告失败');
+        }
+        throw new Error('导出报告失败，请稍后重试');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const disposition = response.headers.get('content-disposition') || '';
+      const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i);
+      const encodedName = fileNameMatch?.[1] || fileNameMatch?.[2];
+      const fallbackName = `${session.results?.patent?.title || 'analysis-report'}-${sessionId}.xlsx`;
+      const fileName = encodedName ? decodeURIComponent(encodedName) : fallbackName;
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : '导出报告失败');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // 统计 - 基于独立权利要求级比对结果
   // 1. 疑似侵权：存在至少一个独立权利要求，其所有特征都相同或等同
   // 2. 疑似不侵权：所有独立权利要求都有至少一个特征不相同
@@ -241,21 +287,39 @@ function ResultsContent() {
               </Badge>
             )}
           </div>
-          {feishuUrl && (
-            <a
-              href={feishuUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleExportReport}
+              disabled={exporting}
             >
-              <ExternalLink className="h-3 w-3" />
-              飞书多维表格
-            </a>
-          )}
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              导出报告
+            </Button>
+            {feishuUrl && (
+              <a
+                href={feishuUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" />
+                飞书多维表格
+              </a>
+            )}
+          </div>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+        {exportError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{exportError}</AlertDescription>
+          </Alert>
+        )}
         {/* 分析概要 */}
         <Card>
           <CardHeader className="pb-3">
