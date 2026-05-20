@@ -6,7 +6,7 @@
 // ============================================================
 
 import type { AnalysisStep } from '@/lib/types';
-import { CheckCircle2, Loader2, Circle, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Circle, AlertCircle, Clock3 } from 'lucide-react';
 
 interface AnalysisProgressProps {
   steps: AnalysisStep[];
@@ -41,6 +41,8 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
             className={`flex items-start gap-4 rounded-lg border p-4 transition-all ${
               step.status === 'running'
                 ? 'border-primary/30 bg-primary/5'
+                : step.status === 'waiting_input'
+                  ? 'border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20'
                 : step.status === 'completed'
                   ? 'border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20'
                   : step.status === 'error'
@@ -55,6 +57,9 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
               )}
               {step.status === 'running' && (
                 <Loader2 className="h-5 w-5 text-primary animate-spin" />
+              )}
+              {step.status === 'waiting_input' && (
+                <Clock3 className="h-5 w-5 text-amber-600" />
               )}
               {step.status === 'completed' && (
                 <CheckCircle2 className="h-5 w-5 text-green-600" />
@@ -72,6 +77,7 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
                 </span>
                 <h4 className={`text-sm font-semibold ${
                   step.status === 'running' ? 'text-primary' :
+                  step.status === 'waiting_input' ? 'text-amber-700 dark:text-amber-400' :
                   step.status === 'completed' ? 'text-green-700 dark:text-green-400' :
                   step.status === 'error' ? 'text-destructive' :
                   'text-foreground'
@@ -87,6 +93,9 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
               )}
               {step.status === 'running' && (
                 <p className="text-xs text-primary mt-1">正在处理中...</p>
+              )}
+              {step.status === 'waiting_input' && (
+                <p className="text-xs text-amber-700 mt-1 dark:text-amber-400">等待用户补充关键词...</p>
               )}
             </div>
 

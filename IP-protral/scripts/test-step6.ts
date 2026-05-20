@@ -38,9 +38,31 @@ function getStringField(record: Record<string, unknown>, ...candidates: string[]
 
 function normalizeStatus(status: string): MatchStatus {
   if (!status) return 'uncertain';
-  const lower = status.toLowerCase();
-  if (lower.includes('不匹配') || lower.includes('not_match') || lower.includes('不同') || lower.includes('不一致') || lower.includes('区别')) return 'not_matching';
-  if (lower.includes('匹配') || lower.includes('match') || lower.includes('相同') || lower.includes('一致') || lower.includes('等同')) return 'matching';
+  const lower = status.trim().toLowerCase();
+  const compact = lower.replace(/[\s_-]+/g, '');
+  if (
+    lower.includes('不匹配')
+    || lower.includes('不相同')
+    || lower.includes('不同')
+    || lower.includes('不一致')
+    || lower.includes('区别')
+    || lower.includes('no_match')
+    || lower.includes('no-match')
+    || lower.includes('no match')
+    || lower.includes('not_match')
+    || lower.includes('not-match')
+    || lower.includes('not match')
+    || compact.includes('nomatch')
+    || compact.includes('notmatch')
+  ) return 'not_matching';
+  if (
+    lower.includes('匹配')
+    || lower.includes('matching')
+    || /\bmatch\b/.test(lower)
+    || lower.includes('相同')
+    || lower.includes('一致')
+    || lower.includes('等同')
+  ) return 'matching';
   return 'uncertain';
 }
 
@@ -496,6 +518,9 @@ function runTests() {
     { input: '不匹配', expected: 'not_matching' },
     { input: 'MATCH', expected: 'matching' },
     { input: 'NOT_MATCH', expected: 'not_matching' },
+    { input: 'NO_MATCH', expected: 'not_matching' },
+    { input: 'no-match', expected: 'not_matching' },
+    { input: 'no match', expected: 'not_matching' },
     { input: '相同', expected: 'matching' },
     { input: '不同', expected: 'not_matching' },
     { input: '等同', expected: 'matching' },

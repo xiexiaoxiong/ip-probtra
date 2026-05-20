@@ -29,7 +29,13 @@ import {
   updateResults,
   getSessionAsync,
 } from '@/lib/analysis-store';
-import type { PatentInfo, ProductInfo, ProductComparison } from '@/lib/types';
+import type {
+  KeywordConfirmationState,
+  PatentInfo,
+  ProductComparison,
+  ProductInfo,
+} from '@/lib/types';
+import { normalizeKeywordList } from '@/lib/keyword-utils';
 import { getUploadsDir } from '@/lib/runtime-paths';
 import { pgQuery } from '@/lib/postgres';
 import { createErrorReport } from '@/lib/error-reports-store';
@@ -158,9 +164,38 @@ function getStringField(record: Record<string, unknown>, ...candidates: string[]
 
 function normalizeStatus(status: string): ProductComparison['claimElements'][0]['status'] {
   if (!status) return 'uncertain';
-  const lower = status.toLowerCase();
-  if (lower.includes('不匹配') || lower.includes('not_match') || lower.includes('不同') || lower.includes('不一致') || lower.includes('区别')) return 'not_matching';
-  if (lower.includes('匹配') || lower.includes('match') || lower.includes('相同') || lower.includes('一致') || lower.includes('等同')) return 'matching';
+  const lower = status.trim().toLowerCase();
+  const compact = lower.replace(/[\s_-]+/g, '');
+
+  if (
+    lower.includes('不匹配')
+    || lower.includes('不相同')
+    || lower.includes('不同')
+    || lower.includes('不一致')
+    || lower.includes('区别')
+    || lower.includes('no_match')
+    || lower.includes('no-match')
+    || lower.includes('no match')
+    || lower.includes('not_match')
+    || lower.includes('not-match')
+    || lower.includes('not match')
+    || compact.includes('nomatch')
+    || compact.includes('notmatch')
+  ) {
+    return 'not_matching';
+  }
+
+  if (
+    lower.includes('匹配')
+    || lower.includes('matching')
+    || /\bmatch\b/.test(lower)
+    || lower.includes('相同')
+    || lower.includes('一致')
+    || lower.includes('等同')
+  ) {
+    return 'matching';
+  }
+
   return 'uncertain';
 }
 
@@ -444,6 +479,76 @@ async function getKeywordTexts(patentRecordId: number, limit: number = 30): Prom
   }
 }
 
+const KEYWORD_CONFIRMATION_TIMEOUT_MS = 30_000;
+const KEYWORD_CONFIRMATION_POLL_MS = 1_000;
+
+async function waitForKeywordConfirmation(
+  sessionId: string,
+  autoKeywords: string[],
+): Promise<KeywordConfirmationState> {
+  const normalizedAutoKeywords = normalizeKeywordList(autoKeywords);
+
+  while (true) {
+    const session = await getSessionAsync(sessionId);
+    const state = session?.results?.keywordConfirmation;
+
+    if (!state) {
+      const fallbackState: KeywordConfirmationState = {
+        status: 'auto_confirmed',
+        autoKeywords: normalizedAutoKeywords,
+        userKeywords: [],
+        finalKeywords: normalizedAutoKeywords,
+        confirmedAt: Date.now(),
+      };
+      await updateResults(sessionId, {
+        keywords: fallbackState.finalKeywords,
+        keywordConfirmation: fallbackState,
+      });
+      return fallbackState;
+    }
+
+    if (state.status === 'confirmed') {
+      return {
+        ...state,
+        autoKeywords: normalizeKeywordList(state.autoKeywords),
+        userKeywords: normalizeKeywordList(state.userKeywords),
+        finalKeywords: normalizeKeywordList(state.finalKeywords),
+      };
+    }
+
+    if (state.status === 'auto_confirmed') {
+      return {
+        ...state,
+        autoKeywords: normalizeKeywordList(state.autoKeywords),
+        userKeywords: normalizeKeywordList(state.userKeywords),
+        finalKeywords: normalizeKeywordList(state.finalKeywords),
+      };
+    }
+
+    if (state.status === 'timed_wait') {
+      const deadlineAt = state.deadlineAt ?? Date.now() + KEYWORD_CONFIRMATION_TIMEOUT_MS;
+      if (Date.now() >= deadlineAt) {
+        const autoConfirmedState: KeywordConfirmationState = {
+          status: 'auto_confirmed',
+          autoKeywords: normalizeKeywordList(state.autoKeywords),
+          userKeywords: [],
+          finalKeywords: normalizeKeywordList(state.autoKeywords),
+          promptedAt: state.promptedAt,
+          deadlineAt,
+          confirmedAt: Date.now(),
+        };
+        await updateResults(sessionId, {
+          keywords: autoConfirmedState.finalKeywords,
+          keywordConfirmation: autoConfirmedState,
+        });
+        return autoConfirmedState;
+      }
+    }
+
+    await sleep(KEYWORD_CONFIRMATION_POLL_MS);
+  }
+}
+
 // ============================================================
 // 后台执行分析流水线
 // ============================================================
@@ -688,21 +793,64 @@ async function executePipeline(
       module1Result.dbRecordId && !module2Error
         ? await getKeywordTexts(module1Result.dbRecordId)
         : null;
-    const keywordList = keywordsFromDb ?? [];
-    if (!module2Error && keywordList.length === 0) {
+    const autoKeywordList = normalizeKeywordList(keywordsFromDb ?? []);
+    let keywordList = autoKeywordList;
+    if (!module2Error && autoKeywordList.length === 0) {
       module2Error = '模块2未生成任何有效关键词，无法进行商品检索';
     }
 
-    stepTimings['step3'] = Date.now() - step3Start;
-    await updateStepStatus(sessionId, 3, module2Error ? 'error' : 'completed', module2Error);
-    await updateResults(sessionId, {
-      keywords: keywordList,
-      keywordRunId: module2Result?.keywordRunId,
-      module2RunId: module2Result?.runId,
-      module2Exception: module2Result?.exceptionType || module2Error,
-      industryUsed: module2Result?.industryUsed || detectedIndustry,
-    });
-    console.log(`[Pipeline ${sessionId}] 步骤3${module2Error ? '异常' : '完成'}（使用${module2Result?.industryUsed || detectedIndustry}工作流, 耗时 ${stepTimings['step3']}ms）`);
+    if (module2Error) {
+      stepTimings['step3'] = Date.now() - step3Start;
+      await updateStepStatus(sessionId, 3, 'error', module2Error);
+      await updateResults(sessionId, {
+        keywords: keywordList,
+        keywordRunId: module2Result?.keywordRunId,
+        module2RunId: module2Result?.runId,
+        module2Exception: module2Result?.exceptionType || module2Error,
+        industryUsed: module2Result?.industryUsed || detectedIndustry,
+      });
+      console.log(`[Pipeline ${sessionId}] 步骤3异常（使用${module2Result?.industryUsed || detectedIndustry}工作流, 耗时 ${stepTimings['step3']}ms）`);
+    } else {
+      const keywordConfirmation: KeywordConfirmationState = {
+        status: 'timed_wait',
+        autoKeywords: autoKeywordList,
+        userKeywords: [],
+        finalKeywords: autoKeywordList,
+        promptedAt: Date.now(),
+        deadlineAt: Date.now() + KEYWORD_CONFIRMATION_TIMEOUT_MS,
+      };
+
+      await updateStepStatus(sessionId, 3, 'waiting_input');
+      await updateResults(sessionId, {
+        keywords: autoKeywordList,
+        keywordRunId: module2Result?.keywordRunId,
+        module2RunId: module2Result?.runId,
+        module2Exception: module2Result?.exceptionType || module2Error,
+        industryUsed: module2Result?.industryUsed || detectedIndustry,
+        keywordConfirmation,
+      });
+
+      console.log(`[Pipeline ${sessionId}] 步骤3进入用户确认阶段，等待30秒或用户补充关键词...`);
+      const resolvedKeywordState = await waitForKeywordConfirmation(sessionId, autoKeywordList);
+      keywordList = normalizeKeywordList(resolvedKeywordState.finalKeywords);
+      stepTimings['step3'] = Date.now() - step3Start;
+
+      await updateStepStatus(sessionId, 3, 'completed');
+      await updateResults(sessionId, {
+        keywords: keywordList,
+        keywordRunId: module2Result?.keywordRunId,
+        module2RunId: module2Result?.runId,
+        module2Exception: module2Result?.exceptionType,
+        industryUsed: module2Result?.industryUsed || detectedIndustry,
+        keywordConfirmation: {
+          ...resolvedKeywordState,
+          autoKeywords: normalizeKeywordList(resolvedKeywordState.autoKeywords),
+          userKeywords: normalizeKeywordList(resolvedKeywordState.userKeywords),
+          finalKeywords: keywordList,
+        },
+      });
+      console.log(`[Pipeline ${sessionId}] 步骤3完成（使用${module2Result?.industryUsed || detectedIndustry}工作流, 最终关键词 ${keywordList.length} 个, 耗时 ${stepTimings['step3']}ms）`);
+    }
 
     // ========== 模块3（步骤4）：商品信息检索 ==========
     let module3Result: Module3Result | null = null;
@@ -826,8 +974,12 @@ async function executePipeline(
     async function enrichProductsFromDb(productsFromComparison: ProductInfo[], sessionIdForDb: string, patentRecordIdForDb: number): Promise<ProductInfo[]> {
       try {
         const searchProductRows = await pgQuery<Record<string, unknown>>(
-          `SELECT product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture FROM search_products WHERE patent_record_id = $1 ORDER BY id ASC`,
-          [patentRecordIdForDb],
+          `SELECT product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture
+           FROM search_products
+           WHERE patent_record_id = $1
+             AND analysis_session_id = $2
+           ORDER BY id ASC`,
+          [patentRecordIdForDb, sessionIdForDb],
         );
         if (searchProductRows.rows.length === 0) return productsFromComparison;
 

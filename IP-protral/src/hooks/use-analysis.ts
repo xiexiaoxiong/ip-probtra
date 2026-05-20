@@ -10,6 +10,7 @@ import type {
   AnalysisSession,
   AnalysisStep,
   AnalysisResults,
+  KeywordConfirmationState,
   StepStatus,
 } from '@/lib/types';
 import { WORKFLOW_MODULES } from '@/lib/types';
@@ -18,9 +19,13 @@ interface UseAnalysisStreamReturn {
   sessionId: string | null;
   steps: AnalysisStep[];
   results: AnalysisResults | null;
+  keywordConfirmation: KeywordConfirmationState | null;
+  isWaitingForKeywordInput: boolean;
   isAnalyzing: boolean;
   error: string | null;
   startAnalysis: (body: { type: 'url' | 'file' | 'text'; url?: string; fileKey?: string; fileName?: string; fileUrl?: string; text?: string }) => void;
+  startKeywordEditing: (sessionId: string) => Promise<void>;
+  confirmKeywords: (sessionId: string, keywords: string[]) => Promise<void>;
   reset: () => void;
 }
 
@@ -33,9 +38,14 @@ export function useAnalysisStream(): UseAnalysisStreamReturn {
     WORKFLOW_MODULES.map((m) => ({ id: m.id, name: m.name, description: m.description, status: 'pending' as StepStatus })),
   );
   const [results, setResults] = useState<AnalysisResults | null>(null);
+  const [keywordConfirmation, setKeywordConfirmation] = useState<KeywordConfirmationState | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const syncKeywordConfirmation = useCallback((nextState: KeywordConfirmationState | null) => {
+    setKeywordConfirmation(nextState);
+  }, []);
 
   // 停止轮询
   const stopPolling = useCallback(() => {
@@ -70,6 +80,7 @@ export function useAnalysisStream(): UseAnalysisStreamReturn {
       if (session.results) {
         setResults(session.results);
       }
+      syncKeywordConfirmation(session.results?.keywordConfirmation ?? null);
 
       // 检查是否完成
       if (session.status === 'completed' || session.status === 'error') {
@@ -89,7 +100,7 @@ export function useAnalysisStream(): UseAnalysisStreamReturn {
     } catch (err) {
       console.warn('[useAnalysis] 轮询失败:', err);
     }
-  }, [stopPolling]);
+  }, [stopPolling, syncKeywordConfirmation]);
 
   // 启动轮询
   const startPolling = useCallback((sid: string) => {
@@ -110,6 +121,7 @@ export function useAnalysisStream(): UseAnalysisStreamReturn {
       // 重置状态
       setSteps(WORKFLOW_MODULES.map((m) => ({ id: m.id, name: m.name, description: m.description, status: 'pending' as StepStatus })));
       setResults(null);
+      syncKeywordConfirmation(null);
       setError(null);
       setIsAnalyzing(true);
       stopPolling();
@@ -146,17 +158,92 @@ export function useAnalysisStream(): UseAnalysisStreamReturn {
         setIsAnalyzing(false);
       }
     },
-    [startPolling, stopPolling],
+    [startPolling, stopPolling, syncKeywordConfirmation],
   );
+
+  const startKeywordEditing = useCallback(async (sid: string) => {
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/analysis/${sid}/keywords`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start_editing' }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `请求失败 (${response.status})`);
+      }
+
+      const nextState = (data.keywordConfirmation ?? null) as KeywordConfirmationState | null;
+      syncKeywordConfirmation(nextState);
+      if (nextState) {
+        setResults((prev) => ({
+          ...(prev || {}),
+          keywords: nextState.finalKeywords,
+          keywordConfirmation: nextState,
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '进入关键词补充状态失败');
+      throw err;
+    }
+  }, [syncKeywordConfirmation]);
+
+  const confirmKeywords = useCallback(async (sid: string, keywords: string[]) => {
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/analysis/${sid}/keywords`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm', keywords }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `请求失败 (${response.status})`);
+      }
+
+      const nextState = (data.keywordConfirmation ?? null) as KeywordConfirmationState | null;
+      syncKeywordConfirmation(nextState);
+      if (nextState) {
+        setResults((prev) => ({
+          ...(prev || {}),
+          keywords: nextState.finalKeywords,
+          keywordConfirmation: nextState,
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '确认关键词失败');
+      throw err;
+    }
+  }, [syncKeywordConfirmation]);
 
   const reset = useCallback(() => {
     stopPolling();
     setSessionId(null);
     setSteps(WORKFLOW_MODULES.map((m) => ({ id: m.id, name: m.name, description: m.description, status: 'pending' as StepStatus })));
     setResults(null);
+    syncKeywordConfirmation(null);
     setError(null);
     setIsAnalyzing(false);
-  }, [stopPolling]);
+  }, [stopPolling, syncKeywordConfirmation]);
 
-  return { sessionId, steps, results, isAnalyzing, error, startAnalysis, reset };
+  const isWaitingForKeywordInput = steps.some((step) => step.id === 3 && step.status === 'waiting_input');
+
+  return {
+    sessionId,
+    steps,
+    results,
+    keywordConfirmation,
+    isWaitingForKeywordInput,
+    isAnalyzing,
+    error,
+    startAnalysis,
+    startKeywordEditing,
+    confirmKeywords,
+    reset,
+  };
 }

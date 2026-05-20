@@ -6,7 +6,7 @@
 export type AnalysisStatus = 'idle' | 'running' | 'completed' | 'error';
 
 /** 单个步骤的状态 */
-export type StepStatus = 'pending' | 'running' | 'completed' | 'error';
+export type StepStatus = 'pending' | 'running' | 'waiting_input' | 'completed' | 'error';
 
 /** 比对结论状态 */
 export type MatchStatus = 'matching' | 'not_matching' | 'uncertain';
@@ -98,6 +98,18 @@ export interface ProductComparison {
   ruleApplied?: string;
 }
 
+export type KeywordConfirmationStatus = 'timed_wait' | 'editing' | 'confirmed' | 'auto_confirmed';
+
+export interface KeywordConfirmationState {
+  status: KeywordConfirmationStatus;
+  autoKeywords: string[];
+  userKeywords: string[];
+  finalKeywords: string[];
+  promptedAt?: number;
+  deadlineAt?: number;
+  confirmedAt?: number;
+}
+
 /** 分析结果汇总 */
 export interface AnalysisResults {
   patent?: PatentInfo;
@@ -124,6 +136,7 @@ export interface AnalysisResults {
   detectedIndustry?: IndustryType;
   industryReasoning?: string;
   industryUsed?: IndustryType;
+  keywordConfirmation?: KeywordConfirmationState;
 }
 
 /** 分析会话 */

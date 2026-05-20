@@ -15,15 +15,41 @@ import { useAnalysisStream } from '@/hooks/use-analysis';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import type { AnalysisSession, AuthUser } from '@/lib/types';
-import { AlertCircle, RotateCcw, ArrowRight, ExternalLink, Shield } from 'lucide-react';
+import { normalizeKeywordList } from '@/lib/keyword-utils';
+import { AlertCircle, RotateCcw, ArrowRight, ExternalLink, Shield, Clock3, Plus } from 'lucide-react';
 
 export default function HomePage() {
   const router = useRouter();
-  const { sessionId, steps, results, isAnalyzing, error, startAnalysis, reset } = useAnalysisStream();
+  const {
+    sessionId,
+    steps,
+    results,
+    keywordConfirmation,
+    isWaitingForKeywordInput,
+    isAnalyzing,
+    error,
+    startAnalysis,
+    startKeywordEditing,
+    confirmKeywords,
+    reset,
+  } = useAnalysisStream();
   const [showProgress, setShowProgress] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [recentSessions, setRecentSessions] = useState<AnalysisSession[]>([]);
+  const [keywordDialogOpen, setKeywordDialogOpen] = useState(false);
+  const [keywordDraft, setKeywordDraft] = useState('');
+  const [keywordDialogError, setKeywordDialogError] = useState<string | null>(null);
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
 
   // 当步骤1-4完成（步骤5为可选的飞书读取，不影响主流程）
   const isCompleted = steps.filter((s) => s.id <= 5 && s.id >= 1).every((s) => s.status === 'completed' || s.status === 'error');
@@ -33,6 +59,27 @@ export default function HomePage() {
       setShowProgress(true);
     }
   }, [isAnalyzing]);
+
+  useEffect(() => {
+    if (keywordConfirmation?.status === 'editing') {
+      setKeywordDialogOpen(true);
+      return;
+    }
+
+    if (!isWaitingForKeywordInput) {
+      setKeywordDialogOpen(false);
+    }
+  }, [isWaitingForKeywordInput, keywordConfirmation?.status]);
+
+  useEffect(() => {
+    if (keywordConfirmation?.status !== 'timed_wait') {
+      return;
+    }
+
+    setCountdownNow(Date.now());
+    const timer = setInterval(() => setCountdownNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [keywordConfirmation?.status, keywordConfirmation?.deadlineAt]);
 
   useEffect(() => {
     async function load() {
@@ -67,12 +114,76 @@ export default function HomePage() {
   const handleReset = () => {
     reset();
     setShowProgress(false);
+    setKeywordDialogOpen(false);
+    setKeywordDraft('');
+    setKeywordDialogError(null);
   };
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
   };
+
+  const handleStartKeywordEditing = async () => {
+    if (!sessionId) {
+      return;
+    }
+
+    setKeywordDialogError(null);
+
+    try {
+      await startKeywordEditing(sessionId);
+      setKeywordDialogOpen(true);
+    } catch (err) {
+      setKeywordDialogError(err instanceof Error ? err.message : '进入关键词补充状态失败');
+    }
+  };
+
+  const handleConfirmKeywords = async () => {
+    if (!sessionId) {
+      return;
+    }
+
+    const keywordList = normalizeKeywordList(keywordDraft);
+    if (keywordList.length === 0) {
+      setKeywordDialogError('请输入至少一个关键词');
+      return;
+    }
+
+    setKeywordDialogError(null);
+
+    try {
+      await confirmKeywords(sessionId, keywordList);
+      setKeywordDialogOpen(false);
+    } catch (err) {
+      setKeywordDialogError(err instanceof Error ? err.message : '确认增加关键词失败');
+    }
+  };
+
+  const autoKeywords = keywordConfirmation?.autoKeywords ?? [];
+  const countdownSeconds =
+    keywordConfirmation?.status === 'timed_wait'
+      ? Math.max(0, Math.ceil(((keywordConfirmation.deadlineAt ?? countdownNow) - countdownNow) / 1000))
+      : null;
+  const keywordPromptVisible =
+    isWaitingForKeywordInput
+    && (keywordConfirmation?.status === 'timed_wait' || keywordConfirmation?.status === 'editing');
+  const pageTitle = isCompleted
+    ? '分析完成'
+    : isWaitingForKeywordInput
+      ? '等待补充关键词'
+      : isAnalyzing
+        ? '正在分析中...'
+        : '分析中断';
+  const pageDescription = isCompleted
+    ? '所有模块已完成，请查看分析结果'
+    : isWaitingForKeywordInput
+      ? keywordConfirmation?.status === 'editing'
+        ? '步骤3已暂停，请补充关键词并确认后继续检索'
+        : '系统已生成关键词，30 秒内如无操作将自动进入下一步检索'
+      : isAnalyzing
+        ? '系统正在执行6个分析步骤，请耐心等待'
+        : '分析过程中出现异常';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
@@ -159,16 +270,8 @@ export default function HomePage() {
           /* ===== 进度区域 ===== */
           <div className="space-y-6">
             <div className="text-center space-y-2">
-              <h2 className="text-xl font-bold">
-                {isCompleted ? '分析完成' : isAnalyzing ? '正在分析中...' : '分析中断'}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {isCompleted
-                  ? '所有模块已完成，请查看分析结果'
-                  : isAnalyzing
-                    ? '系统正在执行6个分析步骤，请耐心等待'
-                    : '分析过程中出现异常'}
-              </p>
+              <h2 className="text-xl font-bold">{pageTitle}</h2>
+              <p className="text-sm text-muted-foreground">{pageDescription}</p>
               {sessionId && (
                 <div className="flex justify-center">
                   <Badge variant="outline" className="font-mono text-[11px]">
@@ -182,6 +285,51 @@ export default function HomePage() {
             <div className="max-w-xl mx-auto">
               <AnalysisProgress steps={steps} />
             </div>
+
+            {keywordPromptVisible && (
+              <div className="max-w-xl mx-auto rounded-lg border border-amber-200 bg-amber-50/70 p-4 space-y-4 dark:border-amber-800 dark:bg-amber-950/20">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Clock3 className="h-4 w-4 text-amber-600" />
+                      <span className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                        {keywordConfirmation?.status === 'editing' ? '等待你确认新增关键词' : '是否需要自己增加关键词？'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-amber-900/80 dark:text-amber-200/80">
+                      {keywordConfirmation?.status === 'editing'
+                        ? '系统已暂停自动继续，请在弹窗中输入要追加的一个或多个关键词，确认后再继续检索。'
+                        : '下面是系统自动生成的全部关键词。30 秒内如无任何操作，将自动进入下一步检索。'}
+                    </p>
+                  </div>
+                  {countdownSeconds !== null && (
+                    <Badge variant="outline" className="border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300">
+                      {countdownSeconds}s
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {autoKeywords.map((keyword) => (
+                    <Badge key={keyword} variant="secondary" className="bg-background/80 text-foreground">
+                      {keyword}
+                    </Badge>
+                  ))}
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900/30"
+                    onClick={handleStartKeywordEditing}
+                  >
+                    <Plus className="h-4 w-4" />
+                    {keywordConfirmation?.status === 'editing' ? '继续填写关键词' : '自己增加关键词'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* 错误提示 */}
             {error && (
@@ -239,6 +387,43 @@ export default function HomePage() {
                 </Button>
               )}
             </div>
+
+            <Dialog open={keywordDialogOpen} onOpenChange={setKeywordDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>增加检索关键词</DialogTitle>
+                  <DialogDescription>
+                    输入一个或多个关键词，支持使用逗号、中文逗号或换行分隔。确认后系统会将它们追加到自动生成关键词中继续检索。
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                  <Textarea
+                    value={keywordDraft}
+                    onChange={(event) => {
+                      setKeywordDraft(event.target.value);
+                      if (keywordDialogError) {
+                        setKeywordDialogError(null);
+                      }
+                    }}
+                    placeholder={'例如：\n自动上台阶扫地机器人\n履带式越障清扫装置'}
+                    rows={6}
+                  />
+                  {keywordDialogError && (
+                    <p className="text-sm text-destructive">{keywordDialogError}</p>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setKeywordDialogOpen(false)}>
+                    关闭
+                  </Button>
+                  <Button type="button" onClick={handleConfirmKeywords}>
+                    确认增加关键词
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </main>
