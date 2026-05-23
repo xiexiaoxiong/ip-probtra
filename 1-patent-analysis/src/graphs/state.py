@@ -54,9 +54,13 @@ class ParseError(BaseModel):
 class PatentFigure(BaseModel):
     """专利附图"""
     figure_id: str = Field(..., description="附图编号，如'图1', '图2'")
-    figure_url: str = Field(..., description="附图的对象存储URL")
+    figure_url: str = Field(..., description="附图访问URL")
     figure_description: str = Field(default="", description="附图说明文字")
     storage_key: Optional[str] = Field(default=None, description="对象存储的key")
+    file_path: Optional[str] = Field(default=None, description="附图本地文件路径")
+    mime_type: Optional[str] = Field(default=None, description="附图MIME类型")
+    file_size: Optional[int] = Field(default=None, description="附图文件大小（字节）")
+    file_sha256: Optional[str] = Field(default=None, description="附图文件SHA256")
 
 
 # ==================== 全局状态定义 ====================
@@ -253,6 +257,7 @@ class ErrorCheckOutput(BaseModel):
 class FigureExtractInput(BaseModel):
     """附图提取节点输入"""
     patent_file: File = Field(..., description="专利文档文件")
+    task_id: str = Field(..., description="任务ID，用于附图本地落盘")
     specification_sections: List[SpecificationSection] = Field(
         default=[], description="说明书章节，用于提取附图说明"
     )

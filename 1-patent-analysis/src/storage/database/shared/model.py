@@ -75,6 +75,10 @@ class PatentFigure(Base):
     figure_url: Mapped[str] = mapped_column(Text, nullable=False, comment="附图URL")
     figure_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="附图说明")
     storage_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="对象存储key")
+    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="附图本地文件路径")
+    mime_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="附图MIME类型")
+    file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="附图文件大小")
+    file_sha256: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="附图文件SHA256")
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), server_default=text('now()'), comment="创建时间"
     )

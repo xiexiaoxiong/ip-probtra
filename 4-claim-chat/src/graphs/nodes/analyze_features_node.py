@@ -8,8 +8,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from coze_coding_dev_sdk import LLMClient
 from graphs.state import AnalyzeFeaturesInput, AnalyzeFeaturesOutput
+from utils.local_llm import invoke_local_llm
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +121,6 @@ def analyze_features_node(
     temperature: float = float(llm_config.get("temperature", 0.1))
     max_tokens: int = int(llm_config.get("max_completion_tokens", 16384))
 
-    client = LLMClient(ctx=ctx)
-
     # 如果有图片，构造多模态消息
     if product_images:
         content_parts: List[Dict[str, Any]] = [{"type": "text", "text": user_prompt}]
@@ -143,7 +141,7 @@ def analyze_features_node(
         ]
 
     try:
-        response = client.invoke(
+        response = invoke_local_llm(
             messages=messages,
             model=model,
             temperature=temperature,

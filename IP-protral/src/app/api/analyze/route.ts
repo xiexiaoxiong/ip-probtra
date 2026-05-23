@@ -454,6 +454,26 @@ async function getPatentClaimsCount(patentRecordId: number): Promise<number | nu
   }
 }
 
+async function getPatentFigureUrls(patentRecordId: number): Promise<string[] | null> {
+  try {
+    const exists = await pgQuery<{ exists: string | null }>(
+      `select to_regclass('patent_figures') as exists`,
+    );
+    if (!exists.rows[0]?.exists) {
+      return null;
+    }
+    const result = await pgQuery<{ figure_url: string | null }>(
+      `select figure_url from patent_figures where record_id = $1 order by id asc`,
+      [patentRecordId],
+    );
+    return result.rows
+      .map((row) => row.figure_url)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  } catch {
+    return null;
+  }
+}
+
 async function getKeywordTexts(patentRecordId: number, limit: number = 30): Promise<string[] | null> {
   try {
     const exists = await pgQuery<{ exists: string | null }>(
@@ -662,6 +682,17 @@ async function executePipeline(
     );
 
     const patentFromModule1 = mapPatentFromModule1(module1Result);
+    if (
+      patentFromModule1
+      && (!patentFromModule1.drawings || patentFromModule1.drawings.length === 0)
+      && module1Result.dbRecordId
+      && module1Result.dbRecordId > 0
+    ) {
+      const figureUrls = await getPatentFigureUrls(module1Result.dbRecordId);
+      if (figureUrls && figureUrls.length > 0) {
+        patentFromModule1.drawings = figureUrls;
+      }
+    }
     let module1ClaimCount = module1Result.finalOutput?.claims?.length ?? 0;
     if (module1ClaimCount === 0 && module1Result.dbRecordId && module1Result.dbRecordId > 0) {
       const dbCount = await getPatentClaimsCount(module1Result.dbRecordId);

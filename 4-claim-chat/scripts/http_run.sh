@@ -67,32 +67,12 @@ normalize_env_aliases() {
     export DATABASE_URL="$PGDATABASE_URL"
   fi
 
-  if [ -z "${COZE_WORKLOAD_IDENTITY_API_KEY:-}" ]; then
-    if [ -n "${LOCAL_LLM_API_KEY:-}" ]; then
-      export COZE_WORKLOAD_IDENTITY_API_KEY="$LOCAL_LLM_API_KEY"
-    elif [ -n "${OPENAI_API_KEY:-}" ]; then
-      export COZE_WORKLOAD_IDENTITY_API_KEY="$OPENAI_API_KEY"
-    elif [ -n "${LOCAL_LLM_FALLBACK_API_KEY:-}" ]; then
-      export COZE_WORKLOAD_IDENTITY_API_KEY="$LOCAL_LLM_FALLBACK_API_KEY"
-    fi
+  if [ -z "${LOCAL_LLM_API_KEY:-}" ] && [ -n "${OPENAI_API_KEY:-}" ]; then
+    export LOCAL_LLM_API_KEY="$OPENAI_API_KEY"
   fi
 
-  if [ -z "${COZE_INTEGRATION_MODEL_BASE_URL:-}" ]; then
-    if [ -n "${LOCAL_LLM_BASE_URL:-}" ]; then
-      export COZE_INTEGRATION_MODEL_BASE_URL="$LOCAL_LLM_BASE_URL"
-    elif [ -n "${OPENAI_BASE_URL:-}" ]; then
-      export COZE_INTEGRATION_MODEL_BASE_URL="$OPENAI_BASE_URL"
-    elif [ -n "${LOCAL_LLM_FALLBACK_BASE_URL:-}" ]; then
-      export COZE_INTEGRATION_MODEL_BASE_URL="$LOCAL_LLM_FALLBACK_BASE_URL"
-    fi
-  fi
-
-  if [ -z "${COZE_INTEGRATION_BASE_URL:-}" ]; then
-    if [ -n "${LOCAL_SEARCH_BASE_URL:-}" ]; then
-      export COZE_INTEGRATION_BASE_URL="$LOCAL_SEARCH_BASE_URL"
-    elif [ -n "${COZE_INTEGRATION_MODEL_BASE_URL:-}" ]; then
-      export COZE_INTEGRATION_BASE_URL="$COZE_INTEGRATION_MODEL_BASE_URL"
-    fi
+  if [ -z "${LOCAL_LLM_BASE_URL:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
+    export LOCAL_LLM_BASE_URL="$OPENAI_BASE_URL"
   fi
 }
 
@@ -115,11 +95,11 @@ validate_required_env() {
       fi
       ;;
     *)
-      if [ -z "${COZE_WORKLOAD_IDENTITY_API_KEY:-}" ]; then
-        missing+=("LOCAL_LLM_API_KEY/OPENAI_API_KEY/COZE_WORKLOAD_IDENTITY_API_KEY")
+      if [ -z "${LOCAL_LLM_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+        missing+=("LOCAL_LLM_API_KEY/OPENAI_API_KEY")
       fi
-      if [ -z "${COZE_INTEGRATION_MODEL_BASE_URL:-}" ]; then
-        missing+=("LOCAL_LLM_BASE_URL/OPENAI_BASE_URL/COZE_INTEGRATION_MODEL_BASE_URL")
+      if [ -z "${LOCAL_LLM_BASE_URL:-}" ] && [ -z "${OPENAI_BASE_URL:-}" ]; then
+        missing+=("LOCAL_LLM_BASE_URL/OPENAI_BASE_URL")
       fi
       ;;
   esac

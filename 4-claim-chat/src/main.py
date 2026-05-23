@@ -55,19 +55,6 @@ def bootstrap_local_env() -> None:
     if not os.getenv("PGDATABASE_URL") and os.getenv("DATABASE_URL"):
         os.environ["PGDATABASE_URL"] = os.getenv("DATABASE_URL", "")
 
-    local_llm_api_key = os.getenv("LOCAL_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-    local_llm_base_url = os.getenv("LOCAL_LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-    local_search_base_url = os.getenv("LOCAL_SEARCH_BASE_URL")
-
-    if local_llm_api_key and not os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY"):
-        os.environ["COZE_WORKLOAD_IDENTITY_API_KEY"] = local_llm_api_key
-    if local_llm_base_url and not os.getenv("COZE_INTEGRATION_MODEL_BASE_URL"):
-        os.environ["COZE_INTEGRATION_MODEL_BASE_URL"] = local_llm_base_url
-    if local_search_base_url and not os.getenv("COZE_INTEGRATION_BASE_URL"):
-        os.environ["COZE_INTEGRATION_BASE_URL"] = local_search_base_url
-    elif local_llm_base_url and not os.getenv("COZE_INTEGRATION_BASE_URL"):
-        os.environ["COZE_INTEGRATION_BASE_URL"] = local_llm_base_url
-
 
 def resolve_local_model_alias(model_name: Optional[str]) -> str:
     import os
@@ -532,40 +519,7 @@ def invoke_local_llm_via_http(
 
 
 def install_local_llm_model_alias_patch() -> None:
-    try:
-        from coze_coding_dev_sdk import LLMClient
-    except Exception as exc:
-        logger.warning("Skip LLM model alias patch: %s", exc)
-        return
-
-    if getattr(LLMClient.invoke, "__local_model_alias_patched__", False):
-        return
-
-    original_invoke = LLMClient.invoke
-
-    def patched_invoke(self, *args, **kwargs):
-        requested_model = kwargs.get("model")
-        resolved_model = resolve_local_model_alias(requested_model)
-        if resolved_model != requested_model:
-            logger.info("Rewrite LLM model from %s to %s", requested_model, resolved_model)
-            kwargs["model"] = resolved_model
-        elif requested_model is None:
-            kwargs["model"] = resolved_model
-        if should_use_local_http_invoke():
-            logger.info("Use local HTTP LLM invoke for model %s", kwargs["model"])
-            return invoke_local_llm_via_http(
-                messages=kwargs.get("messages") or (args[0] if args else []),
-                model=kwargs["model"],
-                temperature=kwargs.get("temperature"),
-                frequency_penalty=kwargs.get("frequency_penalty"),
-                top_p=kwargs.get("top_p"),
-                max_tokens=kwargs.get("max_tokens"),
-                max_completion_tokens=kwargs.get("max_completion_tokens"),
-            )
-        return original_invoke(self, *args, **kwargs)
-
-    patched_invoke.__local_model_alias_patched__ = True
-    LLMClient.invoke = patched_invoke
+    logger.info("Module4 nodes now invoke local LLM directly; skip Coze LLMClient patch")
 
 
 bootstrap_local_env()

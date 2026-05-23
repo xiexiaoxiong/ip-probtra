@@ -10,7 +10,7 @@ import cozeloop
 import uvicorn
 import time
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
@@ -21,6 +21,7 @@ from coze_coding_utils.log.write_log import setup_logging, request_context
 from coze_coding_utils.log.config import LOG_LEVEL
 from coze_coding_utils.error.classifier import ErrorClassifier, classify_error
 from coze_coding_utils.helper.stream_runner import AgentStreamRunner, WorkflowStreamRunner,agent_stream_handler,workflow_stream_handler, RunOpt
+from utils.runtime_paths import get_task_figures_dir
 
 setup_logging(
     log_file=LOG_FILE,
@@ -948,6 +949,24 @@ async def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+def _is_safe_segment(value: str) -> bool:
+    if not value or value in {".", ".."}:
+        return False
+    return "/" not in value and "\\" not in value and "\0" not in value
+
+
+@app.get("/figures/{task_id}/{file_name}")
+async def get_figure_file(task_id: str, file_name: str):
+    if not _is_safe_segment(task_id) or not _is_safe_segment(file_name):
+        raise HTTPException(status_code=400, detail="非法文件路径")
+
+    file_path = get_task_figures_dir(task_id) / file_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="图片不存在")
+
+    return FileResponse(file_path)
 
 
 @app.get(path="/graph_parameter")

@@ -26,24 +26,10 @@ except Exception:
 
 def get_db_url() -> str:
     url = os.getenv("PGDATABASE_URL") or ""
-    if url is not None and url != "":
+    if url:
         return url
-    from coze_workload_identity import Client
-    try:
-        client = Client()
-        env_vars = client.get_project_env_vars()
-        client.close()
-        for env_var in env_vars:
-            if env_var.key == "PGDATABASE_URL":
-                url = env_var.value.replace("'", "'\\''")
-                return url
-    except Exception as e:
-        logger.error(f"Error loading PGDATABASE_URL: {e}")
-        raise e
-    finally:
-        if url is None or url == "":
-            logger.error("PGDATABASE_URL is not set")
-    return url
+    logger.error("PGDATABASE_URL is not set")
+    raise ValueError("PGDATABASE_URL is not set")
 
 _engine = None
 _SessionLocal = None
