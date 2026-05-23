@@ -391,6 +391,8 @@ export async function runModule2(
 
 export interface Module3Result {
   searchRunId?: number;
+  totalProductsCount?: number;
+  isComplete?: boolean;
   exceptionType?: string;
   exceptionMessage?: string;
   runId: string;
@@ -417,6 +419,8 @@ export async function runModule3(
 
   return {
     searchRunId: typeof data.search_run_id === 'number' ? data.search_run_id : undefined,
+    totalProductsCount: typeof data.total_products_count === 'number' ? data.total_products_count : undefined,
+    isComplete: typeof data.is_complete === 'boolean' ? data.is_complete : undefined,
     exceptionType: typeof data.exception_type === 'string' ? data.exception_type : undefined,
     exceptionMessage:
       typeof data.exception_message === 'string'

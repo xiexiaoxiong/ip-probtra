@@ -856,6 +856,8 @@ async function executePipeline(
     let module3Result: Module3Result | null = null;
     let module3Error: string | undefined;
     let module3RecoveredFromTransport = false;
+    let module3ProductsCount = 0;
+    let module3IsComplete = false;
     await updateStepStatus(sessionId, 4, 'running');
     console.log(`[Pipeline ${sessionId}] 步骤4: 商品信息检索...`);
     const step4Start = Date.now();
@@ -870,6 +872,8 @@ async function executePipeline(
       if (module3Result.exceptionMessage) {
         module3Error = module3Result.exceptionMessage;
       }
+      module3ProductsCount = module3Result.totalProductsCount || 0;
+      module3IsComplete = module3Result.isComplete ?? false;
     } catch (e) {
       module3Error = e instanceof Error ? e.message : String(e);
       console.warn(`[Pipeline ${sessionId}] 模块3异常: ${module3Error}`);
@@ -880,8 +884,12 @@ async function executePipeline(
         if (snapshot) {
           module3RecoveredFromTransport = true;
           module3Error = undefined;
+          module3ProductsCount = snapshot.total_products_count;
+          module3IsComplete = snapshot.is_complete;
           module3Result = {
             searchRunId: snapshot.id,
+            totalProductsCount: snapshot.total_products_count,
+            isComplete: snapshot.is_complete,
             exceptionMessage: snapshot.error_message || undefined,
             runId: '',
           };
@@ -892,20 +900,49 @@ async function executePipeline(
       }
     }
 
+    if (module1Result.dbRecordId && module3ProductsCount === 0) {
+      const latestSearchSnapshot = await getLatestSearchRunSnapshot(sessionId, module1Result.dbRecordId);
+      if (latestSearchSnapshot) {
+        module3ProductsCount = latestSearchSnapshot.total_products_count;
+        module3IsComplete = latestSearchSnapshot.is_complete;
+        if (!module3Result) {
+          module3Result = {
+            searchRunId: latestSearchSnapshot.id,
+            totalProductsCount: latestSearchSnapshot.total_products_count,
+            isComplete: latestSearchSnapshot.is_complete,
+            exceptionMessage: latestSearchSnapshot.error_message || undefined,
+            runId: '',
+          };
+        }
+        if (!module3Error && latestSearchSnapshot.error_message) {
+          module3Error = latestSearchSnapshot.error_message;
+        }
+      }
+    }
+
     stepTimings['step4'] = Date.now() - step4Start;
-    await updateStepStatus(
-      sessionId,
-      4,
-      module3Error ? 'error' : 'completed',
-      module3Error || (module3RecoveredFromTransport ? '模块3 HTTP 响应中断，但后台任务已完成并写入数据库' : undefined),
-    );
+    const shouldContinueToStep5 = module3ProductsCount > 0;
+    const step4TerminalMessage = shouldContinueToStep5
+      ? (module3RecoveredFromTransport && !module3IsComplete
+          ? '模块3 HTTP 响应中断，但后台已写入部分商品数据，继续步骤5'
+          : undefined)
+      : (module3Error || '步骤4未检索到任何商品，已停止后续步骤');
+    await updateStepStatus(sessionId, 4, shouldContinueToStep5 ? 'completed' : 'error', step4TerminalMessage);
     await updateResults(sessionId, {
       products: [],
       searchRunId: module3Result?.searchRunId,
       module3RunId: module3Result?.runId,
       module3Exception: module3Error,
     });
-    console.log(`[Pipeline ${sessionId}] 步骤4${module3RecoveredFromTransport ? '(数据库恢复,继续)' : module3Error ? '异常' : '完成'} (耗时 ${stepTimings['step4']}ms)`);
+    console.log(
+      `[Pipeline ${sessionId}] 步骤4${shouldContinueToStep5 ? '(有商品,继续)' : '(无商品,终止)'} `
+      + `(products=${module3ProductsCount}, complete=${module3IsComplete}, 耗时 ${stepTimings['step4']}ms)`,
+    );
+
+    if (!shouldContinueToStep5) {
+      await updateSessionStatus(sessionId, 'error');
+      return;
+    }
 
     // ========== 模块4（步骤5）：技术特征比对 ==========
     let module4Result: Module4Result | null = null;

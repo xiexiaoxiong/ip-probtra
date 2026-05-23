@@ -21,6 +21,7 @@ from graphs.state import (
     Claim,
     ParseError
 )
+from utils.runtime_paths import resolve_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,7 @@ def claims_parse_node(
     ctx = runtime.context
     
     # 读取LLM配置
-    cfg_file = os.path.join(
-        os.getenv("COZE_WORKSPACE_PATH", ""),
-        config["metadata"]["llm_cfg"]
-    )
+    cfg_file = resolve_project_path(config["metadata"]["llm_cfg"])
     with open(cfg_file, "r", encoding="utf-8") as f:
         llm_config_dict = json.load(f)
     

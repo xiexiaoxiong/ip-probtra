@@ -28,6 +28,19 @@
   - 其次 `FEISHU_APP_ID` + `FEISHU_APP_SECRET`
   - 最后才尝试旧的 Coze workload identity
 
+## 推荐运维方式
+
+- 只使用根目录的 `ecosystem.config.cjs` 管理全部服务
+- 只维护一份环境文件：`IP-protral/.env.local`
+- 不要手工分别执行各模块的 `scripts/http_run.sh`
+- 不要让本机和服务器使用不同启动命令
+
+原因：
+
+- `ecosystem.config.cjs` 会把 `IP-protral/.env.local` 中的数据库、LLM、搜索、对象存储变量统一注入 6 个工作流和前端服务
+- 单独手工启动模块容易出现端口被旧进程占用、环境变量缺失、不同机器命令不一致的问题
+- 现在各模块的 `scripts/http_run.sh` 已增加统一环境加载、关键变量校验、手工重复占端口拦截；即便误操作，也会尽早失败而不是运行到中途报错
+
 ## 启动步骤
 
 1. 至少补齐这些变量：
@@ -55,7 +68,7 @@ COZE_BUCKET_REGION=cn-beijing
 - `COZE_BUCKET_*` 仍然需要，因为工作流内部会把附图和商品图片上传到对象存储
 - 现在飞书不再是主链路依赖；只要你不再使用飞书节点输出，`FEISHU_*` 可以不配
 
-3. 安装依赖：
+2. 安装依赖：
 
 ```bash
 cd /Users/adamrainbow/server/ip-probtra/IP-protral
@@ -69,20 +82,55 @@ cd /Users/adamrainbow/server/ip-probtra/3-search && uv sync
 cd /Users/adamrainbow/server/ip-probtra/4-claim-chat && uv sync
 ```
 
-4. 构建前端：
+3. 构建前端：
 
 ```bash
 cd /Users/adamrainbow/server/ip-probtra/IP-protral
 pnpm build
 ```
 
-5. 用 PM2 启动整套服务：
+4. 用 PM2 启动整套服务：
 
 ```bash
 cd /Users/adamrainbow/server/ip-probtra
 pm2 start ecosystem.config.cjs
 pm2 save
 ```
+
+5. 后续更新和重启只用下面这组固定命令：
+
+```bash
+cd /Users/adamrainbow/server/ip-probtra
+git pull
+pnpm --dir IP-protral install
+pnpm --dir IP-protral build
+pm2 reload ecosystem.config.cjs --update-env
+```
+
+6. 日常查看状态：
+
+```bash
+cd /Users/adamrainbow/server/ip-probtra
+pm2 ls
+pm2 logs patent-web
+pm2 logs patent-4-claim-chat
+```
+
+## 禁止事项
+
+- 不要直接运行 `1-patent-analysis/scripts/http_run.sh`
+- 不要直接运行 `2-keyword*/scripts/http_run.sh`
+- 不要直接运行 `3-search/scripts/http_run.sh`
+- 不要直接运行 `4-claim-chat/scripts/http_run.sh`
+- 不要手工先起一个模块，再用 PM2 起另一套同端口服务
+
+如果确实需要单独调试某个模块：
+
+```bash
+SKIP_ENV_VALIDATION=1 bash scripts/http_run.sh -p 5116
+```
+
+调试端口不要复用正式端口 `5101-5106`。
 
 ## 域名 `ip-probtra.top`
 

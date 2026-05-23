@@ -1,10 +1,13 @@
 #!/bin/bash
 set -eo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK_DIR="${COZE_WORKSPACE_PATH:-$(dirname "$SCRIPT_DIR")}"
+
 # 初始化目录
 if [ "$COZE_PROJECT_ENV" = "DEV" ]; then
-  if [ ! -d "${COZE_WORKSPACE_PATH}/assets" ]; then
-    mkdir -p "${COZE_WORKSPACE_PATH}/assets"
+  if [ ! -d "${WORK_DIR}/assets" ]; then
+    mkdir -p "${WORK_DIR}/assets"
   fi
 fi
 

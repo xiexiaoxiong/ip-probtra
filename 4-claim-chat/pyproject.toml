@@ -1,6 +1,6 @@
 [project]
 name = "vibe-coding"
-version = "0.1.0"
+version = "0.1.1"
 description = "Coze Vibe Coding project"
 requires-python = ">=3.12"
 dependencies = [

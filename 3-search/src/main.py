@@ -37,6 +37,21 @@ logger = logging.getLogger(__name__)
 
 def bootstrap_local_env() -> None:
     import os
+
+    def read_local_override(env_path: Path, key: str) -> Optional[str]:
+        try:
+            for raw_line in env_path.read_text().splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                current_key, value = line.split("=", 1)
+                if current_key.strip() != key:
+                    continue
+                return value.strip().strip("'").strip('"')
+        except Exception:
+            return None
+        return None
+
     try:
         from dotenv import load_dotenv
     except Exception:
@@ -51,6 +66,11 @@ def bootstrap_local_env() -> None:
         for env_path in env_candidates:
             if env_path.exists():
                 load_dotenv(env_path, override=False)
+                # 本地显式配置的搜索工作流凭据应优先于外层继承环境。
+                for key in ("COZE_SEARCH_API_URL", "COZE_SEARCH_API_TOKEN"):
+                    override_value = read_local_override(env_path, key)
+                    if override_value:
+                        os.environ[key] = override_value
 
     if not os.getenv("PGDATABASE_URL") and os.getenv("DATABASE_URL"):
         os.environ["PGDATABASE_URL"] = os.getenv("DATABASE_URL", "")

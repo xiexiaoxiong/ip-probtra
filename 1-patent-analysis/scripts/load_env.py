@@ -7,10 +7,11 @@
 
 import os
 import sys
+from pathlib import Path
 
 # 添加 app 目录到 Python 路径
-workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-app_dir = os.path.join(workspace_path, 'src')
+project_root = Path(os.getenv("COZE_WORKSPACE_PATH") or Path(__file__).resolve().parents[1]).resolve()
+app_dir = str(project_root / "src")
 if app_dir not in sys.path:
     sys.path.insert(0, app_dir)
 
