@@ -17,6 +17,33 @@ from graphs.state import KeywordCombinationInput, KeywordCombinationOutput
 
 
 LEGALISTIC_MARKERS = ["用于", "具备", "关于", "相关", "本体", "装置"]
+ENTERPRISE_MARKERS = [
+    "公司", "集团", "有限", "股份", "企业", "实业", "科技", "技术", "工业", "电子",
+    "株式会社", "株式会社", "会社", "LLC", "INC", "CORP", "CORPORATION", "LTD", "LIMITED", "GMBH",
+]
+ENTERPRISE_SUFFIX_PATTERNS = [
+    r"(股份)?有限公司$",
+    r"有限责任公司$",
+    r"股份公司$",
+    r"集团有限公司$",
+    r"集团公司$",
+    r"科技有限公司$",
+    r"技术有限公司$",
+    r"电子有限公司$",
+    r"实业有限公司$",
+    r"公司$",
+    r"集团$",
+    r"企业$",
+    r"株式会社$",
+    r"会社$",
+    r",?\s*INC\.?$",
+    r",?\s*LLC$",
+    r",?\s*LTD\.?$",
+    r",?\s*LIMITED$",
+    r",?\s*CORP\.?$",
+    r",?\s*CORPORATION$",
+    r",?\s*GMBH$",
+]
 
 
 def _normalize_keyword_text(text: str) -> str:
@@ -69,6 +96,74 @@ def _parse_combined_keywords(result_text: str) -> list[dict]:
             }
         )
     return combined_keywords
+
+
+def _is_enterprise_holder(patent_holder: str) -> bool:
+    holder = str(patent_holder or "").strip()
+    if not holder:
+        return False
+    upper_holder = holder.upper()
+    return any(marker in holder or marker in upper_holder for marker in ENTERPRISE_MARKERS)
+
+
+def _extract_holder_key_name(patent_holder: str) -> str:
+    holder = str(patent_holder or "").strip()
+    if not holder:
+        return ""
+
+    cleaned = holder.replace("（", "(").replace("）", ")")
+    cleaned = re.sub(r"\(.*?\)", "", cleaned).strip()
+    for pattern in ENTERPRISE_SUFFIX_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip()
+
+    cleaned = cleaned.strip(" ,，.。·")
+    if not cleaned:
+        return ""
+
+    if re.search(r"[A-Za-z]", cleaned):
+        tokens = re.split(r"[\s,，]+", cleaned)
+        cleaned = tokens[0].strip() if tokens and tokens[0].strip() else cleaned
+
+    cleaned = cleaned.strip(" ,，.。·")
+    return cleaned[:12]
+
+
+def _select_holder_keyword_object(
+    primary_object: str,
+    search_objects: list[str],
+    product_objects: list[str],
+) -> str:
+    candidates = [obj for obj in list(search_objects) + list(product_objects) + [primary_object] if str(obj).strip()]
+    for obj in candidates:
+        text = str(obj).strip()
+        if not text:
+            continue
+        if any(marker in text for marker in LEGALISTIC_MARKERS):
+            continue
+        return text
+    return str(primary_object or "").strip()
+
+
+def _build_holder_based_keyword(
+    patent_holder: str,
+    primary_object: str,
+    search_objects: list[str],
+    product_objects: list[str],
+) -> dict | None:
+    if not _is_enterprise_holder(patent_holder):
+        return None
+
+    holder_key_name = _extract_holder_key_name(patent_holder)
+    object_text = _select_holder_keyword_object(primary_object, search_objects, product_objects)
+    if not holder_key_name or not object_text:
+        return None
+
+    return {
+        "keyword_text": f"{holder_key_name}同款{object_text}",
+        "keyword_type": "holder_based",
+        "combination_pattern": "品牌同款型-补充生成",
+        "confidence": 0.88,
+    }
 
 
 def _has_repeated_fragment(keyword_text: str) -> bool:
@@ -164,6 +259,14 @@ def keyword_combination_node(
 
     result_text = _extract_text_content(response.content)
     parsed_keywords = _parse_combined_keywords(result_text)
+    holder_based_keyword = _build_holder_based_keyword(
+        state.patent_holder,
+        state.primary_product_object,
+        state.search_product_objects,
+        state.product_object,
+    )
+    if holder_based_keyword:
+        parsed_keywords.insert(0, holder_based_keyword)
     combined_keywords = _apply_guardrails(parsed_keywords)
 
     return KeywordCombinationOutput(combined_keywords=combined_keywords)
