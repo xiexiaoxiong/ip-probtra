@@ -50,6 +50,8 @@ def scenario_audience_inference_node(
         "invention_point": state.invention_point or "未识别",
         "invention_content": state.invention_content or "无",
         "claim_text": state.claim_text or "无",
+        "primary_product_object": state.primary_product_object or "未识别",
+        "search_product_objects": "、".join(state.search_product_objects) if state.search_product_objects else "无",
         "product_object": "、".join(state.product_object) if state.product_object else "未识别",
         "core_terms": "、".join(core_term_texts) if core_term_texts else "无"
     })

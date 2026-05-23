@@ -3,12 +3,55 @@
 职责：将关键词结果写入 Postgres
 """
 from datetime import datetime
+import re
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 
 from graphs.state import KeywordWriterInput, KeywordWriterOutput
+
+
+def _normalize_keyword_text(text: str) -> str:
+    normalized = str(text or "").strip().lower()
+    normalized = normalized.replace("＋", "+").replace("—", "-").replace("–", "-")
+    normalized = re.sub(r"[()（）\[\]【】]", "", normalized)
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized
+
+
+def _dedupe_keywords(keywords: list[dict]) -> list[dict]:
+    deduped: dict[str, dict] = {}
+    order: list[str] = []
+
+    for keyword in keywords:
+        keyword_text = str(keyword.get("keyword_text", "")).strip()
+        if not keyword_text:
+            continue
+
+        normalized = _normalize_keyword_text(keyword_text)
+        if not normalized:
+            continue
+
+        if normalized not in deduped:
+            deduped[normalized] = {
+                **keyword,
+                "keyword_text": keyword_text,
+            }
+            order.append(normalized)
+            continue
+
+        existing = deduped[normalized]
+        existing_conf = float(existing.get("confidence_score") or 0)
+        new_conf = float(keyword.get("confidence_score") or 0)
+
+        if new_conf > existing_conf:
+            deduped[normalized] = {
+                **keyword,
+                "keyword_text": keyword_text,
+            }
+
+    return [deduped[key] for key in order]
 
 
 def keyword_writer_node(
@@ -45,6 +88,15 @@ def keyword_writer_node(
             valid_keywords = [
                 keyword for keyword in state.all_keywords if str(keyword.get("keyword_text", "")).strip()
             ]
+            valid_keywords = _dedupe_keywords(valid_keywords)
+            if not valid_keywords:
+                return KeywordWriterOutput(
+                    patent_record_id=state.patent_record_id,
+                    keyword_run_id=0,
+                    keywords_count=0,
+                    exception_type="NO_VALID_KEYWORDS",
+                    exception_message="模型未产出通过护栏校验的关键词",
+                )
             keyword_run = KeywordRun(
                 patent_record_id=state.patent_record_id,
                 analysis_session_id=state.analysis_session_id or None,

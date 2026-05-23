@@ -111,10 +111,20 @@ def feishu_data_loader_node(
         ]
 
         integrated_patent_records: List[dict] = []
+        primary_claim = None
         for claim in claims:
-            if claim.claim_type != "INDEPENDENT":
-                continue
+            if str(claim.claim_id).strip() == "1":
+                primary_claim = claim
+                break
+        if primary_claim is None:
+            for claim in claims:
+                if claim.claim_type == "INDEPENDENT":
+                    primary_claim = claim
+                    break
+        if primary_claim is None and claims:
+            primary_claim = claims[0]
 
+        if primary_claim is not None:
             integrated_patent_records.append(
                 {
                     "data_record": {
@@ -123,11 +133,11 @@ def feishu_data_loader_node(
                     },
                     "claim_records": [
                         {
-                            "record_id": str(claim.id),
+                            "record_id": str(primary_claim.id),
                             "fields": {
-                                "claim_id": claim.claim_id,
-                                "claim_type": claim.claim_type,
-                                "claim_text": claim.claim_text,
+                                "claim_id": primary_claim.claim_id,
+                                "claim_type": primary_claim.claim_type,
+                                "claim_text": primary_claim.claim_text,
                             },
                         }
                     ],
@@ -135,24 +145,14 @@ def feishu_data_loader_node(
                 }
             )
 
-        if not integrated_patent_records and claims:
-            first_claim = claims[0]
+        if not integrated_patent_records:
             integrated_patent_records.append(
                 {
                     "data_record": {
                         "record_id": str(patent_record.id),
                         "fields": data_fields,
                     },
-                    "claim_records": [
-                        {
-                            "record_id": str(first_claim.id),
-                            "fields": {
-                                "claim_id": first_claim.claim_id,
-                                "claim_type": first_claim.claim_type,
-                                "claim_text": first_claim.claim_text,
-                            },
-                        }
-                    ],
+                    "claim_records": [],
                     "figure_records": figure_records,
                 }
             )
@@ -181,7 +181,11 @@ def feishu_data_loader_node(
                 "table_id": "claims",
                 "table_name": "patent_claims",
                 "fields": [{"field_name": key} for key in ["claim_id", "claim_type", "claim_text"]],
-                "sample_records": [record["claim_records"][0] for record in integrated_patent_records[:5]],
+                "sample_records": [
+                    record["claim_records"][0]
+                    for record in integrated_patent_records[:5]
+                    if record.get("claim_records")
+                ],
             },
             "figures": {
                 "table_id": "figures",

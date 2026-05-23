@@ -49,7 +49,9 @@ class GlobalState(BaseModel):
     application_date: str = Field(default="", description="申请日期或优先权日期")
     
     # 处理过程数据
-    product_object: List[str] = Field(default=[], description="产品客体列表（具体产品名称）")
+    primary_product_object: str = Field(default="", description="主客体，优先锚定权利要求1的主对象")
+    search_product_objects: List[str] = Field(default=[], description="检索落地客体列表，仅用于补充检索，不替代主客体")
+    product_object: List[str] = Field(default=[], description="兼容旧流程的产品客体列表，首项优先为主客体")
     invention_point: str = Field(default="", description="发明点描述")
     invention_point_source: str = Field(default="", description="发明点来源位置")
     core_terms: List[dict] = Field(default=[], description="精炼后的核心术语列表（已包含不同说法的同义表述）")
@@ -218,25 +220,32 @@ class RecordProcessLoopOutput(BaseModel):
 
 class InputValidationInput(BaseModel):
     """输入验证节点的输入"""
-    claim_id: str = Field(..., description="权利要求编号")
-    claim_text: str = Field(..., description="权利要求原文")
+    claim_id: str = Field(default="", description="权利要求编号")
+    claim_text: str = Field(default="", description="权利要求原文")
+    technical_field: str = Field(default="", description="技术领域")
+    invention_content: str = Field(default="", description="发明或实用新型内容")
+    background_tech: str = Field(default="", description="背景技术")
 
 
 class InputValidationOutput(BaseModel):
     """输入验证节点的输出"""
     is_valid: bool = Field(..., description="输入是否有效")
+    use_fallback_context: bool = Field(default=False, description="是否启用无权利要求降级路径")
     exception_type: str = Field(default="", description="异常类型")
     exception_message: str = Field(default="", description="异常消息")
 
 
 class ProductObjectExtractionInput(BaseModel):
     """产品客体提取节点的输入"""
+    claim_text: str = Field(default="", description="权利要求原文")
     technical_field: str = Field(default="", description="技术领域")
     invention_content: str = Field(default="", description="发明或实用新型内容（当技术领域过于宽泛时用于进一步明确客体）")
 
 
 class ProductObjectExtractionOutput(BaseModel):
     """产品客体提取节点的输出"""
+    primary_product_object: str = Field(default="", description="主客体")
+    search_product_objects: List[str] = Field(default=[], description="检索落地客体列表")
     product_object: List[str] = Field(default=[], description="提取的产品客体列表（可能有多个客体，每个客体为具体产品名称）")
 
 
@@ -272,6 +281,8 @@ class InventionPointRefinementInput(BaseModel):
     invention_content: str = Field(default="", description="发明或实用新型内容")
     claim_text: str = Field(default="", description="权利要求原文")
     background_tech: str = Field(default="", description="背景技术")
+    primary_product_object: str = Field(default="", description="主客体")
+    search_product_objects: List[str] = Field(default=[], description="检索落地客体列表")
 
 
 class InventionPointRefinementOutput(BaseModel):
@@ -297,6 +308,8 @@ class ScenarioAudienceInferenceInput(BaseModel):
     invention_point: str = Field(default="", description="发明点描述")
     invention_content: str = Field(default="", description="发明或实用新型内容")
     claim_text: str = Field(default="", description="权利要求原文")
+    primary_product_object: str = Field(default="", description="主客体")
+    search_product_objects: List[str] = Field(default=[], description="检索落地客体列表")
     product_object: List[str] = Field(default=[], description="产品客体列表")
     filtered_core_terms: List[dict] = Field(default=[], description="筛选后的核心术语列表")
 
@@ -310,6 +323,8 @@ class ScenarioAudienceInferenceOutput(BaseModel):
 class KeywordCombinationInput(BaseModel):
     """关键词组合节点的输入"""
     filtered_core_terms: List[dict] = Field(default=[], description="筛选后的核心术语列表")
+    primary_product_object: str = Field(default="", description="主客体")
+    search_product_objects: List[str] = Field(default=[], description="检索落地客体列表")
     product_object: List[str] = Field(default=[], description="产品客体列表")
     patent_holder: str = Field(default="", description="专利权人")
     invention_point: str = Field(default="", description="发明点描述")

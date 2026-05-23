@@ -1,23 +1,117 @@
 """
 关键词组合节点
-职责：将筛选后的关键词与场景词、人群词组合成最终检索关键词
-生成五种类型：
-1. 品牌同款型：专利权人 + 同款 + 客体
-2. 特征组合型：核心发明点特征词 + 客体
-3. 场景型：场景词 + 客体
-4. 人群型：人群词 + 客体
-5. 功能型：功能特点词 + 客体
+职责：以大模型为主生成最终检索关键词，代码仅做轻量护栏校验
 """
-import os
 import json
+import os
 import re
+
 from jinja2 import Template
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from coze_coding_utils.runtime_ctx.context import Context
+
 from coze_coding_dev_sdk import LLMClient
-from langchain_core.messages import SystemMessage, HumanMessage
+from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import KeywordCombinationInput, KeywordCombinationOutput
+
+
+LEGALISTIC_MARKERS = ["用于", "具备", "关于", "相关", "本体", "装置"]
+
+
+def _normalize_keyword_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "").strip().lower())
+
+
+def _extract_text_content(content: object) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(item.get("text", ""))
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return " ".join(text_parts).strip()
+    return str(content).strip()
+
+
+def _parse_combined_keywords(result_text: str) -> list[dict]:
+    combined_keywords: list[dict] = []
+    try:
+        json_match = re.search(r"\[[\s\S]*\]", result_text)
+        if json_match:
+            result_list = json.loads(json_match.group(0))
+            if isinstance(result_list, list):
+                for item in result_list:
+                    if isinstance(item, dict) and item.get("keyword_text"):
+                        combined_keywords.append(
+                            {
+                                "keyword_text": item.get("keyword_text", ""),
+                                "keyword_type": item.get("keyword_type", "unknown"),
+                                "combination_pattern": item.get("combination_pattern", ""),
+                                "confidence": item.get("confidence", 0.8),
+                            }
+                        )
+                return combined_keywords
+    except json.JSONDecodeError:
+        pass
+
+    lines = [line.strip() for line in result_text.split("\n") if line.strip()]
+    for line in lines:
+        combined_keywords.append(
+            {
+                "keyword_text": line,
+                "keyword_type": "unknown",
+                "combination_pattern": "text_extraction",
+                "confidence": 0.6,
+            }
+        )
+    return combined_keywords
+
+
+def _has_repeated_fragment(keyword_text: str) -> bool:
+    normalized = _normalize_keyword_text(keyword_text)
+    if not normalized:
+        return False
+    return bool(re.search(r"(.{2,8})\1", normalized))
+
+
+def _violates_quality_guardrail(keyword_text: str) -> bool:
+    cleaned = str(keyword_text or "").strip()
+    normalized = _normalize_keyword_text(cleaned)
+    if not normalized:
+        return True
+    if len(normalized) < 3 or len(normalized) > 18:
+        return True
+    if any(sep in cleaned for sep in ["、", "，", ",", "/"]):
+        return True
+    if any(marker in cleaned for marker in LEGALISTIC_MARKERS) and len(normalized) > 10:
+        return True
+    if _has_repeated_fragment(cleaned):
+        return True
+    return False
+
+
+def _apply_guardrails(
+    combined_keywords: list[dict],
+) -> list[dict]:
+    processed: list[dict] = []
+    seen: set[str] = set()
+
+    for item in combined_keywords:
+        keyword_text = str(item.get("keyword_text", "")).strip()
+        if _violates_quality_guardrail(keyword_text):
+            continue
+
+        normalized = _normalize_keyword_text(keyword_text)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        processed.append({**item, "keyword_text": keyword_text})
+
+    return processed
 
 
 def keyword_combination_node(
@@ -27,16 +121,14 @@ def keyword_combination_node(
 ) -> KeywordCombinationOutput:
     """
     title: 关键词组合
-    desc: 将核心术语、场景词、人群词与客体组合成五种类型的电商搜索关键词
+    desc: 以大语言模型为主组合关键词，代码仅负责轻量护栏校验
     integrations: 大语言模型
     """
     ctx = runtime.context
 
-    # 如果没有关键词数据，返回空列表
-    if not state.filtered_core_terms or len(state.filtered_core_terms) == 0:
+    if not state.filtered_core_terms:
         return KeywordCombinationOutput(combined_keywords=[])
 
-    # 读取 LLM 配置
     cfg_file = os.path.join(os.getenv("COZE_WORKSPACE_PATH"), config['metadata']['llm_cfg'])
     with open(cfg_file, 'r', encoding='utf-8') as fd:
         _cfg = json.load(fd)
@@ -45,82 +137,33 @@ def keyword_combination_node(
     sp = _cfg.get("sp", "")
     up = _cfg.get("up", "")
 
-    # 准备关键词数据
     core_term_texts = [term.get("text", "") for term in state.filtered_core_terms if term.get("text")]
 
-    # 使用 Jinja2 渲染提示词
     up_tpl = Template(up)
     user_prompt = up_tpl.render({
         "core_terms": "、".join(core_term_texts) if core_term_texts else "无",
+        "primary_product_object": state.primary_product_object or "未识别",
+        "search_product_objects": "、".join(state.search_product_objects) if state.search_product_objects else "无",
         "product_object": "、".join(state.product_object) if state.product_object else "未识别",
         "patent_holder": state.patent_holder or "未知",
         "invention_point": state.invention_point or "未识别",
         "scenario_words": "、".join(state.scenario_words) if state.scenario_words else "无",
-        "audience_words": "、".join(state.audience_words) if state.audience_words else "无"
+        "audience_words": "、".join(state.audience_words) if state.audience_words else "无",
     })
 
-    # 初始化 LLM 客户端
     client = LLMClient(ctx=ctx)
-
-    # 调用 LLM
-    messages = [
-        SystemMessage(content=sp),
-        HumanMessage(content=user_prompt)
-    ]
-
     response = client.invoke(
-        messages=messages,
+        messages=[
+            SystemMessage(content=sp),
+            HumanMessage(content=user_prompt),
+        ],
         model=llm_config.get("model", "glm-5-0-260211"),
         temperature=llm_config.get("temperature", 0.3),
-        max_completion_tokens=llm_config.get("max_completion_tokens", 3000)
+        max_completion_tokens=llm_config.get("max_completion_tokens", 3000),
     )
 
-    # 提取文本内容
-    content = response.content
-    if isinstance(content, str):
-        result_text = content.strip()
-    elif isinstance(content, list):
-        text_parts = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text_parts.append(item.get("text", ""))
-            elif isinstance(item, str):
-                text_parts.append(item)
-        result_text = " ".join(text_parts).strip()
-    else:
-        result_text = str(content).strip()
-
-    # 解析组合结果
-    combined_keywords = []
-
-    try:
-        # 提取 JSON 数组
-        json_match = re.search(r'\[[\s\S]*\]', result_text)
-        if json_match:
-            result_list = json.loads(json_match.group(0))
-
-            for item in result_list:
-                if isinstance(item, dict) and item.get("keyword_text"):
-                    combined_keywords.append({
-                        "keyword_text": item.get("keyword_text", ""),
-                        "keyword_type": item.get("keyword_type", "unknown"),
-                        "combination_pattern": item.get("combination_pattern", ""),
-                        "confidence": item.get("confidence", 0.8)
-                    })
-
-    except json.JSONDecodeError:
-        # 解析失败，尝试简单文本提取
-        lines = result_text.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line and len(line) > 3:
-                combined_keywords.append({
-                    "keyword_text": line,
-                    "keyword_type": "unknown",
-                    "combination_pattern": "text_extraction",
-                    "confidence": 0.6
-                })
-    except Exception:
-        pass
+    result_text = _extract_text_content(response.content)
+    parsed_keywords = _parse_combined_keywords(result_text)
+    combined_keywords = _apply_guardrails(parsed_keywords)
 
     return KeywordCombinationOutput(combined_keywords=combined_keywords)
