@@ -7,7 +7,7 @@ import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import httpx
 from langchain_core.runnables import RunnableConfig
@@ -24,7 +24,7 @@ COZE_REQUEST_TIMEOUT = int(os.getenv("COZE_SEARCH_TIMEOUT", "300"))
 COZE_MAX_CONCURRENT = int(os.getenv("COZE_MAX_CONCURRENT", "3"))
 COZE_COLD_START_RETRIES = int(os.getenv("COZE_COLD_START_RETRIES", "2"))
 COZE_COLD_START_EXTRA_TIMEOUT = int(os.getenv("COZE_COLD_START_EXTRA_TIMEOUT", "600"))
-COZE_BATCH_SIZE = int(os.getenv("COZE_BATCH_SIZE", "3"))
+COZE_PER_KEYWORD_PRODUCT_LIMIT = int(os.getenv("COZE_PER_KEYWORD_PRODUCT_LIMIT", "5"))
 
 
 def _extract_products_from_response(response_data: Any) -> List[Dict[str, Any]]:
@@ -132,18 +132,72 @@ def _call_coze_api(
     return products
 
 
+def _merge_keyword_text(existing: str, incoming: str) -> str:
+    merged: List[str] = []
+    seen = set()
+    for value in (existing, incoming):
+        for keyword in str(value or "").split(","):
+            normalized = keyword.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                merged.append(normalized)
+    return ", ".join(merged)
+
+
+def _get_product_dedup_key(product: Dict[str, Any]) -> str:
+    product_url = str(product.get("product_url") or "").strip()
+    if product_url:
+        return f"url::{product_url}"
+
+    product_id = str(product.get("product_id") or "").strip()
+    if product_id:
+        return f"id::{product_id}"
+
+    product_name = str(product.get("product_name") or "").strip()
+    product_source = str(product.get("product_source") or "").strip()
+    return f"name::{product_name}::{product_source}"
+
+
 def _deduplicate_products(products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """按URL去重"""
-    seen_urls = set()
-    deduped = []
-    for p in products:
-        url = p.get("product_url", "")
-        if url and url in seen_urls:
+    """统一去重并合并重复商品命中的关键词信息。"""
+    deduped_map: Dict[str, Dict[str, Any]] = {}
+    ordered_keys: List[str] = []
+
+    for product in products:
+        dedup_key = _get_product_dedup_key(product)
+        existing = deduped_map.get(dedup_key)
+        if existing is None:
+            deduped_map[dedup_key] = dict(product)
+            ordered_keys.append(dedup_key)
             continue
-        if url:
-            seen_urls.add(url)
-        deduped.append(p)
-    return deduped
+
+        existing["matched_keywords"] = _merge_keyword_text(
+            str(existing.get("matched_keywords") or ""),
+            str(product.get("matched_keywords") or ""),
+        )
+
+        for field in ("description", "price", "brand", "manufacturer", "product_source", "product_url", "product_name"):
+            if not existing.get(field) and product.get(field):
+                existing[field] = product[field]
+
+        if not existing.get("picture") and product.get("picture"):
+            existing["picture"] = product["picture"]
+        if not existing.get("raw_payload") and product.get("raw_payload"):
+            existing["raw_payload"] = product["raw_payload"]
+
+    return [deduped_map[key] for key in ordered_keys]
+
+
+def _search_products_for_keyword(keyword: str) -> Tuple[str, List[Dict[str, Any]]]:
+    products = _call_coze_api([keyword])
+    limited_products = products[:COZE_PER_KEYWORD_PRODUCT_LIMIT]
+    logger.info(
+        "关键词 '%s' 检索到%d个商品，截断后保留%d个",
+        keyword,
+        len(products),
+        len(limited_products),
+    )
+    return keyword, limited_products
 
 
 def coze_search_node(
@@ -178,19 +232,29 @@ def coze_search_node(
         )
 
     try:
-        # 只取第3个关键词传给Coze API（单关键词调用）
-        keyword_index = min(2, len(keywords) - 1)
-        selected_keyword = keywords[keyword_index]
-        logger.info("共%d个关键词，只取第%d个关键词调用Coze: '%s'", len(keywords), keyword_index + 1, selected_keyword)
+        logger.info(
+            "共%d个关键词，逐个调用Coze检索；每个关键词最多保留%d个商品",
+            len(keywords),
+            COZE_PER_KEYWORD_PRODUCT_LIMIT,
+        )
 
-        all_products = _call_coze_api([selected_keyword])
+        keyword_results: List[Tuple[str, List[Dict[str, Any]]]] = []
+        max_workers = max(1, min(COZE_MAX_CONCURRENT, len(keywords)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            keyword_results = list(executor.map(_search_products_for_keyword, keywords))
 
-        if not all_products:
-            all_products = []
+        all_products: List[Dict[str, Any]] = []
+        successful = 0
+        failed = 0
+        for keyword, products in keyword_results:
+            if products:
+                successful += 1
+                all_products.extend(products)
+            else:
+                failed += 1
+                logger.warning("关键词 '%s' 未检索到商品", keyword)
 
         all_products = _deduplicate_products(all_products)
-        successful = 1 if all_products else 0
-        failed = 0 if all_products else 1
 
         return CozeSearchOutput(
             products=all_products,
