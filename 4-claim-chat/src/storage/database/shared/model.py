@@ -112,8 +112,13 @@ class ClaimCompareRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     patent_record_id: Mapped[int] = mapped_column(Integer, nullable=False)
     analysis_session_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, unique=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'queued'"))
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     result_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     product_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    started_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True), nullable=True)
+    finished_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(True), server_default=text("now()"))
     updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True), server_default=text("now()"))
 

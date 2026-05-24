@@ -20,9 +20,15 @@ interface ModuleResponse {
   keywords_count?: number;
   exception_type?: string;
   exception_message?: string;
+  error_message?: string;
   all_comparison_results?: unknown[];
   result_summary?: string;
   table_urls?: Array<{ table_name?: string; table_url?: string }>;
+  status?: string;
+  product_count?: number;
+  started_at?: string;
+  finished_at?: string;
+  is_finished?: boolean;
   [key: string]: unknown;
 }
 
@@ -102,8 +108,8 @@ function getModuleConfigs(): {
   };
 }
 
-function createHeaders(token?: string): HeadersInit {
-  return token
+function createHeaders(token?: string, extraHeaders?: HeadersInit): HeadersInit {
+  const headers: Record<string, string> = token
     ? {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -111,6 +117,16 @@ function createHeaders(token?: string): HeadersInit {
     : {
         'Content-Type': 'application/json',
       };
+
+  if (extraHeaders) {
+    Object.assign(headers, extraHeaders as Record<string, string>);
+  }
+
+  return headers;
+}
+
+function getModuleBaseUrl(runUrl: string): string {
+  return runUrl.replace(/\/run$/, '');
 }
 
 function normalizeFileType(inputType: string): 'image' | 'video' {
@@ -442,6 +458,26 @@ export interface Module4Result {
   tableUrls: Array<{ tableName?: string; tableUrl?: string }>;
 }
 
+export type Module4TaskStatus = 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | 'timeout';
+
+export interface Module4AsyncStartResult {
+  runId: string;
+  claimCompareRunId?: number;
+  status: Module4TaskStatus | 'accepted';
+}
+
+export interface Module4RunStatusResult {
+  runId: string;
+  claimCompareRunId?: number;
+  status: Module4TaskStatus;
+  resultSummary: string;
+  productCount: number;
+  errorMessage?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  isFinished: boolean;
+}
+
 export async function runModule4(
   patentRecordId: number,
   analysisSessionId: string,
@@ -485,6 +521,84 @@ export async function runModule4(
         }))
       : [],
   };
+}
+
+export async function startModule4Async(
+  patentRecordId: number,
+  analysisSessionId: string,
+  runId: string,
+  onProgress?: (message: string) => void,
+): Promise<Module4AsyncStartResult> {
+  const configs = getModuleConfigs();
+  const endpoint = `${getModuleBaseUrl(configs.module4.url)}/async_run`;
+  if (onProgress) {
+    onProgress('正在提交模块4后台任务...');
+  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: createHeaders(configs.module4.token, { 'x-run-id': runId }),
+    body: JSON.stringify({
+      patent_record_id: patentRecordId,
+      analysis_session_id: analysisSessionId,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+  const data = (await response.json()) as ModuleResponse;
+  return {
+    runId: String(data.run_id || runId),
+    claimCompareRunId: typeof data.claim_compare_run_id === 'number' ? data.claim_compare_run_id : undefined,
+    status: (String(data.status || 'accepted') as Module4AsyncStartResult['status']),
+  };
+}
+
+export async function getModule4RunStatus(runId: string): Promise<Module4RunStatusResult> {
+  const configs = getModuleConfigs();
+  const endpoint = `${getModuleBaseUrl(configs.module4.url)}/runs/${encodeURIComponent(runId)}`;
+  const response = await fetch(endpoint, {
+    method: 'GET',
+    headers: createHeaders(configs.module4.token),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+  const data = (await response.json()) as ModuleResponse;
+  return {
+    runId: String(data.run_id || runId),
+    claimCompareRunId: typeof data.claim_compare_run_id === 'number' ? data.claim_compare_run_id : undefined,
+    status: String(data.status || 'running') as Module4TaskStatus,
+    resultSummary: String(data.result_summary || ''),
+    productCount: typeof data.product_count === 'number' ? data.product_count : 0,
+    errorMessage:
+      typeof data.error_message === 'string'
+        ? data.error_message
+        : typeof data.exception_message === 'string'
+          ? data.exception_message
+          : undefined,
+    startedAt: typeof data.started_at === 'string' ? data.started_at : undefined,
+    finishedAt: typeof data.finished_at === 'string' ? data.finished_at : undefined,
+    isFinished: Boolean(data.is_finished),
+  };
+}
+
+export async function cancelModule4Run(runId: string): Promise<void> {
+  const configs = getModuleConfigs();
+  const endpoint = `${getModuleBaseUrl(configs.module4.url)}/runs/${encodeURIComponent(runId)}/cancel`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: createHeaders(configs.module4.token),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
 }
 
 export async function fetchPatentContent(url: string): Promise<string> {

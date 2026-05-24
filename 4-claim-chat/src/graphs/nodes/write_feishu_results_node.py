@@ -1,4 +1,5 @@
 import logging
+import datetime
 from typing import Any, Dict, List
 
 from langchain_core.runnables import RunnableConfig
@@ -47,14 +48,6 @@ def write_feishu_results_node(
     desc: 将比对结果写入Postgres
     integrations: Postgres数据库
     """
-    all_results = state.all_comparison_results
-    if not all_results:
-        return WriteResultsOutput(
-            claim_compare_run_id=0,
-            result_summary="无比对结果可写入",
-            table_urls=[],
-        )
-
     try:
         from storage.database.db import get_engine, get_session
         from storage.database.shared.model import Base, ClaimCompareResult, ClaimCompareRun
@@ -65,18 +58,37 @@ def write_feishu_results_node(
             tables=[ClaimCompareRun.__table__, ClaimCompareResult.__table__],
         )
 
-        summary = _build_summary(all_results)
+        all_results = state.all_comparison_results
+        summary = _build_summary(all_results) if all_results else "无比对结果可写入"
         session = get_session()
         try:
-            compare_run = ClaimCompareRun(
-                patent_record_id=state.patent_record_id,
-                analysis_session_id=state.analysis_session_id or None,
-                result_summary=summary,
-                product_count=len(all_results),
-            )
-            session.add(compare_run)
-            session.flush()
+            compare_run_id = int(state.claim_compare_run_id or 0)
+            compare_run = None
+            if compare_run_id > 0:
+                compare_run = session.get(ClaimCompareRun, compare_run_id)
+            if compare_run is None and state.run_id:
+                compare_run = session.query(ClaimCompareRun).filter(ClaimCompareRun.run_id == state.run_id).one_or_none()
+            if compare_run is None:
+                compare_run = ClaimCompareRun(
+                    patent_record_id=state.patent_record_id,
+                    analysis_session_id=state.analysis_session_id or None,
+                    run_id=state.run_id or None,
+                    status="running",
+                    started_at=datetime.datetime.now(datetime.timezone.utc),
+                )
+                session.add(compare_run)
+                session.flush()
             compare_run_id = int(compare_run.id)
+            compare_run.result_summary = summary
+            compare_run.product_count = len(all_results)
+            compare_run.status = "completed"
+            compare_run.error_message = None
+            compare_run.finished_at = datetime.datetime.now(datetime.timezone.utc)
+            compare_run.updated_at = datetime.datetime.now(datetime.timezone.utc)
+
+            session.query(ClaimCompareResult).filter(
+                ClaimCompareResult.claim_compare_run_id == compare_run_id
+            ).delete(synchronize_session=False)
 
             rows: List[ClaimCompareResult] = []
             for result in all_results:
@@ -126,13 +138,15 @@ def write_feishu_results_node(
         )
         return WriteResultsOutput(
             claim_compare_run_id=compare_run_id,
+            run_id=state.run_id,
             result_summary=summary,
             table_urls=[],
         )
     except Exception as error:
         logger.error("写入比对结果失败: %s", error, exc_info=True)
         return WriteResultsOutput(
-            claim_compare_run_id=0,
+            claim_compare_run_id=int(state.claim_compare_run_id or 0),
+            run_id=state.run_id,
             result_summary=f"写入比对结果失败: {error}",
             table_urls=[],
         )

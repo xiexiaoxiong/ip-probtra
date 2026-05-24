@@ -128,6 +128,10 @@ export interface AnalysisResults {
   module2RunId?: string;
   module3RunId?: string;
   module4RunId?: string;
+  module4TaskStatus?: 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | 'timeout';
+  module4TaskStartedAt?: string;
+  module4TaskFinishedAt?: string;
+  module4TaskError?: string;
   // 模块异常信息
   module2Exception?: string;
   module3Exception?: string;

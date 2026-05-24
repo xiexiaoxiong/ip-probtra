@@ -16,11 +16,12 @@ import {
   runModule1,
   runModule2,
   runModule3,
-  runModule4,
+  startModule4Async,
+  getModule4RunStatus,
   detectIndustry,
   warmupCozeSearch,
 } from '@/lib/workflow-client';
-import type { Module1Result, Module2Result, Module3Result, Module4Result } from '@/lib/workflow-client';
+import type { Module1Result, Module2Result, Module3Result, Module4Result, Module4TaskStatus } from '@/lib/workflow-client';
 import type { IndustryType } from '@/lib/types';
 import {
   createSession,
@@ -357,6 +358,10 @@ interface ClaimCompareRunSnapshot {
   id: number;
   product_count: number;
   result_summary: string | null;
+  status: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 async function getLatestSearchRunSnapshot(
@@ -382,7 +387,7 @@ async function getLatestClaimCompareRunSnapshot(
 ): Promise<ClaimCompareRunSnapshot | null> {
   const result = await pgQuery<ClaimCompareRunSnapshot>(
     `
-      select id, product_count, result_summary
+      select id, product_count, result_summary, status, error_message, started_at, finished_at
       from claim_compare_runs
       where analysis_session_id = $1 and patent_record_id = $2
       order by id desc
@@ -979,55 +984,161 @@ async function executePipeline(
     let module4Result: Module4Result | null = null;
     let module4Error: string | undefined;
     let module4RecoveredFromTransport = false;
+    let module4TaskStatus: Module4TaskStatus | undefined;
+    let module4TaskStartedAt: string | undefined;
+    let module4TaskFinishedAt: string | undefined;
     await updateStepStatus(sessionId, 5, 'running');
     console.log(`[Pipeline ${sessionId}] 步骤5: 技术特征比对（最耗时步骤，可能需要数分钟）...`);
     const step5Start = Date.now();
 
     try {
-      module4Result = await runModule4(
+      const module4Task = await startModule4Async(
         module1Result.dbRecordId,
         sessionId,
+        `${sessionId}-module4`,
         (msg) => console.log(`[Pipeline ${sessionId}] 模块4进度: ${msg}`),
       );
-      if (module4Result.exceptionMessage) {
-        module4Error = module4Result.exceptionMessage;
+      module4Result = {
+        claimCompareRunId: module4Task.claimCompareRunId,
+        exceptionMessage: undefined,
+        runId: module4Task.runId,
+        allComparisonResults: [],
+        resultSummary: '',
+        tableUrls: [],
+      };
+      module4TaskStatus = module4Task.status === 'accepted' ? 'queued' : module4Task.status;
+      await updateResults(sessionId, {
+        claimCompareRunId: module4Result.claimCompareRunId,
+        module4RunId: module4Result.runId,
+        module4TaskStatus,
+        module4TaskStartedAt,
+        module4TaskFinishedAt,
+        module4TaskError: undefined,
+        module4Exception: undefined,
+      });
+
+      let consecutiveStatusFailures = 0;
+      let lastObservedStatus: string | undefined;
+      let lastObservedClaimCompareRunId = module4Result.claimCompareRunId;
+      let lastObservedStartedAt: string | undefined;
+      let lastObservedFinishedAt: string | undefined;
+      let lastObservedTaskError: string | undefined;
+
+      while (true) {
+        try {
+          const runStatus = await getModule4RunStatus(module4Result.runId);
+          consecutiveStatusFailures = 0;
+          module4TaskStatus = runStatus.status;
+          module4TaskStartedAt = runStatus.startedAt;
+          module4TaskFinishedAt = runStatus.finishedAt;
+          if (runStatus.claimCompareRunId) {
+            module4Result.claimCompareRunId = runStatus.claimCompareRunId;
+          }
+          module4Result.resultSummary = runStatus.resultSummary;
+
+          const taskError = runStatus.errorMessage;
+          const shouldPersistStatus = (
+            lastObservedStatus !== runStatus.status
+            || lastObservedClaimCompareRunId !== module4Result.claimCompareRunId
+            || lastObservedStartedAt !== module4TaskStartedAt
+            || lastObservedFinishedAt !== module4TaskFinishedAt
+            || lastObservedTaskError !== taskError
+          );
+          if (shouldPersistStatus) {
+            await updateResults(sessionId, {
+              claimCompareRunId: module4Result.claimCompareRunId,
+              module4RunId: module4Result.runId,
+              module4TaskStatus: runStatus.status,
+              module4TaskStartedAt,
+              module4TaskFinishedAt,
+              module4TaskError: taskError,
+              module4Exception: undefined,
+            });
+            lastObservedStatus = runStatus.status;
+            lastObservedClaimCompareRunId = module4Result.claimCompareRunId;
+            lastObservedStartedAt = module4TaskStartedAt;
+            lastObservedFinishedAt = module4TaskFinishedAt;
+            lastObservedTaskError = taskError;
+          }
+
+          if (runStatus.status === 'completed') {
+            module4Error = undefined;
+            break;
+          }
+
+          if (runStatus.status === 'error' || runStatus.status === 'cancelled' || runStatus.status === 'timeout') {
+            module4Error = taskError || `模块4任务状态异常: ${runStatus.status}`;
+            break;
+          }
+        } catch (statusError) {
+          consecutiveStatusFailures += 1;
+          const statusErrorMessage = statusError instanceof Error ? statusError.message : String(statusError);
+          console.warn(
+            `[Pipeline ${sessionId}] 模块4状态查询失败 (${consecutiveStatusFailures}): ${statusErrorMessage}`,
+          );
+
+          if (consecutiveStatusFailures >= 5) {
+            const snapshot = await getLatestClaimCompareRunSnapshot(sessionId, module1Result.dbRecordId);
+            if (snapshot && snapshot.status) {
+              module4RecoveredFromTransport = true;
+              module4TaskStatus = snapshot.status as Module4TaskStatus;
+              module4TaskStartedAt = snapshot.started_at || undefined;
+              module4TaskFinishedAt = snapshot.finished_at || undefined;
+              module4Result.claimCompareRunId = snapshot.id;
+              module4Result.resultSummary = snapshot.result_summary || '';
+              await updateResults(sessionId, {
+                claimCompareRunId: snapshot.id,
+                module4RunId: module4Result.runId,
+                module4TaskStatus,
+                module4TaskStartedAt,
+                module4TaskFinishedAt,
+                module4TaskError: snapshot.error_message || undefined,
+                module4Exception: undefined,
+              });
+              if (snapshot.status === 'completed') {
+                module4Error = undefined;
+                break;
+              }
+              if (snapshot.status === 'error' || snapshot.status === 'cancelled' || snapshot.status === 'timeout') {
+                module4Error = snapshot.error_message || `模块4任务状态异常: ${snapshot.status}`;
+                break;
+              }
+            }
+          }
+
+          if (consecutiveStatusFailures >= 12) {
+            throw new Error(`模块4状态查询连续失败: ${statusErrorMessage}`);
+          }
+        }
+
+        await sleep(5000);
       }
     } catch (e) {
       module4Error = e instanceof Error ? e.message : String(e);
       console.warn(`[Pipeline ${sessionId}] 模块4异常: ${module4Error}`);
-
-      if (isRecoverableWorkflowTransportError(module4Error)) {
-        console.log(`[Pipeline ${sessionId}] 模块4响应异常，转为轮询数据库中的 claim_compare_runs...`);
-        const snapshot = await waitForClaimCompareRunRecovery(sessionId, module1Result.dbRecordId, step5Start);
-        if (snapshot) {
-          module4RecoveredFromTransport = true;
-          module4Error = undefined;
-          module4Result = {
-            claimCompareRunId: snapshot.id,
-            exceptionMessage: undefined,
-            runId: '',
-            allComparisonResults: [],
-            resultSummary: snapshot.result_summary || '',
-            tableUrls: [],
-          };
-          console.log(
-            `[Pipeline ${sessionId}] 模块4已从数据库恢复: claim_compare_run_id=${snapshot.id}, product_count=${snapshot.product_count}`,
-          );
-        }
-      }
     }
 
     stepTimings['step5'] = Date.now() - step5Start;
+    if (module4RecoveredFromTransport) {
+      console.warn(
+        `[Pipeline ${sessionId}] 模块4 HTTP 响应中断，但后台任务已完成并写入数据库 `
+        + `(耗时 ${stepTimings['step5']}ms, claim_compare_run_id=${module4Result?.claimCompareRunId || 'unknown'})`,
+      );
+    }
     await updateStepStatus(
       sessionId,
       5,
       module4Error ? 'error' : 'completed',
-      module4RecoveredFromTransport ? '模块4 HTTP 响应中断，但后台任务已完成并写入数据库' : undefined,
+      undefined,
     );
     await updateResults(sessionId, {
       comparisons: [],
       claimCompareRunId: module4Result?.claimCompareRunId,
       module4RunId: module4Result?.runId,
+      module4TaskStatus,
+      module4TaskStartedAt,
+      module4TaskFinishedAt,
+      module4TaskError: module4Error,
       module4Exception: module4Error,
     });
     console.log(`[Pipeline ${sessionId}] 步骤5${module4RecoveredFromTransport ? '(数据库恢复,继续)' : module4Error ? '异常' : '完成'} (耗时 ${stepTimings['step5']}ms)`);
@@ -1137,6 +1248,7 @@ async function executePipeline(
       try {
         const dbComparisonRunId = module4Result?.claimCompareRunId || 0;
         let dbResults: unknown[] = [];
+        let recoveredDbComparisonRunId = dbComparisonRunId;
 
         if (dbComparisonRunId > 0) {
           const rows = await pgQuery<Record<string, unknown>>(
@@ -1146,11 +1258,17 @@ async function executePipeline(
           dbResults = rows.rows;
         } else if (module1Result.dbRecordId && module1Result.dbRecordId > 0) {
           const runRows = await pgQuery<Record<string, unknown>>(
-            `SELECT id FROM claim_compare_runs WHERE patent_record_id = $1 ORDER BY id DESC LIMIT 1`,
-            [module1Result.dbRecordId],
+            `SELECT id
+             FROM claim_compare_runs
+             WHERE patent_record_id = $1
+               AND analysis_session_id = $2
+             ORDER BY id DESC
+             LIMIT 1`,
+            [module1Result.dbRecordId, sessionId],
           );
           if (runRows.rows.length > 0) {
             const runId = runRows.rows[0].id as number;
+            recoveredDbComparisonRunId = runId;
             const resultRows = await pgQuery<Record<string, unknown>>(
               `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
               [runId],
@@ -1159,8 +1277,48 @@ async function executePipeline(
           }
         }
 
+        if (dbResults.length === 0 && module1Result.dbRecordId && module1Result.dbRecordId > 0) {
+          const fallbackRunRows = await pgQuery<Record<string, unknown>>(
+            `SELECT r.id
+             FROM claim_compare_runs r
+             WHERE r.patent_record_id = $1
+               AND r.analysis_session_id = $2
+               AND EXISTS (
+                 SELECT 1
+                 FROM claim_compare_results rr
+                 WHERE rr.claim_compare_run_id = r.id
+               )
+             ORDER BY r.id DESC
+             LIMIT 1`,
+            [module1Result.dbRecordId, sessionId],
+          );
+          if (fallbackRunRows.rows.length > 0) {
+            const fallbackRunId = fallbackRunRows.rows[0].id as number;
+            const fallbackResultRows = await pgQuery<Record<string, unknown>>(
+              `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
+              [fallbackRunId],
+            );
+            if (fallbackResultRows.rows.length > 0) {
+              recoveredDbComparisonRunId = fallbackRunId;
+              dbResults = fallbackResultRows.rows;
+              if (module4Result) {
+                module4Result.claimCompareRunId = fallbackRunId;
+              }
+              await updateResults(sessionId, {
+                claimCompareRunId: fallbackRunId,
+              });
+              console.warn(
+                `[Pipeline ${sessionId}] 模块4结果回退到最新有明细的 claim_compare_run_id=${fallbackRunId}，原始 run_id=${dbComparisonRunId || 'none'}`,
+              );
+            }
+          }
+        }
+
         if (dbResults.length > 0) {
-          console.log(`[Pipeline ${sessionId}] 从数据库读取到 ${dbResults.length} 条比对结果`);
+          console.log(
+            `[Pipeline ${sessionId}] 从数据库读取到 ${dbResults.length} 条比对结果 `
+            + `(claim_compare_run_id=${recoveredDbComparisonRunId || 'unknown'})`,
+          );
 
           // 将数据库行按商品分组转换为嵌套格式，再用 mapComparisonsFromApi 映射
           const grouped = groupDbRowsByProduct(dbResults);

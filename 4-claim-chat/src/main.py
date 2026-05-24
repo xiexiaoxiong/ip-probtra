@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import datetime
 import json
 import threading
 import traceback
@@ -534,6 +535,134 @@ from coze_coding_utils.log.loop_trace import init_run_config, init_agent_config
 # 超时配置常量
 TIMEOUT_SECONDS = 900  # 15分钟
 
+CLAIM_COMPARE_TERMINAL_STATUSES = {"completed", "error", "cancelled", "timeout"}
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+def _ensure_claim_compare_tables() -> None:
+    from storage.database.db import get_engine
+    from storage.database.shared.model import Base, ClaimCompareRun, ClaimCompareResult
+
+    engine = get_engine()
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[ClaimCompareRun.__table__, ClaimCompareResult.__table__],
+    )
+
+def _serialize_claim_compare_run(compare_run: Any) -> Dict[str, Any]:
+    def _iso(value: Any) -> Optional[str]:
+        return value.isoformat() if value else None
+
+    return {
+        "claim_compare_run_id": int(compare_run.id),
+        "run_id": compare_run.run_id,
+        "status": str(compare_run.status or ""),
+        "analysis_session_id": compare_run.analysis_session_id,
+        "patent_record_id": int(compare_run.patent_record_id),
+        "result_summary": compare_run.result_summary,
+        "product_count": int(compare_run.product_count or 0),
+        "error_message": compare_run.error_message,
+        "started_at": _iso(compare_run.started_at),
+        "finished_at": _iso(compare_run.finished_at),
+        "created_at": _iso(compare_run.created_at),
+        "updated_at": _iso(compare_run.updated_at),
+    }
+
+def _get_claim_compare_run_by_run_id(run_id: str) -> Optional[Dict[str, Any]]:
+    if not run_id:
+        return None
+
+    from storage.database.db import get_session
+    from storage.database.shared.model import ClaimCompareRun
+
+    _ensure_claim_compare_tables()
+    session = get_session()
+    try:
+        compare_run = session.query(ClaimCompareRun).filter(ClaimCompareRun.run_id == run_id).one_or_none()
+        if compare_run is None:
+            return None
+        return _serialize_claim_compare_run(compare_run)
+    finally:
+        session.close()
+
+def _create_or_get_claim_compare_run(
+    patent_record_id: int,
+    analysis_session_id: str,
+    run_id: str,
+) -> Dict[str, Any]:
+    from storage.database.db import get_session
+    from storage.database.shared.model import ClaimCompareRun
+
+    _ensure_claim_compare_tables()
+    session = get_session()
+    try:
+        compare_run = session.query(ClaimCompareRun).filter(ClaimCompareRun.run_id == run_id).one_or_none()
+        if compare_run is None:
+            compare_run = ClaimCompareRun(
+                patent_record_id=patent_record_id,
+                analysis_session_id=analysis_session_id or None,
+                run_id=run_id,
+                status="queued",
+                started_at=None,
+                finished_at=None,
+            )
+            session.add(compare_run)
+            session.flush()
+            session.commit()
+            session.refresh(compare_run)
+        return _serialize_claim_compare_run(compare_run)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+def _update_claim_compare_run_status(
+    run_id: str,
+    *,
+    status: Optional[str] = None,
+    error_message: Optional[str] = None,
+    result_summary: Optional[str] = None,
+    product_count: Optional[int] = None,
+    set_started_at: bool = False,
+    set_finished_at: bool = False,
+) -> Optional[Dict[str, Any]]:
+    if not run_id:
+        return None
+
+    from storage.database.db import get_session
+    from storage.database.shared.model import ClaimCompareRun
+
+    _ensure_claim_compare_tables()
+    session = get_session()
+    try:
+        compare_run = session.query(ClaimCompareRun).filter(ClaimCompareRun.run_id == run_id).one_or_none()
+        if compare_run is None:
+            return None
+        now = _utcnow()
+        if status is not None:
+            compare_run.status = status
+        if error_message is not None:
+            compare_run.error_message = error_message
+        if result_summary is not None:
+            compare_run.result_summary = result_summary
+        if product_count is not None:
+            compare_run.product_count = product_count
+        if set_started_at and compare_run.started_at is None:
+            compare_run.started_at = now
+        if set_finished_at:
+            compare_run.finished_at = now
+        compare_run.updated_at = now
+        session.commit()
+        session.refresh(compare_run)
+        return _serialize_claim_compare_run(compare_run)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
 class GraphService:
     def __init__(self):
         # 用于跟踪正在运行的任务（使用asyncio.Task）
@@ -583,6 +712,15 @@ class GraphService:
 
         run_id = ctx.run_id
         logger.info(f"Starting run with run_id: {run_id}")
+        payload = dict(payload or {})
+        payload.setdefault("run_id", run_id)
+        compare_run_snapshot = _create_or_get_claim_compare_run(
+            patent_record_id=int(payload.get("patent_record_id") or 0),
+            analysis_session_id=str(payload.get("analysis_session_id") or ""),
+            run_id=run_id,
+        )
+        payload.setdefault("claim_compare_run_id", compare_run_snapshot["claim_compare_run_id"])
+        _update_claim_compare_run_status(run_id, status="running", error_message=None, set_started_at=True)
 
         try:
             graph = self._get_graph(ctx)
@@ -592,12 +730,52 @@ class GraphService:
 
             # 直接调用，LangGraph会在当前任务上下文中执行
             # 如果当前任务被取消，LangGraph的执行也会被取消
-            return await graph.ainvoke(payload, config=run_config, context=ctx)
+            result = await graph.ainvoke(payload, config=run_config, context=ctx)
+            if isinstance(result, dict):
+                result.setdefault("run_id", run_id)
+                result.setdefault("claim_compare_run_id", compare_run_snapshot["claim_compare_run_id"])
+                if result.get("status") == "cancelled":
+                    _update_claim_compare_run_status(
+                        run_id,
+                        status="cancelled",
+                        error_message=str(result.get("message") or "Execution was cancelled"),
+                        set_finished_at=True,
+                    )
+                else:
+                    _update_claim_compare_run_status(
+                        run_id,
+                        status="completed",
+                        error_message=None,
+                        result_summary=str(result.get("result_summary") or "") or None,
+                        product_count=len(result.get("all_comparison_results") or []),
+                        set_finished_at=True,
+                    )
+            return result
+        except asyncio.TimeoutError:
+            _update_claim_compare_run_status(
+                run_id,
+                status="timeout",
+                error_message=f"Execution timeout: exceeded {TIMEOUT_SECONDS} seconds",
+                set_finished_at=True,
+            )
+            raise
 
         except asyncio.CancelledError:
+            _update_claim_compare_run_status(
+                run_id,
+                status="cancelled",
+                error_message="Execution was cancelled",
+                set_finished_at=True,
+            )
             logger.info(f"Run {run_id} was cancelled")
             return {"status": "cancelled", "run_id": run_id, "message": "Execution was cancelled"}
         except Exception as e:
+            _update_claim_compare_run_status(
+                run_id,
+                status="error",
+                error_message=str(e),
+                set_finished_at=True,
+            )
             # 使用错误分类器分类错误
             err = self.error_classifier.classify(e, {"node_name": "run", "run_id": run_id})
             # 记录详细的错误信息和堆栈跟踪
@@ -776,14 +954,18 @@ async def http_run(request: Request) -> Dict[str, Any]:
         except asyncio.TimeoutError:
             logger.error(f"Run execution timeout after {TIMEOUT_SECONDS}s for run_id: {run_id}")
             task.cancel()
-            try:
-                result = await task
-            except asyncio.CancelledError:
-                return {
-                    "status": "timeout",
-                    "run_id": run_id,
-                    "message": f"Execution timeout: exceeded {TIMEOUT_SECONDS} seconds"
-                }
+            result = await task
+            _update_claim_compare_run_status(
+                run_id,
+                status="timeout",
+                error_message=f"Execution timeout: exceeded {TIMEOUT_SECONDS} seconds",
+                set_finished_at=True,
+            )
+            return {
+                "status": "timeout",
+                "run_id": run_id,
+                "message": f"Execution timeout: exceeded {TIMEOUT_SECONDS} seconds"
+            }
 
         if not result:
             result = {}
@@ -817,6 +999,123 @@ async def http_run(request: Request) -> Dict[str, Any]:
         )
     finally:
         cozeloop.flush()
+
+
+async def _run_background_workflow(payload: Dict[str, Any], ctx: Context, run_id: str) -> None:
+    try:
+        await asyncio.wait_for(service.run(payload, ctx), timeout=float(TIMEOUT_SECONDS))
+    except asyncio.TimeoutError:
+        logger.error(f"Async run execution timeout after {TIMEOUT_SECONDS}s for run_id: {run_id}")
+        _update_claim_compare_run_status(
+            run_id,
+            status="timeout",
+            error_message=f"Execution timeout: exceeded {TIMEOUT_SECONDS} seconds",
+            set_finished_at=True,
+        )
+    except asyncio.CancelledError:
+        logger.info(f"Async run cancelled for run_id: {run_id}")
+        _update_claim_compare_run_status(
+            run_id,
+            status="cancelled",
+            error_message="Execution was cancelled",
+            set_finished_at=True,
+        )
+        raise
+    except Exception as error:
+        logger.error(f"Async run failed for run_id={run_id}: {error}", exc_info=True)
+        _update_claim_compare_run_status(
+            run_id,
+            status="error",
+            error_message=str(error),
+            set_finished_at=True,
+        )
+    finally:
+        cozeloop.flush()
+
+
+@app.post("/async_run")
+async def http_async_run(request: Request) -> Dict[str, Any]:
+    raw_body = await request.body()
+    try:
+        body_text = raw_body.decode("utf-8")
+    except Exception as e:
+        body_text = str(raw_body)
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {body_text}, error: {e}")
+
+    ctx = new_context(method="async_run", headers=request.headers)
+    upstream_run_id = request.headers.get(HEADER_X_RUN_ID)
+    if upstream_run_id:
+        ctx.run_id = upstream_run_id
+    run_id = ctx.run_id
+    request_context.set(ctx)
+
+    logger.info(
+        f"Received request for /async_run: "
+        f"run_id={run_id}, "
+        f"query={dict(request.query_params)}, "
+        f"body={body_text}"
+    )
+
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid payload: expected JSON object")
+
+        payload = dict(payload)
+        payload["run_id"] = run_id
+        compare_run = _create_or_get_claim_compare_run(
+            patent_record_id=int(payload.get("patent_record_id") or 0),
+            analysis_session_id=str(payload.get("analysis_session_id") or ""),
+            run_id=run_id,
+        )
+        payload["claim_compare_run_id"] = compare_run["claim_compare_run_id"]
+        _update_claim_compare_run_status(run_id, status="queued", error_message=None)
+
+        task = asyncio.create_task(_run_background_workflow(payload, ctx, run_id))
+        service.running_tasks[run_id] = task
+
+        return {
+            "status": "accepted",
+            "run_id": run_id,
+            "claim_compare_run_id": compare_run["claim_compare_run_id"],
+        }
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in http_async_run: {e}, traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format, {extract_core_stack()}")
+
+
+@app.get("/runs/{run_id}")
+async def http_get_run_status(run_id: str):
+    request_context.set(new_context(method="run_status"))
+    compare_run = _get_claim_compare_run_by_run_id(run_id)
+    if compare_run is None:
+        return JSONResponse({"error": "Run not found", "run_id": run_id}, status_code=404)
+
+    task = service.running_tasks.get(run_id)
+    if task is not None and not task.done() and compare_run["status"] not in CLAIM_COMPARE_TERMINAL_STATUSES:
+        compare_run["status"] = "running"
+    compare_run["is_finished"] = compare_run["status"] in CLAIM_COMPARE_TERMINAL_STATUSES
+    return compare_run
+
+
+@app.post("/runs/{run_id}/cancel")
+async def http_cancel_run_status(run_id: str, request: Request):
+    ctx = new_context(method="cancel_run_status", headers=request.headers)
+    request_context.set(ctx)
+    logger.info(f"Received request for /runs/{run_id}/cancel")
+    result = service.cancel_run(run_id, ctx)
+    if result.get("status") == "success":
+        _update_claim_compare_run_status(
+            run_id,
+            status="cancelled",
+            error_message="Cancellation signal sent, task will be cancelled at next await point",
+            set_finished_at=True,
+        )
+    current = _get_claim_compare_run_by_run_id(run_id)
+    if current:
+        result["claim_compare_run_id"] = current["claim_compare_run_id"]
+        result["task_status"] = current["status"]
+    return result
 
 
 HEADER_X_WORKFLOW_STREAM_MODE = "x-workflow-stream-mode"

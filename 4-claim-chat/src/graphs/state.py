@@ -58,6 +58,7 @@ class GlobalState(BaseModel):
     """全局状态定义"""
     patent_record_id: int = Field(default=0, description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
     feishu_url: str = Field(default="", description="飞书多维表格URL")
     app_token: str = Field(default="", description="飞书多维表格app_token")
     table_id: str = Field(default="", description="飞书多维表格table_id")
@@ -78,11 +79,14 @@ class GraphInput(BaseModel):
     """工作流输入"""
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
+    claim_compare_run_id: int = Field(default=0, description="预创建的比对运行记录ID")
 
 
 class GraphOutput(BaseModel):
     """工作流输出"""
     claim_compare_run_id: int = Field(default=0, description="比对运行记录ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
     all_comparison_results: List[Dict[str, Any]] = Field(default=[], description="所有商品的比对结果")
     result_summary: str = Field(default="", description="结果摘要")
     table_urls: List[str] = Field(default=[], description="创建的飞书子表格URL列表")
@@ -94,11 +98,15 @@ class ParseAndFetchInput(BaseModel):
     """解析URL并获取飞书数据节点的输入"""
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
+    claim_compare_run_id: int = Field(default=0, description="预创建的比对运行记录ID")
 
 
 class ParseAndFetchOutput(BaseModel):
     """解析URL并获取飞书数据节点的输出"""
     patent_record_id: int = Field(default=0, description="专利解析主记录ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
+    claim_compare_run_id: int = Field(default=0, description="比对运行记录ID")
     app_token: str = Field(..., description="飞书多维表格app_token")
     table_id: str = Field(default="", description="飞书多维表格table_id")
     independent_claims: List[Dict[str, str]] = Field(default=[], description="独立权利要求列表")
@@ -136,12 +144,15 @@ class WriteResultsInput(BaseModel):
     """写入飞书结果节点的输入"""
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
+    claim_compare_run_id: int = Field(default=0, description="预创建的比对运行记录ID")
     all_comparison_results: List[Dict[str, Any]] = Field(..., description="所有商品的比对结果")
 
 
 class WriteResultsOutput(BaseModel):
     """写入飞书结果节点的输出"""
     claim_compare_run_id: int = Field(default=0, description="比对运行记录ID")
+    run_id: str = Field(default="", description="模块4任务运行ID")
     result_summary: str = Field(..., description="结果摘要")
     table_urls: List[str] = Field(default=[], description="创建的飞书子表格URL列表")
 

@@ -51,6 +51,8 @@ def parse_and_fetch_node(
             if patent_record is None:
                 return ParseAndFetchOutput(
                     patent_record_id=state.patent_record_id,
+                    run_id=state.run_id,
+                    claim_compare_run_id=state.claim_compare_run_id,
                     app_token="",
                     table_id="",
                     independent_claims=[],
@@ -113,6 +115,8 @@ def parse_and_fetch_node(
 
         return ParseAndFetchOutput(
             patent_record_id=state.patent_record_id,
+            run_id=state.run_id,
+            claim_compare_run_id=state.claim_compare_run_id,
             app_token="",
             table_id="",
             independent_claims=independent_claims,
@@ -125,6 +129,8 @@ def parse_and_fetch_node(
         logger.error("读取数据库比对输入失败: %s", error, exc_info=True)
         return ParseAndFetchOutput(
             patent_record_id=state.patent_record_id,
+            run_id=state.run_id,
+            claim_compare_run_id=state.claim_compare_run_id,
             app_token="",
             table_id="",
             independent_claims=[],
