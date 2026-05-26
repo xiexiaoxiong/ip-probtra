@@ -9,6 +9,7 @@ interface KeywordRecordRow extends JsonRecord {
 }
 
 interface SearchProductRow extends JsonRecord {
+  id?: number;
   product_id?: string;
   product_name?: string;
   product_url?: string;
@@ -237,9 +238,10 @@ function mapProductRows(rows: SearchProductRow[]): Map<string, ExportProduct> {
   const productMap = new Map<string, ExportProduct>();
 
   for (const row of rows) {
+    const rowId = row.id != null ? toText(row.id) : '';
     const productId = toText(row.product_id);
     const productName = toText(row.product_name);
-    const key = productId || productName;
+    const key = rowId || productId || productName;
     if (!key) continue;
 
     productMap.set(key, {

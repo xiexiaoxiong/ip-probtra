@@ -13,6 +13,31 @@ logger = logging.getLogger(__name__)
 MAX_PARALLEL_WORKERS: int = 10
 
 
+def _feature_key(feature: Dict[str, Any]) -> tuple[str, str, str]:
+    feature_id = str(feature.get("feature_id", "")).strip()
+    claim_id = str(feature.get("claim_id", "")).strip()
+    feature_text = str(feature.get("feature_text", "")).strip()
+    return (claim_id, feature_id, feature_text)
+
+
+def _dedupe_features(features: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    对当前 run 的技术特征去重。
+
+    目标不是跨分析历史去重，而是避免同一轮模块4里把重复特征反复送给模型，
+    从而导致同一商品页重复显示并放大 token 消耗。
+    """
+    deduped: List[Dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for feature in features:
+        key = _feature_key(feature)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(feature)
+    return deduped
+
+
 def _compare_single_product(
     idx: int,
     product: Dict[str, Any],
@@ -74,7 +99,8 @@ def compare_products_loop_node(
     title: 并行比对商品技术特征
     desc: 使用线程池并行比对所有商品，每个商品独立调用子图完成特征分析+规则判定（包含所有独立权利要求的特征），最终汇总所有比对结果
     """
-    features: List[Dict[str, str]] = state.features
+    raw_features: List[Dict[str, str]] = state.features
+    features: List[Dict[str, str]] = _dedupe_features(raw_features)
     products: List[Dict[str, Any]] = state.products
     specification_text: str = state.specification_text
 
@@ -90,7 +116,13 @@ def compare_products_loop_node(
     claim_ids: set = set(str(f.get("claim_id", "")) for f in features)
     total: int = len(products)
     worker_count: int = min(total, MAX_PARALLEL_WORKERS)
-    logger.info(f"开始并行比对 {total} 个商品，{len(claim_ids)} 个独立权利要求，并发线程数: {worker_count}")
+    duplicate_count = max(0, len(raw_features) - len(features))
+    logger.info(
+        f"开始并行比对 {total} 个商品，{len(claim_ids)} 个独立权利要求，"
+        f"技术特征 {len(features)} 个"
+        + (f"（已去重 {duplicate_count} 个重复特征）" if duplicate_count else "")
+        + f"，并发线程数: {worker_count}"
+    )
 
     ordered_results: List[Dict[str, Any]] = [{}] * total
 

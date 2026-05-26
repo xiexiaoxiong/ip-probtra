@@ -1153,7 +1153,7 @@ async function executePipeline(
     async function enrichProductsFromDb(productsFromComparison: ProductInfo[], sessionIdForDb: string, patentRecordIdForDb: number): Promise<ProductInfo[]> {
       try {
         const searchProductRows = await pgQuery<Record<string, unknown>>(
-          `SELECT product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture
+          `SELECT id, product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture
            FROM search_products
            WHERE patent_record_id = $1
              AND analysis_session_id = $2
@@ -1167,10 +1167,11 @@ async function executePipeline(
           enriched.set(p.id, { ...p });
         }
         for (const row of searchProductRows.rows) {
-          const spId = String(row['product_id'] || row['id'] || '');
+          const searchRowId = row['id'] != null ? String(row['id']) : '';
+          const spId = String(row['product_id'] || '');
           const spName = String(row['product_name'] || row['name'] || '');
-          if (!spId && !spName) continue;
-          const key = spId || spName;
+          if (!searchRowId && !spId && !spName) continue;
+          const key = searchRowId || spId || spName;
           if (enriched.has(key)) {
             const existing = enriched.get(key)!;
             if (!existing.url && row['product_url']) existing.url = String(row['product_url']);

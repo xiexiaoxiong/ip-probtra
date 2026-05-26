@@ -103,13 +103,19 @@ def parse_and_fetch_node(
         products: List[Dict[str, Any]] = []
         for row in product_rows:
             product_images = row.picture if isinstance(row.picture, list) else []
+            # 使用 search_products.id 作为当前分析内的稳定唯一键，避免业务侧 product_id
+            # 在不同商品之间重复，导致多个商品的比对结果被错误合并到同一商品页。
+            stable_product_id = str(row.id)
             products.append(
                 {
-                    "id": row.product_id or str(row.id),
+                    "id": stable_product_id,
                     "name": row.product_name or "",
                     "description": row.description or "",
                     "images": product_images,
-                    "raw_data": row.raw_payload or {},
+                    "raw_data": {
+                        **(row.raw_payload or {}),
+                        "source_product_id": row.product_id,
+                    },
                 }
             )
 

@@ -14,6 +14,25 @@ from utils.local_llm import invoke_local_llm
 logger = logging.getLogger(__name__)
 
 
+def _feature_key(feature: Dict[str, Any]) -> tuple[str, str, str]:
+    feature_id = str(feature.get("feature_id", "")).strip()
+    claim_id = str(feature.get("claim_id", "")).strip()
+    feature_text = str(feature.get("feature_text", "")).strip()
+    return (claim_id, feature_id, feature_text)
+
+
+def _dedupe_features(features: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    deduped: List[Dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for feature in features:
+        key = _feature_key(feature)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(feature)
+    return deduped
+
+
 def _extract_json_from_response(content: Any) -> Any:
     """从LLM响应中提取JSON"""
     text: str = ""
@@ -68,7 +87,8 @@ def analyze_features_node(
     integrations: 大语言模型
     """
     ctx = runtime.context
-    features: List[Dict[str, str]] = state.features
+    raw_features: List[Dict[str, str]] = state.features
+    features: List[Dict[str, str]] = _dedupe_features(raw_features)
     product_data: Dict[str, Any] = state.product_data
 
     if not features:
@@ -105,6 +125,15 @@ def analyze_features_node(
 
     # 从 state 获取说明书文本
     specification_text: str = state.specification_text
+
+    duplicate_count = max(0, len(raw_features) - len(features))
+    if duplicate_count:
+        logger.warning(
+            "商品 '%s' 的输入特征存在重复，已在模型调用前去重: raw=%s, deduped=%s",
+            product_name,
+            len(raw_features),
+            len(features),
+        )
 
     # 渲染用户提示词
     up_tpl: Template = Template(up_template)
@@ -180,6 +209,7 @@ def analyze_features_node(
     # 验证并补充缺失的特征
     parsed_ids: set = set()
     valid_analysis: List[Dict[str, Any]] = []
+    deduped_analysis_by_feature_id: Dict[str, Dict[str, Any]] = {}
     for item in parsed:
         if isinstance(item, dict):
             fid = str(item.get("feature_id", ""))
@@ -188,15 +218,37 @@ def analyze_features_node(
                 # 提取 evidence_images，确保是字符串数组
                 raw_images = item.get("evidence_images", [])
                 evidence_images = [str(url) for url in raw_images if isinstance(url, str) and url.strip()] if isinstance(raw_images, list) else []
-                
-                valid_analysis.append({
+
+                candidate = {
                     "feature_id": fid,
                     "evidence": str(item.get("evidence", "")),
                     "reason": str(item.get("reason", "")),
                     "reasoning_type": str(item.get("reasoning_type", "相关信息缺失")),
                     "claim_id": str(item.get("claim_id", "")),
                     "evidence_images": evidence_images
-                })
+                }
+
+                existing = deduped_analysis_by_feature_id.get(fid)
+                if existing is None:
+                    deduped_analysis_by_feature_id[fid] = candidate
+                    continue
+
+                existing_score = (
+                    1 if existing.get("evidence") else 0,
+                    1 if existing.get("evidence_images") else 0,
+                    0 if existing.get("reasoning_type") == "相关信息缺失" else 1,
+                    len(str(existing.get("reason", ""))),
+                )
+                candidate_score = (
+                    1 if candidate.get("evidence") else 0,
+                    1 if candidate.get("evidence_images") else 0,
+                    0 if candidate.get("reasoning_type") == "相关信息缺失" else 1,
+                    len(str(candidate.get("reason", ""))),
+                )
+                if candidate_score > existing_score:
+                    deduped_analysis_by_feature_id[fid] = candidate
+
+    valid_analysis.extend(deduped_analysis_by_feature_id.values())
 
     # 补充LLM遗漏的特征
     for feat in features:
