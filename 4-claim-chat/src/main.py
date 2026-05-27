@@ -57,6 +57,61 @@ def bootstrap_local_env() -> None:
         os.environ["PGDATABASE_URL"] = os.getenv("DATABASE_URL", "")
 
 
+def ensure_claim_compare_async_columns() -> None:
+    """Auto-migrate async task columns required by module4."""
+    from storage.database.db import get_engine
+    from sqlalchemy import text
+
+    try:
+        engine = get_engine()
+        with engine.begin() as conn:
+            existing_columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'claim_compare_runs'
+                        """
+                    )
+                ).fetchall()
+            }
+
+            statements: list[str] = []
+            if "run_id" not in existing_columns:
+                statements.append("ALTER TABLE claim_compare_runs ADD COLUMN run_id TEXT")
+            if "status" not in existing_columns:
+                statements.append("ALTER TABLE claim_compare_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'")
+            if "error_message" not in existing_columns:
+                statements.append("ALTER TABLE claim_compare_runs ADD COLUMN error_message TEXT")
+            if "started_at" not in existing_columns:
+                statements.append("ALTER TABLE claim_compare_runs ADD COLUMN started_at TIMESTAMPTZ")
+            if "finished_at" not in existing_columns:
+                statements.append("ALTER TABLE claim_compare_runs ADD COLUMN finished_at TIMESTAMPTZ")
+
+            for statement in statements:
+                logger.info("Applying module4 async schema migration: %s", statement)
+                conn.execute(text(statement))
+
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS claim_compare_runs_run_id_unique_idx
+                    ON claim_compare_runs (run_id)
+                    WHERE run_id IS NOT NULL
+                    """
+                )
+            )
+
+            if statements:
+                logger.info("Module4 async schema migration completed, added %d columns", len(statements))
+            else:
+                logger.info("Module4 async schema already up to date")
+    except Exception as error:
+        logger.warning("Module4 async schema migration skipped: %s", error, exc_info=True)
+
+
 def resolve_local_model_alias(model_name: Optional[str]) -> str:
     import os
 
@@ -524,6 +579,7 @@ def install_local_llm_model_alias_patch() -> None:
 
 
 bootstrap_local_env()
+ensure_claim_compare_async_columns()
 install_local_llm_model_alias_patch()
 from coze_coding_utils.helper.agent_helper import to_stream_input
 from coze_coding_utils.openai.handler import OpenAIChatHandler
