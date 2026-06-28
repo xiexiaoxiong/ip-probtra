@@ -50,6 +50,7 @@
 - 节点位于 `coze_search` 之后、`save_results` 之前；`coze_search` 已经会增量写入部分商品，因此 Portal 的首轮 partial 模块4仍可先跑，终轮模块4读取补全后的商品。
 - 默认只更新第一次检索已经存在的 `search_products`，不新增商品。
 - 可接受的同一商品依据：URL 精确一致、商品 ID 精确一致或商品名称相似度达到阈值。
+- 同一商品校验也支持更适合拆机文章/视频的强标识：搜索结果标题或链接包含原商品 ID，或同时命中原商品品牌和型号标识时，可接受；同品牌不同型号必须拒绝。
 - accepted 来源的文本会合并到 `description`，并完整记录在 `raw_payload.secondary_enrichment`；rejected 来源只留诊断，不进入模块4比对文本。
 - 默认启用第一次检索图片 OCR、第一次检索图片视觉读取、商品 URL Playwright 抓取和 HTTP 抓取；`SECONDARY_SEARCH_API_URL` 可接入搜索引擎/拆机文章/视频搜索；`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH=1` 可开启 Coze 精确二次搜索，但默认关闭以避免主流程耗时失控。
 - 图片视觉读取需要本地多模态模型环境变量；若未配置，会自动失败隔离。图片 OCR 不依赖 LLM，使用本机 `tesseract`。
@@ -197,3 +198,4 @@ GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complet
 - 新增 `direct_web_search` 无 API 搜索兜底，默认尝试 Bing/DuckDuckGo 的少量查询并解析搜索结果；当前真实关键词未返回可接受结果。合并策略要求无 accepted 来源的新一轮二次检索不得覆盖已有成功补充。
 - Portal 已透传模块3二次检索统计：`enriched_products_count`、`enrichment_error_message` 会进入 `analysis_sessions.results` 的 `module3EnrichedProductsCount`、`module3EnrichmentError`。
 - 入口语义修正：`input_keywords=[]` 必须直接返回空关键词，不得从数据库读取旧关键词。新增测试覆盖空数组不读库和显式关键词清理去重；`tests/test_secondary_enrichment.py` 13/13 通过。PM2 重启后 API 验证 `POST /run` with `input_keywords: []` 返回 `total_products_count=0`、`error_message="未提供搜索关键词"`。
+- 搜索结果增强：外部搜索响应会递归合并 `organic/videos/articles` 等混合列表；同一 URL/标题的 accepted/rejected 结果会去重；新增商品 ID 命中、品牌+型号命中的同一商品判定。新增测试证明同型号拆机视频 accepted、不同型号评测 rejected；`tests/test_secondary_enrichment.py` 18/18 通过。2026-06-29 已重启 `patent-3-search`，5105 `/health` 正常。

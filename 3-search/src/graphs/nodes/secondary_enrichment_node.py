@@ -102,6 +102,20 @@ def _text_similarity(a: Any, b: Any) -> float:
     return SequenceMatcher(None, left, right).ratio()
 
 
+def _identity_text(*values: Any) -> str:
+    return " ".join(_normalize_space(value).lower() for value in values if _normalize_space(value))
+
+
+def _extract_model_tokens(*values: Any) -> List[str]:
+    text = _identity_text(*values)
+    tokens: List[str] = []
+    for token in re.findall(r"[a-z]{1,8}[-_\s]?\d[a-z0-9_-]{1,16}|\d[a-z]{1,8}\d*[a-z0-9_-]{0,12}", text):
+        normalized = re.sub(r"[\s_-]+", "", token.lower())
+        if len(normalized) >= 3 and normalized not in tokens:
+            tokens.append(normalized)
+    return tokens[:8]
+
+
 def _canonical_url(value: Any) -> str:
     url = _normalize_space(value)
     if not url:
@@ -133,6 +147,17 @@ def _same_product(original: Dict[str, Any], candidate: Dict[str, Any]) -> Tuple[
     candidate_id = _normalize_space(candidate.get("product_id") or candidate.get("id"))
     if original_id and candidate_id and original_id == candidate_id:
         return True, "product_id_exact", 1.0
+    candidate_text = _identity_text(
+        candidate.get("product_url"),
+        candidate.get("url"),
+        candidate.get("link"),
+        candidate.get("product_name"),
+        candidate.get("title"),
+        candidate.get("name"),
+        candidate.get("page_title"),
+    )
+    if original_id and len(original_id) >= 5 and original_id.lower() in candidate_text:
+        return True, "product_id_in_candidate", 0.98
 
     candidate_name = (
         candidate.get("product_name")
@@ -141,6 +166,14 @@ def _same_product(original: Dict[str, Any], candidate: Dict[str, Any]) -> Tuple[
         or candidate.get("page_title")
         or ""
     )
+    original_brand = _normalize_name(original.get("brand"))
+    candidate_normalized = _normalize_name(candidate_name)
+    if original_brand and original_brand in candidate_normalized:
+        original_tokens = _extract_model_tokens(original.get("product_name"), original.get("product_id"), original.get("product_url"))
+        candidate_tokens = _extract_model_tokens(candidate_name, candidate.get("product_url"), candidate.get("url"), candidate.get("link"))
+        if original_tokens and set(original_tokens).intersection(candidate_tokens):
+            return True, "brand_model_match", 0.92
+
     similarity = _text_similarity(original.get("product_name"), candidate_name)
     if similarity >= 0.72:
         return True, "name_similarity", similarity
@@ -407,6 +440,21 @@ def _build_secondary_queries(product: Dict[str, Any]) -> List[str]:
     return queries
 
 
+def _dedupe_result_items(items: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: List[Dict[str, Any]] = []
+    for item in items:
+        marker = _normalize_space(item.get("url") or item.get("title") or item.get("description") or item.get("query"))
+        if marker and marker in seen:
+            continue
+        if marker:
+            seen.add(marker)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
 def _coze_exact_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
     if not ENRICHMENT_ENABLE_COZE_EXACT_SEARCH:
         return {"source_type": "coze_exact_supplement", "accepted": [], "rejected": [], "queries": []}
@@ -445,19 +493,34 @@ def _coze_exact_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "source_type": "coze_exact_supplement",
         "queries": queries,
-        "accepted": accepted[:8],
-        "rejected": rejected[:12],
+        "accepted": _dedupe_result_items(accepted, 8),
+        "rejected": _dedupe_result_items(rejected, 12),
     }
 
 
 def _extract_search_items(response_data: Any) -> List[Dict[str, Any]]:
+    common_list_keys = ("results", "items", "data", "organic", "videos", "articles")
     if isinstance(response_data, list):
         return [item for item in response_data if isinstance(item, dict)]
     if isinstance(response_data, dict):
-        for key in ("results", "items", "data", "organic", "videos", "articles"):
+        items: List[Dict[str, Any]] = []
+        for key in common_list_keys:
             value = response_data.get(key)
             if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
+                items.extend(item for item in value if isinstance(item, dict))
+            elif isinstance(value, dict):
+                items.extend(_extract_search_items(value))
+        if items:
+            seen: set[str] = set()
+            unique: List[Dict[str, Any]] = []
+            for item in items:
+                marker = _normalize_space(item.get("url") or item.get("link") or item.get("title") or item.get("name"))
+                if marker and marker in seen:
+                    continue
+                if marker:
+                    seen.add(marker)
+                unique.append(item)
+            return unique
     return []
 
 
@@ -503,8 +566,8 @@ async def _generic_search_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "source_type": "generic_search_supplement",
         "queries": queries,
-        "accepted": accepted[:8],
-        "rejected": rejected[:12],
+        "accepted": _dedupe_result_items(accepted, 8),
+        "rejected": _dedupe_result_items(rejected, 12),
         "enabled": True,
     }
 
@@ -596,8 +659,8 @@ async def _direct_web_search_supplement(product: Dict[str, Any]) -> Dict[str, An
     return {
         "source_type": "direct_web_search",
         "queries": queries,
-        "accepted": accepted[:8],
-        "rejected": rejected[:12],
+        "accepted": _dedupe_result_items(accepted, 8),
+        "rejected": _dedupe_result_items(rejected, 12),
         "enabled": True,
     }
 

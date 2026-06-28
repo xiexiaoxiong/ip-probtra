@@ -1,5 +1,6 @@
 import sys
 import builtins
+import asyncio
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
@@ -10,6 +11,8 @@ from src.graphs.nodes.get_keywords_node import get_keywords_node
 from src.graphs.nodes.secondary_enrichment_node import (
     _classify_supplement_evidence,
     _extract_accepted_text,
+    _extract_search_items,
+    _generic_search_supplement,
     _image_vision_supplement,
     _merge_product_with_enrichment,
     _normalize_picture_urls,
@@ -78,6 +81,59 @@ def test_same_product_rejects_unrelated_product() -> None:
     candidate = {
         "title": "空气炸锅家用大容量",
         "product_url": "https://another.example.com/item/999",
+    }
+
+    accepted, reason, score = _same_product(original, candidate)
+
+    assert accepted is False
+    assert reason == "identity_mismatch"
+    assert score < 0.72
+
+
+def test_same_product_accepts_product_id_inside_article_url() -> None:
+    original = {
+        "product_name": "某品牌 P10 Pro 扫地机器人",
+        "product_id": "offer-123456789",
+        "product_url": "https://detail.1688.com/offer/123456789.html",
+    }
+    candidate = {
+        "title": "P10 Pro 扫地机器人拆机图文",
+        "url": "https://post.example.com/teardown/offer-123456789",
+    }
+
+    accepted, reason, score = _same_product(original, candidate)
+
+    assert accepted is True
+    assert reason == "product_id_in_candidate"
+    assert score == 0.98
+
+
+def test_same_product_accepts_brand_model_video_title() -> None:
+    original = {
+        "product_name": "普森斯 P10 Pro 中扫升降扫地机器人",
+        "brand": "普森斯",
+        "product_url": "https://detail.example.com/item/1",
+    }
+    candidate = {
+        "title": "普森斯 P10 Pro 拆机视频：底部结构与拖布支架",
+        "url": "https://www.bilibili.com/video/BV123",
+    }
+
+    accepted, reason, score = _same_product(original, candidate)
+
+    assert accepted is True
+    assert reason == "brand_model_match"
+    assert score == 0.92
+
+
+def test_same_product_rejects_same_brand_different_model() -> None:
+    original = {
+        "product_name": "普森斯 P10 Pro 中扫升降扫地机器人",
+        "brand": "普森斯",
+    }
+    candidate = {
+        "title": "普森斯 X20 扫地机器人评测",
+        "url": "https://post.example.com/x20-review",
     }
 
     accepted, reason, score = _same_product(original, candidate)
@@ -248,6 +304,83 @@ def test_normalize_picture_urls_accepts_strings_and_dicts() -> None:
         "https://example.com/b.jpg",
         "https://example.com/c.jpg",
     ]
+
+
+def test_extract_search_items_combines_nested_video_article_and_organic_results() -> None:
+    payload = {
+        "data": {
+            "organic": [
+                {"title": "商品详情", "url": "https://example.com/detail"},
+            ],
+            "videos": [
+                {"title": "拆机视频", "url": "https://video.example.com/1"},
+            ],
+            "articles": [
+                {"title": "拆机文章", "url": "https://post.example.com/1"},
+            ],
+        }
+    }
+
+    items = _extract_search_items(payload)
+
+    assert [item["title"] for item in items] == ["商品详情", "拆机视频", "拆机文章"]
+
+
+def test_generic_search_accepts_same_model_video_and_rejects_other_model(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return
+
+        def json(self) -> dict:
+            return {
+                "data": {
+                    "videos": [
+                        {
+                            "title": "普森斯 P10 Pro 拆机视频：底部拖布支架结构",
+                            "url": "https://www.bilibili.com/video/BV123",
+                            "description": "视频展示该型号底部有拖布组件和升降机构。",
+                        }
+                    ],
+                    "articles": [
+                        {
+                            "title": "普森斯 X20 扫地机器人评测",
+                            "url": "https://post.example.com/x20-review",
+                            "description": "另一型号的拆机文章。",
+                        }
+                    ],
+                }
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return
+
+        async def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "src.graphs.nodes.secondary_enrichment_node.SECONDARY_SEARCH_API_URL",
+        "http://secondary-search.test/search",
+    )
+    monkeypatch.setattr("src.graphs.nodes.secondary_enrichment_node.httpx.AsyncClient", FakeAsyncClient)
+
+    product = {
+        "product_name": "普森斯 P10 Pro 中扫升降扫地机器人",
+        "brand": "普森斯",
+    }
+    result = asyncio.run(_generic_search_supplement(product))
+
+    assert result["enabled"] is True
+    assert len(result["accepted"]) == 1
+    assert result["accepted"][0]["evidence_type"] == "video"
+    assert "拖布组件" in result["accepted"][0]["description"]
+    assert any(item["title"] == "普森斯 X20 扫地机器人评测" for item in result["rejected"])
 
 
 def test_image_vision_supplement_uses_first_search_images(monkeypatch) -> None:
