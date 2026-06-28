@@ -22,6 +22,8 @@ from utils.claim_scoring import (  # noqa: E402
     build_feature_segments,
     classify_unit_status,
     compute_claim_score,
+    compute_feature_awarded_score,
+    compute_feature_similarity_score,
     compute_product_score,
 )
 
@@ -110,8 +112,8 @@ def test_token_mismatch_zeroes_claim_and_product() -> None:
 
 def test_product_score_sums_features_without_mismatch() -> None:
     features = [
-        {"feature_awarded_score": 40.0, "matched_effective_length": 4, "zeroed_by_mismatch": False},
-        {"feature_awarded_score": 35.0, "matched_effective_length": 3, "zeroed_by_mismatch": False},
+        {"feature_awarded_score": 40.0, "feature_effective_length": 5, "matched_effective_length": 4, "zeroed_by_mismatch": False},
+        {"feature_awarded_score": 35.0, "feature_effective_length": 5, "matched_effective_length": 3, "zeroed_by_mismatch": False},
     ]
     claim_score, matched_length, zeroed = compute_claim_score(features, claim_total_effective_length=10)
     assert claim_score == 75.0
@@ -123,7 +125,31 @@ def test_product_score_sums_features_without_mismatch() -> None:
     ]) == 75.0
 
 
+def test_feature_score_caps_overlapping_matched_length() -> None:
+    assert compute_feature_similarity_score(
+        feature_effective_length=2,
+        matched_effective_length=4,
+        has_mismatch=False,
+    ) == 100.0
+    assert compute_feature_awarded_score(
+        feature_full_score=40.0,
+        feature_effective_length=2,
+        matched_effective_length=4,
+        has_mismatch=False,
+    ) == 40.0
+
+    features = [
+        {"feature_awarded_score": 40.0, "feature_effective_length": 2, "matched_effective_length": 4, "zeroed_by_mismatch": False},
+        {"feature_awarded_score": 30.0, "feature_effective_length": 3, "matched_effective_length": 2, "zeroed_by_mismatch": False},
+    ]
+    claim_score, matched_length, zeroed = compute_claim_score(features, claim_total_effective_length=5)
+    assert claim_score == 70.0
+    assert matched_length == 4
+    assert zeroed is False
+
+
 test_status_normalization()
 test_token_mismatch_zeroes_claim_and_product()
 test_product_score_sums_features_without_mismatch()
+test_feature_score_caps_overlapping_matched_length()
 print("module4 scoring pipeline tests passed")

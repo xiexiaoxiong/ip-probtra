@@ -8,10 +8,12 @@ from graphs.state import ApplyRulesInput, ApplyRulesOutput
 from utils.claim_scoring import (
     build_claim_totals,
     build_feature_segments,
+    cap_matched_effective_length,
     classify_unit_status,
     compute_claim_score,
     compute_feature_awarded_score,
     compute_feature_full_score,
+    compute_feature_similarity_score,
     compute_product_score,
     count_effective_units,
     score_band,
@@ -185,10 +187,20 @@ def _recompute_feature_result(feature_result: Dict[str, Any]) -> None:
 
     feature_result["matched_effective_length"] = matched_effective_length
     feature_result["zeroed_by_mismatch"] = has_mismatch
+    capped_matched_effective_length = cap_matched_effective_length(
+        feature_result["feature_effective_length"],
+        matched_effective_length,
+    )
+    feature_result["matched_effective_length"] = capped_matched_effective_length
+    feature_result["similarity_score"] = compute_feature_similarity_score(
+        feature_effective_length=feature_result["feature_effective_length"],
+        matched_effective_length=capped_matched_effective_length,
+        has_mismatch=has_mismatch,
+    )
     feature_result["feature_awarded_score"] = compute_feature_awarded_score(
         feature_full_score=feature_result["feature_full_score"],
         feature_effective_length=feature_result["feature_effective_length"],
-        matched_effective_length=matched_effective_length,
+        matched_effective_length=capped_matched_effective_length,
         has_mismatch=has_mismatch,
     )
 
@@ -346,6 +358,12 @@ def _compute_feature_result(
     if feature_effective_length <= 0:
         feature_effective_length = sum(int(unit.get("effective_length", 0) or 0) for unit in normalized_units)
     feature_full_score = compute_feature_full_score(feature_effective_length, claim_total_effective_length)
+    matched_effective_length = cap_matched_effective_length(feature_effective_length, matched_effective_length)
+    feature_similarity_score = compute_feature_similarity_score(
+        feature_effective_length=feature_effective_length,
+        matched_effective_length=matched_effective_length,
+        has_mismatch=has_mismatch,
+    )
     feature_awarded_score = compute_feature_awarded_score(
         feature_full_score=feature_full_score,
         feature_effective_length=feature_effective_length,
@@ -358,6 +376,7 @@ def _compute_feature_result(
         "feature_effective_length": feature_effective_length,
         "matched_effective_length": matched_effective_length,
         "feature_full_score": feature_full_score,
+        "similarity_score": feature_similarity_score,
         "feature_awarded_score": feature_awarded_score,
         "zeroed_by_mismatch": has_mismatch,
     }
@@ -389,15 +408,13 @@ def apply_rules_node(
             }
 
     claim_total_lengths = build_claim_totals(list(feature_meta_map.values()))
-    product_total_effective_length = sum(int(length or 0) for length in claim_total_lengths.values())
-
     comparison_features: List[Dict[str, Any]] = []
     for item in reviewed_analysis:
         fid = str(item.get("feature_id", ""))
         feature_meta = feature_meta_map.get(fid, {})
         claim_id: str = str(feature_meta.get("claim_id", "")).strip() or str(item.get("claim_id", "")).strip() or "unknown"
         claim_total_effective_length = int(claim_total_lengths.get(claim_id, 0) or 0)
-        feature_result = _compute_feature_result(item, feature_meta, product_total_effective_length)
+        feature_result = _compute_feature_result(item, feature_meta, claim_total_effective_length)
 
         reasoning_type: str = str(item.get("reasoning_type", "相关信息缺失"))
         reason: str = str(item.get("reason", ""))
@@ -408,9 +425,9 @@ def apply_rules_node(
             "feature_id": fid,
             "feature_text": str(feature_meta.get("feature_text", "")),
             "evidence": evidence,
-            "similarity_score": feature_result["feature_awarded_score"],
+            "similarity_score": feature_result["similarity_score"],
             "score_band": score_band(
-                feature_result["feature_awarded_score"],
+                feature_result["similarity_score"],
                 has_mismatch=feature_result["zeroed_by_mismatch"],
                 matched_length=feature_result["matched_effective_length"],
                 total_length=feature_result["feature_effective_length"],
@@ -420,7 +437,9 @@ def apply_rules_node(
             "claim_id": claim_id,
             "evidence_images": evidence_images,
             "score_rationale": (
-                f"特征理论满分 {feature_result['feature_full_score']}，"
+                f"特征占比 {feature_result['feature_full_score']}%，"
+                f"特征得分 {feature_result['similarity_score']}%，"
+                f"加权贡献 {feature_result['feature_awarded_score']}，"
                 f"命中有效长度 {feature_result['matched_effective_length']}/{feature_result['feature_effective_length']}"
             ),
             "token_units": feature_result["token_units"],

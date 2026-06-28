@@ -30,9 +30,8 @@ export function countEffectiveUnits(text: string): number {
 }
 
 export function scoreColorClass(score: number, band?: ScoreBand): string {
-  // 待确认（信息不足）→ 黄色，不应该被纯低分染红
   if (band === 'uncertain') return 'text-amber-700';
-  if (band === 'exact_mismatch') return 'text-red-700';
+  if (band === 'exact_mismatch') return 'text-slate-500';
   if (score > 70) return 'text-green-700';
   if (score >= 30) return 'text-amber-700';
   return 'text-red-700';
@@ -40,7 +39,7 @@ export function scoreColorClass(score: number, band?: ScoreBand): string {
 
 export function scoreBgClass(score: number, band?: ScoreBand): string {
   if (band === 'uncertain') return 'bg-amber-50 border-amber-200';
-  if (band === 'exact_mismatch') return 'bg-red-50 border-red-200';
+  if (band === 'exact_mismatch') return 'bg-slate-100 border-slate-200';
   if (score > 70) return 'bg-green-50 border-green-200';
   if (score >= 30) return 'bg-amber-50 border-amber-200';
   return 'bg-red-50 border-red-200';
@@ -51,7 +50,7 @@ export function tokenStatusClass(status: ClaimTokenStatus): string {
     case 'match':
       return 'border-b-[3px] border-green-400 bg-green-100/50';
     case 'mismatch':
-      return 'border-b-[3px] border-red-400 bg-red-100/50';
+      return 'border-b-[3px] border-slate-400 bg-slate-100/70';
     default:
       return 'border-b-[3px] border-yellow-400 bg-yellow-100/60';
   }
@@ -77,13 +76,35 @@ export function computeClaimScores(elements: ClaimElementComparison[]): ClaimSco
 
   return Array.from(claimMap.entries()).map(([claimId, claimElements]) => {
     const zeroedByMismatch = claimElements.some((item) => item.scoreDetail?.zeroedByMismatch);
+    const claimTotalEffectiveLength = claimElements.reduce((sum, item) => sum + (item.scoreDetail?.effectiveLength ?? 0), 0);
+    const claimMatchedEffectiveLength = claimElements.reduce((sum, item) => {
+      const effectiveLength = item.scoreDetail?.effectiveLength ?? 0;
+      const matchedLength = item.scoreDetail?.matchedEffectiveLength ?? 0;
+      return sum + Math.min(Math.max(matchedLength, 0), Math.max(effectiveLength, 0));
+    }, 0);
     const similarityScore = zeroedByMismatch
       ? 0
       : Number(
-          claimElements.reduce((sum, item) => sum + (item.scoreDetail?.awardedScore ?? item.similarityScore ?? 0), 0).toFixed(2),
+          Math.min(
+            claimElements.reduce((sum, item) => {
+              const effectiveLength = item.scoreDetail?.effectiveLength ?? 0;
+              const matchedLength = item.scoreDetail?.matchedEffectiveLength ?? 0;
+              if (effectiveLength > 0 && claimTotalEffectiveLength > 0) {
+                const cappedMatched = Math.min(Math.max(matchedLength, 0), effectiveLength);
+                return sum + (cappedMatched / claimTotalEffectiveLength) * 100;
+              }
+
+              const fullScore = item.scoreDetail?.fullScore;
+              const featureScore = item.similarityScore ?? 0;
+              if (typeof fullScore === 'number' && Number.isFinite(fullScore)) {
+                return sum + (featureScore * fullScore) / 100;
+              }
+
+              return sum + (item.scoreDetail?.awardedScore ?? featureScore ?? 0);
+            }, 0),
+            100,
+          ).toFixed(2),
         );
-    const claimTotalEffectiveLength = claimElements.reduce((sum, item) => sum + (item.scoreDetail?.effectiveLength ?? 0), 0);
-    const claimMatchedEffectiveLength = claimElements.reduce((sum, item) => sum + (item.scoreDetail?.matchedEffectiveLength ?? 0), 0);
     return {
       claimId,
       similarityScore,

@@ -1,4 +1,3 @@
-import math
 import re
 from typing import Any, Dict, List, Tuple
 
@@ -70,6 +69,23 @@ def compute_feature_full_score(feature_effective_length: int, claim_total_effect
     return round((feature_effective_length / claim_total_effective_length) * 100, 2)
 
 
+def cap_matched_effective_length(feature_effective_length: int, matched_effective_length: int) -> int:
+    if feature_effective_length <= 0 or matched_effective_length <= 0:
+        return 0
+    return min(int(matched_effective_length), int(feature_effective_length))
+
+
+def compute_feature_similarity_score(
+    feature_effective_length: int,
+    matched_effective_length: int,
+    has_mismatch: bool,
+) -> float:
+    if has_mismatch or feature_effective_length <= 0:
+        return 0.0
+    capped_matched = cap_matched_effective_length(feature_effective_length, matched_effective_length)
+    return round((capped_matched / feature_effective_length) * 100, 2)
+
+
 def compute_feature_awarded_score(
     feature_full_score: float,
     feature_effective_length: int,
@@ -78,7 +94,8 @@ def compute_feature_awarded_score(
 ) -> float:
     if has_mismatch or feature_effective_length <= 0 or feature_full_score <= 0:
         return 0.0
-    ratio = matched_effective_length / feature_effective_length if feature_effective_length else 0
+    capped_matched = cap_matched_effective_length(feature_effective_length, matched_effective_length)
+    ratio = capped_matched / feature_effective_length if feature_effective_length else 0
     return round(feature_full_score * ratio, 2)
 
 
@@ -109,7 +126,12 @@ def compute_claim_score(features: List[Dict[str, Any]], claim_total_effective_le
     zeroed_by_mismatch = False
 
     for feature in features:
-        feature_matched_effective_length = int(feature.get("matched_effective_length", 0) or 0)
+        feature_effective_length = int(feature.get("feature_effective_length", 0) or 0)
+        raw_feature_matched_effective_length = int(feature.get("matched_effective_length", 0) or 0)
+        feature_matched_effective_length = cap_matched_effective_length(
+            feature_effective_length,
+            raw_feature_matched_effective_length,
+        )
         matched_effective_length += feature_matched_effective_length
         if bool(feature.get("zeroed_by_mismatch")):
             zeroed_by_mismatch = True
@@ -139,23 +161,14 @@ def score_band(
     把分数映射为展示分段。
 
     关键区分（必须依据单元级 unit_status 而非纯分数）：
-    - has_mismatch=True → "明确不相同"（红色）——存在明确不存在的单元
-    - matched_length=0 且 total_length>0 且 has_mismatch=False → "待确认"（黄色）——
-      没有命中也没有反向证据，属于"现有信息不足"，不应该被判为"明确不相同"
-    - 其他按分数区间走
-
-    注意：score=0 不再直接等价于"明确不相同"，必须叠加 has_mismatch/matched_length
-    信息才能区分"待确认"和"明确不相同"。否则会出现"无法确认的特征整条标红"的问题。
+    - has_mismatch=True → "明确不相同"（由前端显示为浅灰）
+    - 其他按 70+/30-70/0-30 三段走；无明确不相同但 0 分也属于低相似
     """
     if has_mismatch:
         return "明确不相同"
-    if total_length > 0 and matched_length == 0:
-        return "待确认"
+    del matched_length, total_length
     if score > 70:
         return "明确相同"
     if score >= 30:
         return "中等相似"
-    # 兜底：score 接近 0 但没有命中/总数信息（遗留数据），按"待确认"处理
-    if math.isclose(score, 0.0):
-        return "待确认"
     return "低相似"

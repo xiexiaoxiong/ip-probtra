@@ -358,7 +358,7 @@ export const SCORE_BAND_CONFIG: Record<ScoreBand, { label: string; color: string
   high_similarity: { label: '高分命中', color: 'text-green-700', bgColor: 'bg-green-50' },
   medium_similarity: { label: '部分命中', color: 'text-amber-700', bgColor: 'bg-amber-50' },
   low_similarity: { label: '低分命中', color: 'text-red-700', bgColor: 'bg-red-50' },
-  exact_mismatch: { label: '明确不相同', color: 'text-red-700', bgColor: 'bg-red-50' },
+  exact_mismatch: { label: '明确不相同', color: 'text-slate-500', bgColor: 'bg-slate-100' },
   uncertain: { label: '待确认', color: 'text-amber-700', bgColor: 'bg-amber-50' },
 };
 
@@ -367,7 +367,7 @@ export const PRODUCT_RISK_CONFIG: Record<ProductRiskLevel, { label: string; colo
   high_risk: { label: '高分命中', color: 'text-green-700', bgColor: 'bg-green-50 border-green-200' },
   medium_risk: { label: '中风险候选', color: 'text-amber-700', bgColor: 'bg-amber-50 border-amber-200' },
   low_risk: { label: '低分命中', color: 'text-red-700', bgColor: 'bg-red-50 border-red-200' },
-  clear_low_risk: { label: '明确不相同', color: 'text-red-700', bgColor: 'bg-red-50 border-red-200' },
+  clear_low_risk: { label: '疑似不侵权', color: 'text-slate-500', bgColor: 'bg-slate-100 border-slate-200' },
 };
 
 export function scoreToBand(
@@ -375,14 +375,7 @@ export function scoreToBand(
   options?: { zeroedByMismatch?: boolean; matchedEffectiveLength?: number; totalEffectiveLength?: number }
 ): ScoreBand {
   const zeroed = options?.zeroedByMismatch ?? false;
-  const matched = options?.matchedEffectiveLength ?? 0;
-  const total = options?.totalEffectiveLength ?? 0;
-  // 1. 显式 mismatch 永远优先 → 红色"明确不相同"
   if (zeroed) return 'exact_mismatch';
-  // 2. 没有任何命中、也没有 mismatch（信息不足） → 黄色"待确认"
-  if (total > 0 && matched === 0) return 'uncertain';
-  // 3. score=0 且 total=0（遗留数据）也按"待确认"处理
-  if (score <= 0) return 'uncertain';
   if (score >= 100) return 'exact_match';
   if (score > 70) return 'high_similarity';
   if (score >= 30) return 'medium_similarity';

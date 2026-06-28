@@ -298,7 +298,9 @@ analyze_features
   - `matched_effective_length`
   - `claim_total_effective_length`
   - `zeroed_by_mismatch`
-- 当前目标口径：全部技术特征共同分配 100 分；待确认按有效字符/英文词比例得分；所有特征得分相加得到商品总分；任一特征明确不相同则整个商品总分直接归零。
+- 当前目标口径：排除标点和“所述”后计算有效长度；`feature_full_score` 表示特征占比百分比，等于特征有效长度 / 所属独立权利要求有效长度 * 100；`similarity_score` 表示特征得分，等于本特征已确认相同的有效长度 / 本特征有效长度 * 100；`feature_awarded_score` 表示加权贡献分，等于特征得分 * 特征占比。
+- 商品总分为各特征加权贡献分求和；同一特征内命中长度必须封顶到该特征有效长度，避免 token 长短粒度重叠导致重复计分；任一特征存在明确不相同单元时，整个商品总分直接归零并标记为“疑似不侵权”。
+- 显色规则：商品总分、Feature 特征得分均按 >70 绿色、30-70 黄色、0-30 红色；明确不相同覆盖为浅灰。具体 token 背景按相同绿色、不确定黄色、不相同灰色。
 
 数据库迁移：
 
@@ -407,7 +409,7 @@ analyze_features
 - 模块1已支持 PDF 文本提取、CN 专利元数据正则兜底、附图提取和 Postgres 保存。
 - 模块2通用/健身/家电三套代码存在，主输入已是 `patent_record_id` + `analysis_session_id`。
 - 模块3主流程可写 Postgres；Playwright 商品页抓取原型保留为独立实验/人工取证工具，不接入默认主流程。
-- 模块4评分化和 token 高亮链路已补脚本验证：token mismatch 会传导到特征、claim、商品归零；无 mismatch 时商品分按特征/claim 分相加。
+- 模块4评分化和 token 高亮链路已补脚本验证：token mismatch 会传导到特征、claim、商品归零；无 mismatch 时商品分按“特征得分 * 特征占比”加权求和，且重叠 token 命中长度会封顶到特征有效长度。
 - 异步检索 + partial + 终轮补跑已有编排字段，并新增脚本测试覆盖首轮 partial 与终轮 final 结果字段。
 - Portal 结果列表、详情页和分数表已共用结果一致性 helper，并新增脚本测试覆盖排序、详情查找和导出前数据摘要口径。
 - 行业路由与关键词确认流程已抽出纯函数并补脚本测试。
@@ -480,3 +482,5 @@ analyze_features
 - 新增测试脚本：`IP-protral/scripts/test-async-module3-module4.ts`、`scripts/test-results-consistency.ts`、`scripts/test-industry-keyword-flow.ts`、`4-claim-chat/scripts/test_module4_scoring_pipeline.py`。
 - 模块3商品页抓取产品决策：暂不接入默认主流程；原型测试需宿主权限运行 Playwright，提权后 `tests/test_product_page_capture.py` 8/8 通过。
 - 数据库验证：真实 `claim_compare_results` 已有 `similarity_score`、`score_band`、`feature_full_score`、`feature_awarded_score`、`feature_effective_length`、`matched_effective_length`、`claim_total_effective_length`、`zeroed_by_mismatch`、`token_units`。
+- 评分口径二次修正：`similarity_score` 统一为特征得分（0-100），`feature_awarded_score` 统一为加权贡献分；历史高分问题根因是重叠 token 的 `matched_effective_length` 超过 `feature_effective_length`，已在模块4和 Portal 聚合中封顶。
+- 历史数据回填：已用 `IP-protral/scripts/recalculate-analysis-scoring.ts analysis_1782625905937_titb69` 回填指定 session 的 180 条特征结果和 `analysis_sessions.results`；原三条高分商品从 97.97/80.35/70.19 调整为 80.36/68.83/60.36，且核对最终 run 中 `matched_effective_length > feature_effective_length` 的行数为 0。
