@@ -16,6 +16,7 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from graphs.nodes.apply_rules_node import apply_rules_node  # noqa: E402
+from graphs.nodes.analyze_features_node import _downgrade_weak_enrichment_only_units  # noqa: E402
 from graphs.nodes.review_analysis_node import review_analysis_node  # noqa: E402
 from graphs.state import ApplyRulesInput, ReviewAnalysisInput  # noqa: E402
 from utils.claim_scoring import (  # noqa: E402
@@ -148,8 +149,53 @@ def test_feature_score_caps_overlapping_matched_length() -> None:
     assert zeroed is False
 
 
+def test_weak_enrichment_only_match_is_downgraded() -> None:
+    candidate = {
+        "feature_id": "1B",
+        "evidence": "[网页搜索/product_page/weak；低置信同品线索，不得单独作为结构确认依据:示例网页] 写到具有升降拖地",
+        "reason": "网页补充资料显示升降拖地",
+        "reasoning_type": "文字直接公开",
+        "token_units": [
+            {
+                "text": "升降拖地",
+                "unit_status": "match",
+                "evidence": "[网页搜索/product_page/weak；低置信同品线索，不得单独作为结构确认依据:示例网页] 升降拖地",
+                "reason": "仅由弱同品网页支持",
+            }
+        ],
+    }
+
+    downgraded = _downgrade_weak_enrichment_only_units(candidate)
+    assert downgraded["reasoning_type"] == "相关信息缺失"
+    assert downgraded["token_units"][0]["unit_status"] == "uncertain"
+    assert "低置信同品线索" in downgraded["token_units"][0]["reason"]
+
+
+def test_weak_enrichment_with_ocr_support_keeps_match() -> None:
+    candidate = {
+        "feature_id": "1B",
+        "evidence": "[商品图片OCR] 显示拖地机；[网页搜索/product_page/weak；低置信同品线索，不得单独作为结构确认依据:示例网页] 提到拖地",
+        "reason": "商品图片OCR和弱网页线索均提到拖地",
+        "reasoning_type": "文字直接公开",
+        "token_units": [
+            {
+                "text": "拖地",
+                "unit_status": "match",
+                "evidence": "[商品图片OCR] 拖地；[网页搜索/product_page/weak；低置信同品线索，不得单独作为结构确认依据:示例网页] 拖地",
+                "reason": "有商品图片OCR支持，不是仅靠弱同品网页",
+            }
+        ],
+    }
+
+    downgraded = _downgrade_weak_enrichment_only_units(candidate)
+    assert downgraded["reasoning_type"] == "文字直接公开"
+    assert downgraded["token_units"][0]["unit_status"] == "match"
+
+
 test_status_normalization()
 test_token_mismatch_zeroes_claim_and_product()
 test_product_score_sums_features_without_mismatch()
 test_feature_score_caps_overlapping_matched_length()
+test_weak_enrichment_only_match_is_downgraded()
+test_weak_enrichment_with_ocr_support_keeps_match()
 print("module4 scoring pipeline tests passed")

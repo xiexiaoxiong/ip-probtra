@@ -154,6 +154,102 @@ def _downgrade_feature_mismatch_inconsistency(candidate: Dict[str, Any]) -> Dict
     return candidate
 
 
+_WEAK_ENRICHMENT_MARKERS = (
+    "低置信同品线索",
+    "/weak",
+    "identity_strength=weak",
+    "identity_strength: weak",
+    "weak；",
+    "weak;",
+)
+
+_STRONG_EVIDENCE_MARKERS = (
+    "[商品图片OCR]",
+    "商品图片OCR",
+    "图片OCR",
+    "OCR",
+    "商品名称",
+    "商品图片",
+    "图片显示",
+    "图片中",
+    "从图片",
+    "/strong",
+    "identity_strength=strong",
+    "identity_strength: strong",
+    "strong；",
+    "strong;",
+)
+
+
+def _has_weak_enrichment_marker(text: str) -> bool:
+    return any(marker in text for marker in _WEAK_ENRICHMENT_MARKERS)
+
+
+def _has_stronger_source_marker(text: str) -> bool:
+    return any(marker in text for marker in _STRONG_EVIDENCE_MARKERS)
+
+
+def _downgrade_weak_enrichment_only_units(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    二次检索中仅靠名称相似等弱同品校验进入的网页/文章/视频资料，不能单独支撑
+    match。若某个 token_unit 的正向依据只指向 weak enrichment，且没有同时引用
+    商品自身名称、图片/OCR或 strong 同品来源，则降级为 uncertain。
+    """
+    token_units = candidate.get("token_units", [])
+    if not isinstance(token_units, list) or not token_units:
+        return candidate
+
+    changed = False
+    for unit in token_units:
+        if not isinstance(unit, dict):
+            continue
+        if str(unit.get("unit_status", "")).strip() != "match":
+            continue
+
+        evidence_text = " ".join([
+            str(unit.get("evidence", "")),
+            str(unit.get("reason", "")),
+            str(candidate.get("evidence", "")),
+            str(candidate.get("reason", "")),
+        ])
+        if not _has_weak_enrichment_marker(evidence_text):
+            continue
+        if _has_stronger_source_marker(evidence_text):
+            continue
+
+        changed = True
+        unit["unit_status"] = "uncertain"
+        unit["reason"] = (
+            str(unit.get("reason", "")).rstrip("。. ")
+            + "（该正向判断仅由低置信同品线索支撑，不能单独作为结构确认依据，已降级为待确认）"
+        )
+
+    if not changed:
+        return candidate
+
+    token_units_after = [
+        unit for unit in token_units
+        if isinstance(unit, dict)
+    ]
+    has_match = any(str(unit.get("unit_status", "")).strip() == "match" for unit in token_units_after)
+    has_mismatch = any(str(unit.get("unit_status", "")).strip() == "mismatch" for unit in token_units_after)
+    if not has_match and not has_mismatch:
+        candidate["reasoning_type"] = "相关信息缺失"
+        candidate["reason"] = (
+            str(candidate.get("reason", "")).rstrip("。. ")
+            + "（原正向依据仅来自低置信同品线索，不能单独确认商品结构，已整体降级为待确认）"
+        )
+    elif not has_match and str(candidate.get("reasoning_type", "")) in (
+        "文字直接公开",
+        "从图片中看出",
+        "结合文字和图片毫无疑义得出",
+        "根据功能推导得出",
+    ):
+        candidate["reasoning_type"] = "相关信息缺失"
+
+    return candidate
+
+
 def _dedupe_features(features: List[Dict[str, str]]) -> List[Dict[str, str]]:
     deduped: List[Dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
@@ -428,6 +524,7 @@ def analyze_features_node(
     # 防御性兜底：特征级 reasoning_type 与单元级 unit_status 出现矛盾时，
     # 强制把整条特征降级为"待确认"，避免后续把所有 segment 标红。
     for fid, candidate in deduped_analysis_by_feature_id.items():
+        candidate = _downgrade_weak_enrichment_only_units(candidate)
         deduped_analysis_by_feature_id[fid] = _downgrade_feature_mismatch_inconsistency(candidate)
 
     valid_analysis.extend(deduped_analysis_by_feature_id.values())

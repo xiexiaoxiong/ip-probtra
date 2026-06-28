@@ -56,6 +56,7 @@
 - reasoning_type 为"相关信息缺失"且reason含明确缺失/不相同指示 → NO_MATCH
 - LLM仅输出evidence/reason/reasoning_type，不输出最终比对结论
 - 最终比对结论由 `apply_rules` 节点的确定性规则生成
+- 二次检索弱同品线索限制：带“低置信同品线索”或 `/weak` 标记的补充资料不能单独支撑 `token_unit=match`；`analyze_features_node._downgrade_weak_enrichment_only_units` 会把仅由 weak 资料支撑的 match 自动降级为 `uncertain`。只有同时引用商品名称、商品图片/OCR 或 `/strong` 同品来源等更强证据时，match 才能保留。
 
 ## 字段分类与图片提取策略（parse_and_fetch节点）
 - **分类策略**：关键词优先 + 字段类型推断
