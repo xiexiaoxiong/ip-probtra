@@ -50,6 +50,9 @@ def invention_point_refinement_node(
     user_prompt = up_tpl.render({
         "core_terms_text": terms_text,
         "invention_point": state.invention_point,
+        "required_features": json.dumps(state.required_features, ensure_ascii=False),
+        "optional_features": json.dumps(state.optional_features, ensure_ascii=False),
+        "excluded_generic_terms": "、".join(state.excluded_generic_terms) if state.excluded_generic_terms else "无",
         "invention_content": state.invention_content,
         "claim_text": state.claim_text,
         "background_tech": state.background_tech,

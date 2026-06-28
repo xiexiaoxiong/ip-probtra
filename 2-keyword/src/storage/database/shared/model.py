@@ -19,6 +19,7 @@ class PatentParseRecord(Base):
     patent_number: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     patent_holder: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    abstract_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     application_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     priority_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     specification: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

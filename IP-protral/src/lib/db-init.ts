@@ -100,6 +100,7 @@ async function ensureCoreTables(): Promise<void> {
       patent_number text,
       patent_holder text,
       title text,
+      abstract_text text,
       application_date text,
       priority_date text,
       specification jsonb,
@@ -233,6 +234,7 @@ async function ensureCoreTables(): Promise<void> {
   await pgQuery(`alter table analysis_sessions add column if not exists user_id integer references users(id) on delete cascade`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_title text`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_number text`);
+  await pgQuery(`alter table patent_parse_records add column if not exists abstract_text text`);
   await pgQuery(`alter table analysis_steps add column if not exists started_at timestamptz`);
   await pgQuery(`alter table analysis_steps add column if not exists completed_at timestamptz`);
 

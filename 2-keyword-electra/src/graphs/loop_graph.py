@@ -16,6 +16,8 @@ from graphs.state import (
     ProductObjectExtractionOutput,
     InventionPointExtractionInput,
     InventionPointExtractionOutput,
+    RequiredFeatureExtractionInput,
+    RequiredFeatureExtractionOutput,
     KeywordExtractionInput,
     KeywordExtractionOutput,
     InventionPointRefinementInput,
@@ -36,6 +38,7 @@ from graphs.nodes.record_dispatch_node import record_dispatch_node
 from graphs.nodes.input_validation_node import input_validation_node
 from graphs.nodes.product_object_extraction_node import product_object_extraction_node
 from graphs.nodes.invention_point_extraction_node import invention_point_extraction_node
+from graphs.nodes.required_feature_extraction_node import required_feature_extraction_node
 from graphs.nodes.keyword_extraction_node import keyword_extraction_node
 from graphs.nodes.invention_point_refinement_node import invention_point_refinement_node
 from graphs.nodes.keyword_filtering_node import keyword_filtering_node
@@ -81,6 +84,15 @@ def invention_point_extraction_wrapper(
 ) -> InventionPointExtractionOutput:
     """发明点提炼"""
     return invention_point_extraction_node(state, config, runtime)
+
+
+def required_feature_extraction_wrapper(
+    state: RequiredFeatureExtractionInput,
+    config: RunnableConfig,
+    runtime: Runtime
+) -> RequiredFeatureExtractionOutput:
+    """必要检索特征识别"""
+    return required_feature_extraction_node(state, config, runtime)
 
 
 def keyword_extraction_wrapper(
@@ -191,6 +203,11 @@ sub_builder.add_node(
     metadata={"type": "agent", "llm_cfg": "config/invention_point_extraction_llm_cfg.json"}
 )
 sub_builder.add_node(
+    "required_feature_extraction",
+    required_feature_extraction_wrapper,
+    metadata={"type": "agent", "llm_cfg": "config/required_feature_extraction_llm_cfg.json"}
+)
+sub_builder.add_node(
     "keyword_extraction",
     keyword_extraction_wrapper,
     metadata={"type": "agent", "llm_cfg": "config/keyword_extraction_llm_cfg.json"}
@@ -244,8 +261,11 @@ sub_builder.add_conditional_edges(
 # 产品客体提取 → 发明点提炼
 sub_builder.add_edge("product_object_extraction", "invention_point_extraction")
 
-# 发明点提炼 → 关键词提取
-sub_builder.add_edge("invention_point_extraction", "keyword_extraction")
+# 发明点提炼 → 必要检索特征识别
+sub_builder.add_edge("invention_point_extraction", "required_feature_extraction")
+
+# 必要检索特征识别 → 关键词提取
+sub_builder.add_edge("required_feature_extraction", "keyword_extraction")
 
 # 关键词提取 → 发明点特征词精炼
 sub_builder.add_edge("keyword_extraction", "invention_point_refinement")

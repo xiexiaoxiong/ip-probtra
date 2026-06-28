@@ -50,7 +50,9 @@ def keyword_filtering_node(
     up_tpl = Template(up)
     user_prompt = up_tpl.render({
         "core_terms": "、".join(core_term_texts) if core_term_texts else "无",
-        "invention_point": state.invention_point or "未提供"
+        "invention_point": state.invention_point or "未提供",
+        "required_features": json.dumps(state.required_features, ensure_ascii=False),
+        "excluded_generic_terms": "、".join(state.excluded_generic_terms) if state.excluded_generic_terms else "无",
     })
     
     # 初始化 LLM 客户端
@@ -211,6 +213,33 @@ def keyword_filtering_node(
         ]
         if not filter_log:
             filter_log = "筛选结果为空，已回退为直接使用原始核心术语"
+
+    excluded_normalized = {re.sub(r"\s+", "", term).lower() for term in state.excluded_generic_terms if term}
+    required_terms = []
+    for feature in state.required_features:
+        text = str(feature.get("text", "")).strip() if isinstance(feature, dict) else str(feature).strip()
+        if text:
+            required_terms.append(
+                {
+                    "text": text,
+                    "category": "required_feature",
+                    "source_location": feature.get("source", "required_feature") if isinstance(feature, dict) else "required_feature",
+                    "confidence": feature.get("confidence", 0.9) if isinstance(feature, dict) else 0.9,
+                }
+            )
+
+    merged_terms = []
+    seen_terms = set()
+    for term in required_terms + filtered_core_terms:
+        text = str(term.get("text", "")).strip()
+        normalized = re.sub(r"\s+", "", text).lower()
+        if not normalized or normalized in seen_terms:
+            continue
+        if normalized in excluded_normalized:
+            continue
+        seen_terms.add(normalized)
+        merged_terms.append(term)
+    filtered_core_terms = merged_terms
     
     return KeywordFilteringOutput(
         filtered_core_terms=filtered_core_terms,

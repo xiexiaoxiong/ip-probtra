@@ -25,17 +25,6 @@ def invention_point_extraction_node(
     """
     ctx = runtime.context
     
-    # 空值防护：权利要求文本和发明内容都为空时，返回默认值
-    has_claim_text = bool(state.claim_text and state.claim_text.strip())
-    has_invention_content = bool(state.invention_content and state.invention_content.strip())
-    
-    if not has_claim_text and not has_invention_content:
-        return InventionPointExtractionOutput(
-            invention_point="",
-            invention_point_source="",
-            innovation_direction=""
-        )
-    
     # 读取 LLM 配置
     cfg_file = os.path.join(os.getenv("COZE_WORKSPACE_PATH"), config['metadata']['llm_cfg'])
     with open(cfg_file, 'r', encoding='utf-8') as fd:
@@ -48,9 +37,12 @@ def invention_point_extraction_node(
     # 使用 Jinja2 渲染提示词
     up_tpl = Template(up)
     user_prompt = up_tpl.render({
-        "claim_text": state.claim_text if has_claim_text else "（未提供权利要求文本，请从发明内容中提炼）",
-        "invention_content": state.invention_content if has_invention_content else "（未提供）",
-        "description_figures": state.description_figures if state.description_figures else "（未提供）"
+        "claim_text": state.claim_text,
+        "abstract_text": state.abstract_text,
+        "invention_content": state.invention_content,
+        "background_tech": state.background_tech,
+        "dependent_claims_text": state.dependent_claims_text,
+        "description_figures": state.description_figures
     })
     
     # 初始化 LLM 客户端
@@ -84,15 +76,12 @@ def invention_point_extraction_node(
     else:
         result_text = str(content).strip()
     
-    # 解析发明点、来源和创新方向（预期格式：发明点内容|来源位置|创新方向）
-    # 从右向左分割，最多分3段，避免发明点内容中的|被误切割
-    parts = result_text.rsplit("|", 2)
+    # 解析发明点和来源（预期格式：发明点内容|来源位置）
+    parts = result_text.split("|")
     invention_point = parts[0].strip() if len(parts) > 0 else result_text
     invention_point_source = parts[1].strip() if len(parts) > 1 else "说明书内容"
-    innovation_direction = parts[2].strip() if len(parts) > 2 else ""
     
     return InventionPointExtractionOutput(
         invention_point=invention_point,
-        invention_point_source=invention_point_source,
-        innovation_direction=innovation_direction
+        invention_point_source=invention_point_source
     )

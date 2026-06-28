@@ -126,7 +126,8 @@ def structure_identify_node(
                         patent_number=metadata_raw.get("patent_number"),
                         application_date=metadata_raw.get("application_date"),
                         priority_date=metadata_raw.get("priority_date"),
-                        title=metadata_raw.get("title")
+                        title=metadata_raw.get("title"),
+                        abstract=metadata_raw.get("abstract")
                     )
                 
                 # 用CN专利正则提取结果填补LLM未识别的字段
@@ -140,6 +141,10 @@ def structure_identify_node(
                     patent_metadata.patent_holder = cn_metadata.patent_holder
                 if not patent_metadata.title and cn_metadata.title:
                     patent_metadata.title = cn_metadata.title
+                if not patent_metadata.abstract and cn_metadata.abstract:
+                    patent_metadata.abstract = cn_metadata.abstract
+                if not patent_metadata.title:
+                    patent_metadata.title = _infer_title_from_claims_text(claims_section_text)
 
                 existing_section_names = {section.section_name for section in specification_sections}
                 for fallback_section in fallback_sections:
@@ -226,8 +231,8 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
         if pdate_match:
             metadata.priority_date = pdate_match.group(1).strip().replace('.', '-').replace('/', '-')
     
-    # (54)发明名称 - 名称可能跨行，到(57)摘要之前结束
-    m54 = re.search(r'\(54\)\s*发明名称\s*\n?\s*([\s\S]*?)(?=\n\s*\(57\)|\n\s*摘要)', raw_text)
+    # (54)名称 - 兼容“发明名称 / 实用新型名称 / 外观设计名称”等首页标记
+    m54 = re.search(r'\(54\)\s*(?:发明|实用新型|外观设计)?名称\s*\n?\s*([\s\S]*?)(?=\n\s*\(57\)|\n\s*摘要)', raw_text)
     if m54:
         title_text = m54.group(1).strip()
         # 合并跨行：移除换行符和多余空格
@@ -241,6 +246,16 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
         # 合并跨行
         holder_text = re.sub(r'\s*\n\s*', '', holder_text)
         metadata.patent_holder = holder_text
+
+    # (57)摘要 - 首页摘要通常位于(57)标记后，到权利要求书/说明书或下一编号字段前结束
+    m57 = re.search(
+        r'\(57\)\s*摘要\s*([\s\S]*?)(?=\n\s*(?:权\s*利\s*要\s*求\s*书|说\s*明\s*书|\(\d{2}\))|$)',
+        raw_text,
+    )
+    if m57:
+        abstract_text = re.sub(r'\s*\n\s*', '', m57.group(1)).strip()
+        if abstract_text:
+            metadata.abstract = abstract_text
     
     logger.info(
         f"CN专利元数据提取: 专利号={metadata.patent_number}, "
@@ -249,6 +264,24 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
     )
     
     return metadata
+
+
+def _infer_title_from_claims_text(claims_text: str) -> Optional[str]:
+    """
+    当首页(54)发明名称未被提取到时，从第一项权利要求主题兜底推断标题。
+
+    只截取“一种/一种...，其特征在于”这类权利要求前序主题，不生成新摘要或法律判断。
+    """
+    if not claims_text:
+        return None
+    normalized = re.sub(r'\s+', '', claims_text)
+    match = re.search(r'(一种[^，。,；;:：]{1,40}?)(?:，?其特征在于|包括|至少包括|，)', normalized)
+    if match:
+        return match.group(1)
+    match = re.search(r'^\s*\d+[.、:：]\s*([^，。,；;:：]{2,40})', claims_text)
+    if match:
+        return re.sub(r'\s+', '', match.group(1)).strip()
+    return None
 
 
 def _extract_claim_ids_from_text(claims_text: str) -> List[str]:

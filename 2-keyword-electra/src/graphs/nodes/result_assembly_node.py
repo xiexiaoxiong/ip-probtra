@@ -34,6 +34,10 @@ def result_assembly_node(
             keyword_type_display = "HOLDER_BASED"  # 权利要求人+同款+客体
         elif keyword_type == "invention_based":
             keyword_type_display = "INVENTION_BASED"  # 核心发明点+客体
+        elif keyword_type == "required_feature":
+            keyword_type_display = "REQUIRED_FEATURE"  # 必要检索特征
+        elif keyword_type == "object_base":
+            keyword_type_display = "OBJECT_BASE"  # 主商品客体基础词
         else:
             keyword_type_display = "COMBINED"
         
@@ -49,8 +53,19 @@ def result_assembly_node(
         }
         keywords.append(keyword_item)
     
-    # 如果没有任何关键词，返回空列表（不阻断循环，由结果收集节点正常推进索引）
+    # 如果没有任何关键词，记录异常
     if len(keywords) == 0:
-        return ResultAssemblyOutput(keywords=[])
+        return ResultAssemblyOutput(
+            keywords=[{
+                "keyword_id": f"KW-{uuid.uuid4().hex[:8]}",
+                "claim_id": state.claim_id,
+                "keyword_text": "",
+                "keyword_type": "EMPTY",
+                "source_location": "",
+                "generation_method": "NONE",
+                "confidence_score": None,
+                "created_at": created_at
+            }]
+        )
     
     return ResultAssemblyOutput(keywords=keywords)

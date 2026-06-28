@@ -58,6 +58,7 @@ export interface Module1FinalOutput {
   metadata?: {
     title?: string;
     patent_number?: string;
+    abstract?: string;
     application_date?: string;
     priority_date?: string;
     patent_holder?: string;

@@ -151,6 +151,8 @@ file_read_node
 - PDF 文本读取必须走 PyMuPDF，不能把错误字符串当文本。
 - TXT 本身不含图片，除非文本中有图片 URL，否则附图为空是正常结果。
 - 附图提取失败是可恢复错误，不应阻断专利解析。
+- CN 专利首页元数据需要覆盖 `(54)发明名称`、`(54)实用新型名称`、`(54)外观设计名称` 和 `(57)摘要`；`PatentMetadata` 已包含 `abstract`，`patent_parse_records` 已增加 `abstract_text`。
+- Portal 分析概要不能只相信 `analysis_sessions.results.patent` 快照；如果缺少专利号、名称、摘要、权利要求或附图，必须按 `dbRecordId` / `patent_record_id` 回查模块1表 `patent_parse_records`、`patent_claims`、`patent_figures` 补齐。
 
 ## 模块2：关键词生成
 
@@ -194,6 +196,9 @@ record_dispatch
 - `record_process_loop` 会按记录数量动态提高 LangGraph `recursion_limit`。
 - 产品客体要求尽量精确到电商类目级，不要泛化到“健身器材”“家用电器”等大类。
 - 通用版存在行业路由外的两个变体：健身器材版、家电版；Portal 根据行业识别结果选择模块。
+- 后续关键词改造方向：模块2不能只从权利要求抽零散术语，应先基于独立权利要求、摘要、发明/实用新型内容、背景技术和必要从属权利要求，形成“主商品客体 + 必要检索特征 + 非必要扩展特征”的结构化理解。必要检索特征指缺少该特征通常不会落入保护范围，且不是主商品客体已天然包含的通用部件/功能；最终关键词必须优先覆盖这些必要特征。
+- 已落地必要特征框架：三套模块2（通用、健身、家电）均新增 `required_feature_extraction` 节点，位于“发明点提炼”之后、“关键词提取”之前。该节点优先用 LLM 通读独立权利要求、摘要、发明内容、背景技术和从属权利要求，输出 `required_features`、`optional_features`、`excluded_generic_terms`；代码兜底不维护具体专利词表，而是用通用语言模式抽取和短词化，例如“具备/具有 X 功能”抽 X，“X 控制结构/控制装置”抽 X，“X 模式”默认降为扩展特征，结构/模式词不得被 LLM 强行提升为必要特征。
+- 关键词组合护栏已改为强制生成：主客体基础词、必要特征基础词、必要特征+主客体、多必要特征+主客体；场景/人群词保留为低优先级扩展关键词，只能来自场景推断节点的明确输出，不能替代必要特征主骨架。新增 `OBJECT_BASE`、`REQUIRED_FEATURE`、`scenario_extension`、`audience_extension` 关键词类型。
 
 关键 Prompt 配置：
 
@@ -339,6 +344,7 @@ analyze_features
 - `src/app/page.tsx`：上传与进度首页。
 - `src/app/results/page.tsx`：结果列表页。
 - `src/app/results/[productId]/page.tsx`：商品详情页。
+- `src/app/module1/page.tsx`：模块1专用查看页，可通过 `/module1?session=<analysis_session_id>` 查看模块1提取的元数据、摘要、说明书章节、权利要求、附图和解析错误。
 - `src/components/claim-chart-table.tsx`：Claim Chart 和 token 高亮。
 - `src/components/results-score-table.tsx`：分数表格。
 - `src/lib/analysis-report-export.ts`：报告导出。
@@ -445,6 +451,7 @@ analyze_features
   - `IP-protral/src/app/api/analyze/route.ts`
   - 结果页/详情页/导出
 - 正式运行推荐 PM2 总入口，不要手工混合启动正式端口。
+- Portal 在 PM2 下运行 `IP-protral/dist/server.js`，不是源码热更新；每次修改前端后必须执行 `cd IP-protral && bash ./scripts/build.sh`，再 `pm2 restart patent-web`，否则用户看到的仍是旧构建。
 - 对 `3-search/tmp/`、`.next/`、`dist/`、`node_modules/`、各 `.venv/` 默认只读或忽略，除非任务明确要求。
 - 由于工作树已有用户改动，后续任何改动前先跑 `git status --short` 并读相关文件，不要覆盖未理解的变更。
 
@@ -484,3 +491,12 @@ analyze_features
 - 数据库验证：真实 `claim_compare_results` 已有 `similarity_score`、`score_band`、`feature_full_score`、`feature_awarded_score`、`feature_effective_length`、`matched_effective_length`、`claim_total_effective_length`、`zeroed_by_mismatch`、`token_units`。
 - 评分口径二次修正：`similarity_score` 统一为特征得分（0-100），`feature_awarded_score` 统一为加权贡献分；历史高分问题根因是重叠 token 的 `matched_effective_length` 超过 `feature_effective_length`，已在模块4和 Portal 聚合中封顶。
 - 历史数据回填：已用 `IP-protral/scripts/recalculate-analysis-scoring.ts analysis_1782625905937_titb69` 回填指定 session 的 180 条特征结果和 `analysis_sessions.results`；原三条高分商品从 97.97/80.35/70.19 调整为 80.36/68.83/60.36，且核对最终 run 中 `matched_effective_length > feature_effective_length` 的行数为 0。
+- Portal 视觉调整：商品详情页 Claim Chart 表格改为固定列宽，特征内容列加宽、比对分析列收窄并强制换行；结果页和详情页整体容器放宽到 `max-w-7xl`，增加轻量背景/卡片层级但不改变现有模块结构。受保护页面渲染截图因内置浏览器初始化失败且不能读取认证 token 而未完成，已通过 `pnpm ts-check`、`pnpm lint` 和 PM2 前端重启验证。
+- 运维修正：确认 `patent-web` 生产进程运行的是 `node dist/server.js`；前端源码改动后仅 `pm2 restart patent-web` 不会生效，必须先 `bash ./scripts/build.sh` 重新生成 `.next` 与 `dist/server.js`。本次已在 2026-06-28 16:54 重新构建并重启，`/login` 返回 200。
+- Portal 分析概要扩展：结果页分析概要展示专利号、专利名称、专利摘要和摘要附图；`PatentInfo` 新增 `abstract` 字段，新分析从模块1说明书“摘要”章节或 metadata 映射，历史结果页从 `specification` 中兜底提取摘要，摘要附图优先取 `drawings[0]`。本次已在 2026-06-28 17:17 重新构建并重启 `patent-web`。
+- 模块1元数据改进：`PatentMetadata` 新增 `abstract`；结构识别新增首页 `(57)摘要` 正则提取，并在 `(54)发明名称` 缺失时从第一项独立权利要求主题兜底推断专利名称。`analysis_1782625905937_titb69` 的模块1记录实际已有专利号 `202122753392.7` 和 6 张附图，但无 title/abstract；已回填 session 的专利号、附图、权利要求和可推断标题“一种水枪(1)”。摘要仍无法回填，因为该记录的 `patent_parse_records.specification` 没有“摘要”章节。2026-06-28 17:26 已重新构建前端并重启模块1/Portal。
+- Portal 商品详情页裁剪：按用户要求移除商品详情页中单独的“独立权利要求”展示区块，避免在 Claim Chart 前重复展示权利要求全文；底层 `independentClaims` 数据仍保留给分析概要、导出和后续流程使用。2026-06-28 18:06 已重新构建并重启 `patent-web`。
+- 模块1字段追踪页与回填修复：核查 `analysis_1782643869819_xckmhp` 后确认模块1数据库已解析出专利号 `CN 222278451 U`、名称“灯具装置”、6 张附图、1 条独立权利要求和 10 条从属权利要求；分析概要为空的根因是 `analysis_sessions.results` 没有保存 `patent` 快照，Portal 查询接口也未从模块1表回填。摘要缺失的根因是旧模型没有 `abstract` 字段，旧正则只匹配 `(54)发明名称` 且未提取 `(57)摘要`。已新增 `/module1?session=analysis_1782643869819_xckmhp` 专用页面，修复模块1摘要/实用新型名称提取、DB `abstract_text` 持久化、`/api/analyze` 和 `/api/analysis/[id]` 从模块1表补齐专利信息，并回填该历史 session 的专利概要。2026-06-28 19:24 已重新构建 Portal 并重启 `patent-1-patent-analysis`、`patent-web`；5101 `/health`、Portal `/login`、`/module1?session=analysis_1782643869819_xckmhp` 均返回 200。
+- 模块2改造规划：以 `analysis_1782651371368_9qeyd5` 为例，现有关键词包含“拖地扫地机器人”“中扫升降扫地机器人”等局部命中，但没有把“扫地机器人 + 拖地 + 升降”识别为必须共同覆盖的检索骨架，且生成了“懒人/养宠/有娃家庭”等无必要特征约束的发散词。后续应新增必要特征识别/覆盖校验层，在保留现有产品客体、发明点、术语精炼、组合流程的基础上，强制输出主客体词、必要特征词和必要组合词，并降低或剔除仅场景/人群/泛部件关键词。
+- 模块2必要特征框架落地：三套模块2均新增必要检索特征识别节点、摘要/完整说明书/从属权利要求输入、必要特征关键词护栏和回归脚本 `scripts/test_required_keyword_strategy.py`。`analysis_1782651371368_9qeyd5` 实际路由为 `home_appliances`，已重跑 5104 生成 `keyword_run_id=127` 并回填 `analysis_sessions.results.keywords`；新关键词包含“扫地机器人”“拖地”“升降”“拖地扫地机器人”“升降扫地机器人”“拖地升降扫地机器人”“中扫升降扫地机器人”，且不再包含“懒人/养宠/有娃家庭”等无必要特征约束的人群噪声词。2026-06-28 21:48 已重启 `patent-2-keyword`、`patent-2-keyword-fitness`、`patent-2-keyword-electra`，三套 py_compile 和回归脚本通过，5104 `/health` 返回 ok。
+- 模块2去特例化修正：按用户要求移除针对“拖地/升降”的专利特例兜底，改为通用必要特征短词化规则；保留场景词作为有依据的扩展关键词，但以低优先级输出，不能污染必要特征。`analysis_1782651371368_9qeyd5` 已用 5104 最终重跑生成 `keyword_run_id=130` 并回填，结果包含“扫地机器人”“拖地”“升降”“拖地扫地机器人”“升降扫地机器人”“拖地升降扫地机器人”“中扫升降扫地机器人”，并保留“拖地模式扫地机器人”“刷地扫地机器人”等扩展词。三套 `scripts/test_required_keyword_strategy.py` 均通过，三个模块2 PM2 服务已重启。

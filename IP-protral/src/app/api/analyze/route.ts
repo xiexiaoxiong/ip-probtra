@@ -469,6 +469,7 @@ function mapPatentFromModule1(module1Result: Module1Result): PatentInfo | undefi
     .map(([section, text]) => `${section}\n${text}`)
     .join('\n\n')
     .trim();
+  const patentAbstract = extractPatentAbstract(specificationMap) || finalOutput.metadata?.abstract;
 
   const drawings = Array.isArray(finalOutput.figures)
     ? finalOutput.figures
@@ -477,13 +478,35 @@ function mapPatentFromModule1(module1Result: Module1Result): PatentInfo | undefi
     : [];
 
   return {
-    title: finalOutput.metadata?.title,
+    title: finalOutput.metadata?.title || inferPatentTitleFromClaims(independentClaims),
     patentNumber: finalOutput.metadata?.patent_number,
+    abstract: patentAbstract || undefined,
     independentClaims: independentClaims.length > 0 ? independentClaims : undefined,
     dependentClaims: dependentClaims.length > 0 ? dependentClaims : undefined,
     specification: specification || undefined,
     drawings: drawings.length > 0 ? drawings : undefined,
   };
+}
+
+function inferPatentTitleFromClaims(independentClaims: string[]): string | undefined {
+  const firstClaim = independentClaims.find((claim) => claim.trim());
+  if (!firstClaim) return undefined;
+  const normalized = firstClaim.replace(/\s+/g, '');
+  const match = normalized.match(/(一种[^，。,；;:：]{1,40}?)(?:，?其特征在于|包括|至少包括|，)/);
+  return match?.[1];
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function extractPatentAbstract(specificationMap: Record<string, unknown>): string {
+  for (const [section, text] of Object.entries(specificationMap)) {
+    if (!String(section || '').includes('摘要')) continue;
+    const value = String(text || '').trim();
+    if (value) return value;
+  }
+  return '';
 }
 
 function explainModule1LocalBlockers(module1Result: Module1Result): string {
@@ -1000,6 +1023,49 @@ async function getPatentFigureUrls(patentRecordId: number): Promise<string[] | n
   }
 }
 
+async function getPatentFromDb(patentRecordId: number): Promise<PatentInfo | undefined> {
+  try {
+    const recordResult = await pgQuery<Record<string, unknown>>(
+      `select patent_number, title, abstract_text, specification from patent_parse_records where id = $1 limit 1`,
+      [patentRecordId],
+    );
+    const record = recordResult.rows[0];
+    if (!record) return undefined;
+
+    const claimsResult = await pgQuery<Record<string, unknown>>(
+      `select claim_type, claim_text from patent_claims where record_id = $1 order by id asc`,
+      [patentRecordId],
+    );
+    const independentClaims = claimsResult.rows
+      .filter((row) => row['claim_type'] === 'INDEPENDENT' && row['claim_text'])
+      .map((row) => String(row['claim_text']));
+    const dependentClaims = claimsResult.rows
+      .filter((row) => row['claim_type'] === 'DEPENDENT' && row['claim_text'])
+      .map((row) => String(row['claim_text']));
+
+    const specificationMap = record['specification'] && typeof record['specification'] === 'object'
+      ? record['specification'] as Record<string, unknown>
+      : {};
+    const specification = Object.entries(specificationMap)
+      .map(([section, text]) => `${section}\n${text}`)
+      .join('\n\n')
+      .trim();
+    const drawings = await getPatentFigureUrls(patentRecordId);
+
+    return {
+      title: asNonEmptyString(record['title']) || inferPatentTitleFromClaims(independentClaims),
+      patentNumber: asNonEmptyString(record['patent_number']),
+      abstract: asNonEmptyString(record['abstract_text']) || extractPatentAbstract(specificationMap) || undefined,
+      independentClaims: independentClaims.length > 0 ? independentClaims : undefined,
+      dependentClaims: dependentClaims.length > 0 ? dependentClaims : undefined,
+      specification: specification || undefined,
+      drawings: drawings && drawings.length > 0 ? drawings : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 async function getKeywordTexts(patentRecordId: number, limit: number = 30): Promise<string[] | null> {
   try {
     const exists = await pgQuery<{ exists: string | null }>(
@@ -1199,7 +1265,7 @@ async function executePipeline(
       (msg) => console.log(`[Pipeline ${sessionId}] 模块1进度: ${msg}`),
     );
 
-    const patentFromModule1 = mapPatentFromModule1(module1Result);
+    let patentFromModule1 = mapPatentFromModule1(module1Result);
     if (
       patentFromModule1
       && (!patentFromModule1.drawings || patentFromModule1.drawings.length === 0)
@@ -1209,6 +1275,32 @@ async function executePipeline(
       const figureUrls = await getPatentFigureUrls(module1Result.dbRecordId);
       if (figureUrls && figureUrls.length > 0) {
         patentFromModule1.drawings = figureUrls;
+      }
+    }
+    if (
+      module1Result.dbRecordId
+      && module1Result.dbRecordId > 0
+      && (
+        !patentFromModule1
+        || !patentFromModule1.title
+        || !patentFromModule1.patentNumber
+        || !patentFromModule1.abstract
+        || !patentFromModule1.drawings?.length
+      )
+    ) {
+      const dbPatent = await getPatentFromDb(module1Result.dbRecordId);
+      if (dbPatent) {
+        patentFromModule1 = {
+          ...(dbPatent || {}),
+          ...(patentFromModule1 || {}),
+          title: patentFromModule1?.title || dbPatent.title,
+          patentNumber: patentFromModule1?.patentNumber || dbPatent.patentNumber,
+          abstract: patentFromModule1?.abstract || dbPatent.abstract,
+          independentClaims: patentFromModule1?.independentClaims?.length ? patentFromModule1.independentClaims : dbPatent.independentClaims,
+          dependentClaims: patentFromModule1?.dependentClaims?.length ? patentFromModule1.dependentClaims : dbPatent.dependentClaims,
+          specification: patentFromModule1?.specification || dbPatent.specification,
+          drawings: patentFromModule1?.drawings?.length ? patentFromModule1.drawings : dbPatent.drawings,
+        };
       }
     }
     let module1ClaimCount = module1Result.finalOutput?.claims?.length ?? 0;

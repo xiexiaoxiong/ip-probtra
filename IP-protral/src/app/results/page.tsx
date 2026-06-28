@@ -18,8 +18,7 @@ import Link from 'next/link';
 import { FeishuConfig } from '@/components/feishu-config';
 import { ResultsScoreTable } from '@/components/results-score-table';
 import type { ProductInfo } from '@/lib/types';
-import { PRODUCT_RISK_CONFIG } from '@/lib/types';
-import { findComparison, sortProductsByComparisonScore } from '@/lib/results-consistency';
+import { sortProductsByComparisonScore } from '@/lib/results-consistency';
 
 export default function ResultsPage() {
   return (
@@ -36,6 +35,22 @@ export default function ResultsPage() {
       <ResultsContent />
     </Suspense>
   );
+}
+
+function getPatentAbstract(explicitAbstract?: string, specification?: string): string {
+  if (explicitAbstract?.trim()) {
+    return explicitAbstract.trim();
+  }
+  const source = specification || '';
+  if (!source.trim()) return '';
+
+  const match = source.match(/(?:^|\n)摘要\s*\n([\s\S]*?)(?=\n{2,}[^\n]{1,30}\n|$)/);
+  if (match?.[1]?.trim()) {
+    return match[1].trim();
+  }
+
+  const inlineMatch = source.match(/摘要[:：\s]*([\s\S]{20,600}?)(?=\n{2,}|$)/);
+  return inlineMatch?.[1]?.trim() || '';
 }
 
 function ResultsContent() {
@@ -161,10 +176,9 @@ function ResultsContent() {
   const comparisons = importedComparisons || session.results?.comparisons || [];
   const feishuUrl = session.results?.feishuUrl;
   const isSessionFinished = session.status === 'completed' || session.status === 'error';
-
-  // 获取商品对应的比对结果
-  const getComparison = (productId: string): ProductComparison | undefined =>
-    findComparison(comparisons, productId, products.find((product) => product.id === productId));
+  const patent = session.results?.patent;
+  const patentAbstract = getPatentAbstract(patent?.abstract, patent?.specification);
+  const abstractFigure = Array.isArray(patent?.drawings) ? patent.drawings.find((url) => typeof url === 'string' && url.trim()) : undefined;
 
   const handleExportReport = async () => {
     if (!sessionId || exporting) {
@@ -237,11 +251,11 @@ function ResultsContent() {
   const sortedProducts = sortProductsByComparisonScore(products, comparisons);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-muted/20">
       {/* 顶部导航 */}
-      <header className="border-b bg-background/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <header className="border-b bg-background/90 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
             <Button variant="ghost" size="sm" onClick={() => router.push('/')} className="gap-1.5">
               <ArrowLeft className="h-4 w-4" />
               返回
@@ -254,18 +268,26 @@ function ResultsContent() {
                 </Button>
               </Link>
             )}
+            {sessionId && (
+              <Link href={`/module1?session=${sessionId}`}>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <FileSearch className="h-4 w-4" />
+                  模块1结果
+                </Button>
+              </Link>
+            )}
             <Separator orientation="vertical" className="h-5" />
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-primary" />
-              <span className="text-sm font-medium">侵权分析结果</span>
+              <span className="text-sm font-medium whitespace-nowrap">侵权分析结果</span>
             </div>
             {sessionId && (
-              <Badge variant="outline" className="font-mono text-[11px]">
+              <Badge variant="outline" className="hidden font-mono text-[11px] sm:inline-flex">
                 {sessionId}
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -291,7 +313,7 @@ function ResultsContent() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         {exportError && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -299,7 +321,7 @@ function ResultsContent() {
           </Alert>
         )}
         {/* 分析概要 */}
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <FileSearch className="h-4 w-4" />
@@ -308,18 +330,46 @@ function ResultsContent() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {session.results?.patent?.title && (
-                <div>
-                  <span className="text-xs text-muted-foreground">专利标题</span>
-                  <p className="text-sm font-medium">{session.results.patent.title}</p>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <span className="text-xs text-muted-foreground">专利号</span>
+                      <p className="text-sm font-medium leading-6">{patent?.patentNumber || session.patentNumber || '暂未识别'}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">专利名称</span>
+                      <p className="text-sm font-medium leading-6">{patent?.title || session.patentTitle || '暂未识别'}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">专利摘要</span>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground whitespace-pre-wrap">
+                      {patentAbstract || '当前结果中暂无摘要内容。'}
+                    </p>
+                  </div>
                 </div>
-              )}
-              {session.results?.patent?.patentNumber && (
-                <div>
-                  <span className="text-xs text-muted-foreground">专利号</span>
-                  <p className="text-sm font-medium">{session.results.patent.patentNumber}</p>
+
+                <div className="space-y-3">
+                  <div className="rounded-lg border bg-background p-3 shadow-sm">
+                    <span className="text-xs text-muted-foreground">摘要附图</span>
+                    {abstractFigure ? (
+                      <a href={abstractFigure} target="_blank" rel="noopener noreferrer" className="mt-2 block overflow-hidden rounded-md border bg-muted">
+                        <img src={abstractFigure} alt="摘要附图" className="h-40 w-full object-contain" />
+                      </a>
+                    ) : (
+                      <div className="mt-2 flex h-40 items-center justify-center rounded-md border bg-muted/30 text-xs text-muted-foreground">
+                        暂无摘要附图
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <span className="text-xs text-muted-foreground">分析进度</span>
+                    <p className="mt-1 text-sm font-medium">{isSessionFinished ? '已完成' : '分析中'}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">结果页会自动同步后台最新数据。</p>
+                  </div>
                 </div>
-              )}
+              </div>
 
               {/* 关键词 */}
               {session.results?.keywords && session.results.keywords.length > 0 && (
@@ -336,24 +386,24 @@ function ResultsContent() {
               {/* 统计结果 */}
               <div>
                 <span className="text-xs text-muted-foreground">分析结果</span>
-                <div className="grid grid-cols-5 gap-3 mt-2">
-                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                <div className="grid gap-3 mt-2 sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="rounded-lg border bg-background p-3 text-center shadow-sm">
                     <div className="text-xl font-bold">{products.length}</div>
                     <div className="text-[11px] text-muted-foreground">检索商品总数</div>
                   </div>
-                  <div className="rounded-lg border bg-green-50/50 p-3 text-center dark:bg-green-950/20">
+                  <div className="rounded-lg border bg-green-50/70 p-3 text-center shadow-sm dark:bg-green-950/20">
                     <div className="text-xl font-bold text-green-700">{verdictStats.highRisk}</div>
                     <div className="text-[11px] text-green-600">高相似度商品</div>
                   </div>
-                  <div className="rounded-lg border bg-amber-50/50 p-3 text-center dark:bg-amber-950/20">
+                  <div className="rounded-lg border bg-amber-50/70 p-3 text-center shadow-sm dark:bg-amber-950/20">
                     <div className="text-xl font-bold text-amber-700">{verdictStats.mediumRisk}</div>
                     <div className="text-[11px] text-amber-600">中等相似度商品</div>
                   </div>
-                  <div className="rounded-lg border bg-red-50/50 p-3 text-center dark:bg-red-950/20">
+                  <div className="rounded-lg border bg-red-50/70 p-3 text-center shadow-sm dark:bg-red-950/20">
                     <div className="text-xl font-bold text-red-700">{verdictStats.lowRisk}</div>
                     <div className="text-[11px] text-red-600">低相似度商品</div>
                   </div>
-                  <div className="rounded-lg border bg-slate-50/50 p-3 text-center dark:bg-slate-950/20">
+                  <div className="rounded-lg border bg-slate-50/80 p-3 text-center shadow-sm dark:bg-slate-950/20">
                     <div className="text-xl font-bold text-slate-700 dark:text-slate-200">{verdictStats.clearLowRisk}</div>
                     <div className="text-[11px] text-slate-600 dark:text-slate-300">疑似不侵权</div>
                   </div>
@@ -366,7 +416,10 @@ function ResultsContent() {
         {/* 商品比对结果列表 */}
         {products.length > 0 ? (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">商品列表</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">商品列表</h2>
+              <span className="text-xs text-muted-foreground">按商品总分排序</span>
+            </div>
             <ResultsScoreTable products={sortedProducts} comparisons={comparisons} sessionId={sessionId || ''} />
           </div>
         ) : !isSessionFinished ? (

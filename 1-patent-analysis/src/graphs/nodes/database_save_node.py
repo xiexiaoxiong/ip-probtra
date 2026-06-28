@@ -22,8 +22,9 @@ from graphs.state import (
 logger = logging.getLogger(__name__)
 
 
-def _ensure_patent_figure_columns(engine: Any) -> None:
+def _ensure_patent_columns(engine: Any) -> None:
     statements = [
+        "ALTER TABLE patent_parse_records ADD COLUMN IF NOT EXISTS abstract_text TEXT",
         "ALTER TABLE patent_figures ADD COLUMN IF NOT EXISTS file_path TEXT",
         "ALTER TABLE patent_figures ADD COLUMN IF NOT EXISTS mime_type TEXT",
         "ALTER TABLE patent_figures ADD COLUMN IF NOT EXISTS file_size INTEGER",
@@ -81,7 +82,7 @@ def database_save_node(
                 PatentFigureModel.__table__,
             ],
         )
-        _ensure_patent_figure_columns(engine)
+        _ensure_patent_columns(engine)
 
         session = get_session()
         try:
@@ -98,6 +99,7 @@ def database_save_node(
             record.patent_number = metadata.patent_number
             record.patent_holder = metadata.patent_holder
             record.title = metadata.title
+            record.abstract_text = metadata.abstract
             record.application_date = metadata.application_date
             record.priority_date = metadata.priority_date
             record.specification = specification_dict

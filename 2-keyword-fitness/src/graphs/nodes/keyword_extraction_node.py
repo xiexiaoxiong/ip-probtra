@@ -40,6 +40,7 @@ def keyword_extraction_node(
     user_prompt = up_tpl.render({
         "claim_text": state.claim_text,
         "invention_point": state.invention_point,
+        "required_features": json.dumps(state.required_features, ensure_ascii=False),
         "patent_holder": state.patent_holder
     })
     

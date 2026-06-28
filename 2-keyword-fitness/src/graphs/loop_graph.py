@@ -16,14 +16,16 @@ from graphs.state import (
     ProductObjectExtractionOutput,
     InventionPointExtractionInput,
     InventionPointExtractionOutput,
+    RequiredFeatureExtractionInput,
+    RequiredFeatureExtractionOutput,
     KeywordExtractionInput,
     KeywordExtractionOutput,
     InventionPointRefinementInput,
     InventionPointRefinementOutput,
     KeywordFilteringInput,
     KeywordFilteringOutput,
-    SceneWordInferenceInput,
-    SceneWordInferenceOutput,
+    ScenarioAudienceInferenceInput,
+    ScenarioAudienceInferenceOutput,
     KeywordCombinationInput,
     KeywordCombinationOutput,
     ResultAssemblyInput,
@@ -36,10 +38,11 @@ from graphs.nodes.record_dispatch_node import record_dispatch_node
 from graphs.nodes.input_validation_node import input_validation_node
 from graphs.nodes.product_object_extraction_node import product_object_extraction_node
 from graphs.nodes.invention_point_extraction_node import invention_point_extraction_node
+from graphs.nodes.required_feature_extraction_node import required_feature_extraction_node
 from graphs.nodes.keyword_extraction_node import keyword_extraction_node
 from graphs.nodes.invention_point_refinement_node import invention_point_refinement_node
 from graphs.nodes.keyword_filtering_node import keyword_filtering_node
-from graphs.nodes.scene_word_inference_node import scene_word_inference_node
+from graphs.nodes.scenario_audience_inference_node import scenario_audience_inference_node
 from graphs.nodes.keyword_combination_node import keyword_combination_node
 from graphs.nodes.result_assembly_node import result_assembly_node
 from graphs.nodes.result_collect_node import result_collect_node
@@ -83,6 +86,15 @@ def invention_point_extraction_wrapper(
     return invention_point_extraction_node(state, config, runtime)
 
 
+def required_feature_extraction_wrapper(
+    state: RequiredFeatureExtractionInput,
+    config: RunnableConfig,
+    runtime: Runtime
+) -> RequiredFeatureExtractionOutput:
+    """必要检索特征识别"""
+    return required_feature_extraction_node(state, config, runtime)
+
+
 def keyword_extraction_wrapper(
     state: KeywordExtractionInput,
     config: RunnableConfig,
@@ -110,13 +122,13 @@ def keyword_filtering_wrapper(
     return keyword_filtering_node(state, config, runtime)
 
 
-def scene_word_inference_wrapper(
-    state: SceneWordInferenceInput,
+def scenario_audience_inference_wrapper(
+    state: ScenarioAudienceInferenceInput,
     config: RunnableConfig,
     runtime: Runtime
-) -> SceneWordInferenceOutput:
-    """场景词推断"""
-    return scene_word_inference_node(state, config, runtime)
+) -> ScenarioAudienceInferenceOutput:
+    """人群场景词推断"""
+    return scenario_audience_inference_node(state, config, runtime)
 
 
 def keyword_combination_wrapper(
@@ -191,6 +203,11 @@ sub_builder.add_node(
     metadata={"type": "agent", "llm_cfg": "config/invention_point_extraction_llm_cfg.json"}
 )
 sub_builder.add_node(
+    "required_feature_extraction",
+    required_feature_extraction_wrapper,
+    metadata={"type": "agent", "llm_cfg": "config/required_feature_extraction_llm_cfg.json"}
+)
+sub_builder.add_node(
     "keyword_extraction",
     keyword_extraction_wrapper,
     metadata={"type": "agent", "llm_cfg": "config/keyword_extraction_llm_cfg.json"}
@@ -206,9 +223,9 @@ sub_builder.add_node(
     metadata={"type": "agent", "llm_cfg": "config/keyword_filtering_llm_cfg.json"}
 )
 sub_builder.add_node(
-    "scene_word_inference",
-    scene_word_inference_wrapper,
-    metadata={"type": "agent", "llm_cfg": "config/scene_word_inference_llm_cfg.json"}
+    "scenario_audience_inference",
+    scenario_audience_inference_wrapper,
+    metadata={"type": "agent", "llm_cfg": "config/scenario_audience_inference_llm_cfg.json"}
 )
 sub_builder.add_node(
     "keyword_combination",
@@ -244,20 +261,23 @@ sub_builder.add_conditional_edges(
 # 产品客体提取 → 发明点提炼
 sub_builder.add_edge("product_object_extraction", "invention_point_extraction")
 
-# 发明点提炼 → 关键词提取
-sub_builder.add_edge("invention_point_extraction", "keyword_extraction")
+# 发明点提炼 → 必要检索特征识别
+sub_builder.add_edge("invention_point_extraction", "required_feature_extraction")
+
+# 必要检索特征识别 → 关键词提取
+sub_builder.add_edge("required_feature_extraction", "keyword_extraction")
 
 # 关键词提取 → 发明点特征词精炼
 sub_builder.add_edge("keyword_extraction", "invention_point_refinement")
 
-# 发明点特征词精炼 → 关键词筛选（精炼节点已包含同义不同说的表述，无需单独生成同义词）
+# 发明点特征词精炼 → 关键词筛选
 sub_builder.add_edge("invention_point_refinement", "keyword_filtering")
 
-# 关键词筛选 → 场景词推断
-sub_builder.add_edge("keyword_filtering", "scene_word_inference")
+# 关键词筛选 → 人群场景词推断
+sub_builder.add_edge("keyword_filtering", "scenario_audience_inference")
 
-# 场景词推断 → 关键词组合
-sub_builder.add_edge("scene_word_inference", "keyword_combination")
+# 人群场景词推断 → 关键词组合
+sub_builder.add_edge("scenario_audience_inference", "keyword_combination")
 
 # 关键词组合 → 结果组装
 sub_builder.add_edge("keyword_combination", "result_assembly")

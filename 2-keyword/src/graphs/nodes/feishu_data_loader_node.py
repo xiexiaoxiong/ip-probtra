@@ -24,6 +24,29 @@ def _find_spec_section(specification: dict, keywords: List[str]) -> str:
     return ""
 
 
+def _format_specification(specification: dict) -> str:
+    if not specification:
+        return ""
+    parts: List[str] = []
+    for key, value in specification.items():
+        text = str(value or "").strip()
+        if text:
+            parts.append(f"{key}\n{text}")
+    return "\n\n".join(parts)
+
+
+def _format_dependent_claims(claims: List[object]) -> str:
+    lines: List[str] = []
+    for claim in claims:
+        if getattr(claim, "claim_type", "") != "DEPENDENT":
+            continue
+        claim_id = str(getattr(claim, "claim_id", "") or "").strip()
+        claim_text = str(getattr(claim, "claim_text", "") or "").strip()
+        if claim_text:
+            lines.append(f"{claim_id}. {claim_text}" if claim_id else claim_text)
+    return "\n\n".join(lines)
+
+
 def feishu_data_loader_node(
     state: FeishuDataLoaderInput,
     config: RunnableConfig,
@@ -86,16 +109,21 @@ def feishu_data_loader_node(
             session.close()
 
         specification = patent_record.specification or {}
+        full_specification = _format_specification(specification)
+        dependent_claims_text = _format_dependent_claims(claims)
         data_fields = {
             "patent_holder": patent_record.patent_holder or "",
             "patent_number": patent_record.patent_number or "",
             "application_date": patent_record.application_date or patent_record.priority_date or "",
             "technical_field": _find_spec_section(specification, ["技术领域", "technical field"]),
             "background_tech": _find_spec_section(specification, ["背景技术", "background"]),
+            "abstract_text": getattr(patent_record, "abstract_text", "") or "",
             "invention_content": _find_spec_section(
                 specification,
                 ["发明内容", "实用新型内容", "发明概述", "summary"],
             ) or "\n".join(str(value) for value in specification.values()),
+            "full_specification": full_specification,
+            "dependent_claims_text": dependent_claims_text,
         }
 
         figure_records = [
@@ -163,7 +191,10 @@ def feishu_data_loader_node(
             "application_date": "application_date",
             "technical_field": "technical_field",
             "background_tech": "background_tech",
+            "abstract_text": "abstract_text",
             "invention_content": "invention_content",
+            "full_specification": "full_specification",
+            "dependent_claims_text": "dependent_claims_text",
             "claim_id": "claim_id",
             "claim_type": "claim_type",
             "claim_text": "claim_text",

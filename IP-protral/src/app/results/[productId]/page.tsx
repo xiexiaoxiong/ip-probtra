@@ -7,7 +7,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import type { AnalysisSession, ClaimElementComparison, ClaimScoreSummary, ProductComparison, ProductInfo, ScoreBand } from '@/lib/types';
+import type { AnalysisSession, ClaimElementComparison, ClaimScoreSummary, ScoreBand } from '@/lib/types';
 import { PRODUCT_RISK_CONFIG, SCORE_BAND_CONFIG, scoreToBand, scoreToRiskLevel } from '@/lib/types';
 import { ClaimChartTable } from '@/components/claim-chart-table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +21,6 @@ import {
   Loader2,
   AlertCircle,
   ShoppingCart,
-  FileText,
 } from 'lucide-react';
 import Link from 'next/link';
 import { findComparison, findProduct, sortProductsByComparisonScore } from '@/lib/results-consistency';
@@ -150,14 +149,13 @@ function ProductDetailContent() {
     totalEffectiveLength: productTotal,
   });
 
-  const independentClaims = session.results?.patent?.independentClaims || [];
   const sortedProducts = sortProductsByComparisonScore(products, comparisons);
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-background/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-muted/20">
+      <header className="border-b bg-background/90 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
             <Button
               variant="ghost"
               size="sm"
@@ -168,7 +166,7 @@ function ProductDetailContent() {
               返回列表
             </Button>
             <Separator orientation="vertical" className="h-5" />
-            <span className="text-sm font-medium truncate max-w-[300px]">{product.name}</span>
+            <span className="text-sm font-medium truncate max-w-[42vw]">{product.name}</span>
           </div>
           {feishuUrl && (
             <a
@@ -184,10 +182,13 @@ function ProductDetailContent() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         {/* 商品导航 */}
-        <div className="rounded-lg border bg-background p-3">
-          <div className="text-xs text-muted-foreground mb-2">切换商品:</div>
+        <div className="rounded-lg border bg-background/95 p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-xs font-medium text-muted-foreground">切换商品</div>
+            <div className="text-[11px] text-muted-foreground">{sortedProducts.length} 个商品</div>
+          </div>
           <div className="flex gap-1.5 flex-wrap">
             {sortedProducts.map((p) => (
               <Link
@@ -206,10 +207,10 @@ function ProductDetailContent() {
         </div>
 
         {/* 商品信息 + 侵权判定 */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex gap-5">
-              <div className="h-28 w-28 shrink-0 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
+        <Card className="shadow-sm">
+          <CardContent className="p-5 sm:p-6">
+            <div className="flex flex-col gap-5 sm:flex-row">
+              <div className="h-32 w-32 shrink-0 rounded-lg border bg-muted flex items-center justify-center overflow-hidden">
                 {product.imageUrl ? (
                   <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
                 ) : (
@@ -217,31 +218,33 @@ function ProductDetailContent() {
                 )}
               </div>
               <div className="flex-1 min-w-0 space-y-3">
-                <div>
-                  <h2 className="text-lg font-bold">{product.name}</h2>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h2 className="max-w-4xl text-xl font-semibold leading-snug">{product.name}</h2>
+                    {comparison && (
+                      <Badge
+                        variant="outline"
+                        className={`${productVerdictConfig.bgColor} ${productVerdictConfig.color} border text-xs`}
+                      >
+                        {productVerdictConfig.label}
+                      </Badge>
+                    )}
+                  </div>
                   {comparison && (
-                    <Badge
-                      variant="outline"
-                      className={`${productVerdictConfig.bgColor} ${productVerdictConfig.color} border text-xs mt-1`}
-                    >
-                      {productVerdictConfig.label}
-                    </Badge>
-                  )}
-                  {comparison && (
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      <span>商品总分: {productScore.toFixed(2)}</span>
-                      <span>分段: {SCORE_BAND_CONFIG[productScoreBand].label}</span>
-                      <span>
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span className="rounded-md border bg-background px-2 py-1">商品总分: {productScore.toFixed(2)}</span>
+                      <span className="rounded-md border bg-background px-2 py-1">分段: {SCORE_BAND_CONFIG[productScoreBand].label}</span>
+                      <span className="rounded-md border bg-background px-2 py-1">
                         特征得分小计: {claimScores.reduce((sum, item) => sum + item.similarityScore, 0).toFixed(2)}
                       </span>
                       {comparison.isLegacyScore && (
-                        <span>旧版评分</span>
+                        <span className="rounded-md border bg-background px-2 py-1">旧版评分</span>
                       )}
                     </div>
                   )}
                 </div>
                 {product.description && (
-                  <p className="text-sm text-muted-foreground line-clamp-3">{product.description}</p>
+                  <p className="max-w-5xl text-sm leading-6 text-muted-foreground line-clamp-3">{product.description}</p>
                 )}
                 <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                   {product.source && <span>来源: {product.source}</span>}
@@ -259,7 +262,7 @@ function ProductDetailContent() {
                       {claimScores.map((item) => {
                         const config = SCORE_BAND_CONFIG[normalizeScoreBand(item.scoreBand, item.similarityScore)];
                         return (
-                          <div key={item.claimId} className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+                          <div key={item.claimId} className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs shadow-sm">
                             <span className="text-muted-foreground">权利要求 {item.claimId}</span>
                             <span className="font-semibold">{item.similarityScore.toFixed(2)}</span>
                             <Badge variant="outline" className={`${config.bgColor} ${config.color} border text-[11px]`}>
@@ -278,28 +281,6 @@ function ProductDetailContent() {
             </div>
           </CardContent>
         </Card>
-
-        {/* 独立权利要求 */}
-        {independentClaims.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                独立权利要求
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {independentClaims.map((claim, index) => (
-                  <div key={index} className="rounded-lg border bg-muted/30 p-4">
-                    <div className="text-xs font-semibold text-muted-foreground mb-1">权利要求 {index + 1}</div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{claim}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* 比对规则说明 */}
         {comparison?.ruleApplied && (

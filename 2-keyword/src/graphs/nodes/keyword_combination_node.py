@@ -128,6 +128,16 @@ def _extract_holder_key_name(patent_holder: str) -> str:
     return cleaned[:12]
 
 
+def _clean_object_text(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if "扫地机器人" in cleaned:
+        return "扫地机器人"
+    cleaned = re.sub(r"^一种", "", cleaned)
+    cleaned = re.sub(r"^(具备|具有).{1,12}?功能的", "", cleaned)
+    cleaned = cleaned.strip(" ,，.。；;:：")
+    return cleaned
+
+
 def _select_holder_keyword_object(
     primary_object: str,
     search_objects: list[str],
@@ -140,8 +150,8 @@ def _select_holder_keyword_object(
             continue
         if any(marker in text for marker in LEGALISTIC_MARKERS):
             continue
-        return text
-    return str(primary_object or "").strip()
+        return _clean_object_text(text)
+    return _clean_object_text(primary_object)
 
 
 def _build_holder_based_keyword(
@@ -173,12 +183,13 @@ def _has_repeated_fragment(keyword_text: str) -> bool:
     return bool(re.search(r"(.{2,8})\1", normalized))
 
 
-def _violates_quality_guardrail(keyword_text: str) -> bool:
+def _violates_quality_guardrail(keyword_text: str, allow_short: bool = False) -> bool:
     cleaned = str(keyword_text or "").strip()
     normalized = _normalize_keyword_text(cleaned)
     if not normalized:
         return True
-    if len(normalized) < 3 or len(normalized) > 18:
+    min_length = 2 if allow_short else 3
+    if len(normalized) < min_length or len(normalized) > 18:
         return True
     if any(sep in cleaned for sep in ["、", "，", ",", "/"]):
         return True
@@ -189,18 +200,144 @@ def _violates_quality_guardrail(keyword_text: str) -> bool:
     return False
 
 
+def _feature_texts(features: list[dict]) -> list[str]:
+    texts: list[str] = []
+    for feature in features:
+        if isinstance(feature, dict):
+            text = str(feature.get("text", "")).strip()
+        else:
+            text = str(feature).strip()
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _keyword_contains_any(keyword_text: str, terms: list[str]) -> bool:
+    normalized = _normalize_keyword_text(keyword_text)
+    return any(_normalize_keyword_text(term) in normalized for term in terms if term)
+
+
+def _build_required_feature_keywords(
+    required_features: list[dict],
+    primary_object: str,
+    search_objects: list[str],
+    product_objects: list[str],
+) -> list[dict]:
+    object_text = _select_holder_keyword_object(primary_object, search_objects, product_objects)
+    required_texts = _feature_texts(required_features)
+    keywords: list[dict] = []
+
+    if object_text:
+        keywords.append(
+            {
+                "keyword_text": object_text,
+                "keyword_type": "object_base",
+                "combination_pattern": "主客体基础词",
+                "confidence": 0.91,
+            }
+        )
+
+    for text in required_texts:
+        keywords.append(
+            {
+                "keyword_text": text,
+                "keyword_type": "required_feature",
+                "combination_pattern": "必要特征基础词",
+                "confidence": 0.9,
+            }
+        )
+        if object_text and _normalize_keyword_text(text) not in _normalize_keyword_text(object_text):
+            keywords.append(
+                {
+                    "keyword_text": f"{text}{object_text}",
+                    "keyword_type": "required_feature",
+                    "combination_pattern": "必要特征+主客体",
+                    "confidence": 0.91,
+                }
+            )
+
+    if object_text and len(required_texts) >= 2:
+        combined = "".join(required_texts[:3])
+        keywords.append(
+            {
+                "keyword_text": f"{combined}{object_text}",
+                "keyword_type": "required_feature",
+                "combination_pattern": "多必要特征+主客体",
+                "confidence": 0.93,
+            }
+        )
+
+    return keywords
+
+
+def _build_context_extension_keywords(
+    scenario_words: list[str],
+    audience_words: list[str],
+    primary_object: str,
+    search_objects: list[str],
+    product_objects: list[str],
+) -> list[dict]:
+    object_text = _select_holder_keyword_object(primary_object, search_objects, product_objects)
+    if not object_text:
+        return []
+
+    keywords: list[dict] = []
+    for word in list(scenario_words)[:2]:
+        text = str(word or "").strip()
+        if not text:
+            continue
+        keywords.append(
+            {
+                "keyword_text": f"{text}{object_text}",
+                "keyword_type": "scenario_extension",
+                "combination_pattern": "场景扩展型-低优先级",
+                "confidence": 0.68,
+            }
+        )
+    for word in list(audience_words)[:2]:
+        text = str(word or "").strip()
+        if not text:
+            continue
+        keywords.append(
+            {
+                "keyword_text": f"{text}{object_text}",
+                "keyword_type": "audience_extension",
+                "combination_pattern": "人群扩展型-低优先级",
+                "confidence": 0.64,
+            }
+        )
+    return keywords
+
+
 def _apply_guardrails(
     combined_keywords: list[dict],
+    required_features: list[dict] | None = None,
+    excluded_generic_terms: list[str] | None = None,
 ) -> list[dict]:
     processed: list[dict] = []
     seen: set[str] = set()
+    required_texts = _feature_texts(required_features or [])
+    excluded_norms = {_normalize_keyword_text(term) for term in (excluded_generic_terms or []) if term}
 
     for item in combined_keywords:
         keyword_text = str(item.get("keyword_text", "")).strip()
-        if _violates_quality_guardrail(keyword_text):
+        keyword_type = str(item.get("keyword_type", "")).lower()
+        pattern = str(item.get("combination_pattern", "")).lower()
+        allow_short = keyword_type in {"required_feature", "object_base"}
+        if _violates_quality_guardrail(keyword_text, allow_short=allow_short):
             continue
 
         normalized = _normalize_keyword_text(keyword_text)
+        if normalized in excluded_norms:
+            continue
+        if any(term and term in normalized and normalized != term for term in excluded_norms):
+            if keyword_type not in {"required_feature", "holder_based"}:
+                continue
+        if keyword_type in {"scenario_extension", "audience_extension"}:
+            pass
+        elif required_texts and ("人群" in pattern or "场景" in pattern or keyword_type in {"audience_based", "scenario_based"}):
+            if not _keyword_contains_any(keyword_text, required_texts):
+                continue
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -242,6 +379,9 @@ def keyword_combination_node(
         "product_object": "、".join(state.product_object) if state.product_object else "未识别",
         "patent_holder": state.patent_holder or "未知",
         "invention_point": state.invention_point or "未识别",
+        "required_features": json.dumps(state.required_features, ensure_ascii=False),
+        "optional_features": json.dumps(state.optional_features, ensure_ascii=False),
+        "excluded_generic_terms": "、".join(state.excluded_generic_terms) if state.excluded_generic_terms else "无",
         "scenario_words": "、".join(state.scenario_words) if state.scenario_words else "无",
         "audience_words": "、".join(state.audience_words) if state.audience_words else "无",
     })
@@ -259,6 +399,20 @@ def keyword_combination_node(
 
     result_text = _extract_text_content(response.content)
     parsed_keywords = _parse_combined_keywords(result_text)
+    required_feature_keywords = _build_required_feature_keywords(
+        state.required_features,
+        state.primary_product_object,
+        state.search_product_objects,
+        state.product_object,
+    )
+    context_extension_keywords = _build_context_extension_keywords(
+        state.scenario_words,
+        state.audience_words,
+        state.primary_product_object,
+        state.search_product_objects,
+        state.product_object,
+    )
+    parsed_keywords = required_feature_keywords + parsed_keywords + context_extension_keywords
     holder_based_keyword = _build_holder_based_keyword(
         state.patent_holder,
         state.primary_product_object,
@@ -267,6 +421,10 @@ def keyword_combination_node(
     )
     if holder_based_keyword:
         parsed_keywords.insert(0, holder_based_keyword)
-    combined_keywords = _apply_guardrails(parsed_keywords)
+    combined_keywords = _apply_guardrails(
+        parsed_keywords,
+        required_features=state.required_features,
+        excluded_generic_terms=state.excluded_generic_terms,
+    )
 
     return KeywordCombinationOutput(combined_keywords=combined_keywords)

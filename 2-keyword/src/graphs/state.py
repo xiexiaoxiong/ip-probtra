@@ -42,7 +42,10 @@ class GlobalState(BaseModel):
     claim_text: str = Field(default="", description="权利要求原文")
     background_tech: str = Field(default="", description="背景技术")
     technical_field: str = Field(default="", description="技术领域")
+    abstract_text: str = Field(default="", description="专利摘要")
     invention_content: str = Field(default="", description="发明或实用新型内容")
+    full_specification: str = Field(default="", description="完整说明书章节文本")
+    dependent_claims_text: str = Field(default="", description="从属权利要求文本")
     description_figures: str = Field(default="", description="说明书附图描述")
     patent_holder: str = Field(default="", description="专利权人")
     patent_number: str = Field(default="", description="专利号")
@@ -54,6 +57,10 @@ class GlobalState(BaseModel):
     product_object: List[str] = Field(default=[], description="兼容旧流程的产品客体列表，首项优先为主客体")
     invention_point: str = Field(default="", description="发明点描述")
     invention_point_source: str = Field(default="", description="发明点来源位置")
+    required_features: List[dict] = Field(default=[], description="必要检索特征，缺少该特征通常不会落入保护范围")
+    optional_features: List[dict] = Field(default=[], description="可选扩展特征，可提高召回但不是主检索骨架")
+    excluded_generic_terms: List[str] = Field(default=[], description="应排除的通用部件、泛词或主客体天然包含的功能")
+    required_feature_log: str = Field(default="", description="必要特征识别日志")
     core_terms: List[dict] = Field(default=[], description="精炼后的核心术语列表（已包含不同说法的同义表述）")
     
     # 筛选、推断和组合后的数据
@@ -159,7 +166,10 @@ class RecordDispatchOutput(BaseModel):
     claim_text: str = Field(default="", description="权利要求原文")
     background_tech: str = Field(default="", description="背景技术")
     technical_field: str = Field(default="", description="技术领域")
+    abstract_text: str = Field(default="", description="专利摘要")
     invention_content: str = Field(default="", description="发明或实用新型内容")
+    full_specification: str = Field(default="", description="完整说明书章节文本")
+    dependent_claims_text: str = Field(default="", description="从属权利要求文本")
     description_figures: str = Field(default="", description="说明书附图描述")
     patent_holder: str = Field(default="", description="专利权人")
     patent_number: str = Field(default="", description="专利号")
@@ -252,7 +262,10 @@ class ProductObjectExtractionOutput(BaseModel):
 class InventionPointExtractionInput(BaseModel):
     """发明点提取节点的输入"""
     claim_text: str = Field(..., description="权利要求原文")
+    abstract_text: str = Field(default="", description="专利摘要")
     invention_content: str = Field(default="", description="发明或实用新型内容")
+    background_tech: str = Field(default="", description="背景技术")
+    dependent_claims_text: str = Field(default="", description="从属权利要求文本")
     description_figures: str = Field(default="", description="说明书附图描述")
 
 
@@ -262,10 +275,31 @@ class InventionPointExtractionOutput(BaseModel):
     invention_point_source: str = Field(default="", description="发明点来源位置")
 
 
+class RequiredFeatureExtractionInput(BaseModel):
+    """必要检索特征识别节点的输入"""
+    claim_text: str = Field(default="", description="独立权利要求原文")
+    abstract_text: str = Field(default="", description="专利摘要")
+    invention_content: str = Field(default="", description="发明或实用新型内容")
+    background_tech: str = Field(default="", description="背景技术")
+    dependent_claims_text: str = Field(default="", description="从属权利要求文本")
+    invention_point: str = Field(default="", description="发明点描述")
+    primary_product_object: str = Field(default="", description="主客体")
+    search_product_objects: List[str] = Field(default=[], description="检索落地客体列表")
+
+
+class RequiredFeatureExtractionOutput(BaseModel):
+    """必要检索特征识别节点的输出"""
+    required_features: List[dict] = Field(default=[], description="必要检索特征")
+    optional_features: List[dict] = Field(default=[], description="可选扩展特征")
+    excluded_generic_terms: List[str] = Field(default=[], description="排除的通用泛词")
+    required_feature_log: str = Field(default="", description="识别日志")
+
+
 class KeywordExtractionInput(BaseModel):
     """关键词提取节点的输入"""
     claim_text: str = Field(..., description="权利要求原文")
     invention_point: str = Field(default="", description="发明点描述")
+    required_features: List[dict] = Field(default=[], description="必要检索特征")
     patent_holder: str = Field(default="", description="专利权人")
 
 
@@ -278,6 +312,9 @@ class InventionPointRefinementInput(BaseModel):
     """发明点特征词精炼节点的输入"""
     core_terms: List[dict] = Field(default=[], description="初步提取的核心术语列表")
     invention_point: str = Field(default="", description="发明点描述")
+    required_features: List[dict] = Field(default=[], description="必要检索特征")
+    optional_features: List[dict] = Field(default=[], description="可选扩展特征")
+    excluded_generic_terms: List[str] = Field(default=[], description="排除的通用泛词")
     invention_content: str = Field(default="", description="发明或实用新型内容")
     claim_text: str = Field(default="", description="权利要求原文")
     background_tech: str = Field(default="", description="背景技术")
@@ -295,6 +332,8 @@ class KeywordFilteringInput(BaseModel):
     """关键词筛选节点的输入"""
     core_terms: List[dict] = Field(default=[], description="核心术语列表")
     invention_point: str = Field(default="", description="发明点描述")
+    required_features: List[dict] = Field(default=[], description="必要检索特征")
+    excluded_generic_terms: List[str] = Field(default=[], description="排除的通用泛词")
 
 
 class KeywordFilteringOutput(BaseModel):
@@ -312,6 +351,7 @@ class ScenarioAudienceInferenceInput(BaseModel):
     search_product_objects: List[str] = Field(default=[], description="检索落地客体列表")
     product_object: List[str] = Field(default=[], description="产品客体列表")
     filtered_core_terms: List[dict] = Field(default=[], description="筛选后的核心术语列表")
+    required_features: List[dict] = Field(default=[], description="必要检索特征")
 
 
 class ScenarioAudienceInferenceOutput(BaseModel):
@@ -328,6 +368,9 @@ class KeywordCombinationInput(BaseModel):
     product_object: List[str] = Field(default=[], description="产品客体列表")
     patent_holder: str = Field(default="", description="专利权人")
     invention_point: str = Field(default="", description="发明点描述")
+    required_features: List[dict] = Field(default=[], description="必要检索特征")
+    optional_features: List[dict] = Field(default=[], description="可选扩展特征")
+    excluded_generic_terms: List[str] = Field(default=[], description="排除的通用泛词")
     scenario_words: List[str] = Field(default=[], description="场景词列表")
     audience_words: List[str] = Field(default=[], description="人群词列表")
 

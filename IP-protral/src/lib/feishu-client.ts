@@ -283,6 +283,7 @@ export function mapPatentInfo(
   return {
     title: getTextField(first, '专利标题') || getTextField(first, '标题') || getTextField(first, 'title'),
     patentNumber: getTextField(first, '专利号') || getTextField(first, '申请号') || getTextField(first, 'patent_number'),
+    abstract: getTextField(first, '摘要') || getTextField(first, '专利摘要') || getTextField(first, 'abstract'),
     independentClaims: extractListField(first, '独立权利要求') || extractListField(first, 'independent_claims'),
     dependentClaims: extractListField(first, '从属权利要求') || extractListField(first, 'dependent_claims'),
     specification: getTextField(first, '说明书') || getTextField(first, '摘要') || getTextField(first, 'specification'),

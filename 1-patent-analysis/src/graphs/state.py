@@ -41,6 +41,7 @@ class PatentMetadata(BaseModel):
     application_date: Optional[str] = Field(default=None, description="专利申请日期")
     priority_date: Optional[str] = Field(default=None, description="优先权日期")
     title: Optional[str] = Field(default=None, description="专利标题")
+    abstract: Optional[str] = Field(default=None, description="专利摘要")
 
 
 class ParseError(BaseModel):

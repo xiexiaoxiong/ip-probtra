@@ -26,10 +26,6 @@ def keyword_extraction_node(
     """
     ctx = runtime.context
     
-    # 空值防护：权利要求文本为空时返回空列表
-    if not state.claim_text or state.claim_text.strip() == "":
-        return KeywordExtractionOutput(core_terms=[])
-    
     # 读取 LLM 配置
     cfg_file = os.path.join(os.getenv("COZE_WORKSPACE_PATH"), config['metadata']['llm_cfg'])
     with open(cfg_file, 'r', encoding='utf-8') as fd:
@@ -43,8 +39,9 @@ def keyword_extraction_node(
     up_tpl = Template(up)
     user_prompt = up_tpl.render({
         "claim_text": state.claim_text,
-        "invention_point": state.invention_point if state.invention_point else "（未识别）",
-        "patent_holder": state.patent_holder if state.patent_holder else "（未提供）"
+        "invention_point": state.invention_point,
+        "required_features": json.dumps(state.required_features, ensure_ascii=False),
+        "patent_holder": state.patent_holder
     })
     
     # 初始化 LLM 客户端

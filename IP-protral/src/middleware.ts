@@ -13,6 +13,7 @@ export function middleware(request: NextRequest) {
   const isProtectedPage =
     pathname === '/'
     || pathname.startsWith('/results')
+    || pathname.startsWith('/module1')
     || pathname.startsWith('/database')
     || pathname.startsWith('/history')
     || pathname.startsWith('/admin');
@@ -28,5 +29,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/login', '/register', '/results/:path*', '/database/:path*', '/history/:path*', '/admin/:path*'],
+  matcher: ['/', '/login', '/register', '/results/:path*', '/module1/:path*', '/database/:path*', '/history/:path*', '/admin/:path*'],
 };

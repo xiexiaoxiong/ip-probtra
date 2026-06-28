@@ -26,16 +26,6 @@ def invention_point_refinement_node(
     """
     ctx = runtime.context
 
-    # 空值防护：如果没有核心术语且没有发明点，返回空结果
-    has_core_terms = bool(state.core_terms and len(state.core_terms) > 0)
-    has_invention_point = bool(state.invention_point and state.invention_point.strip())
-    
-    if not has_core_terms and not has_invention_point:
-        return InventionPointRefinementOutput(
-            core_terms=[],
-            refinement_log="无核心术语和发明点，跳过精炼"
-        )
-
     # 读取 LLM 配置
     cfg_file = os.path.join(os.getenv("COZE_WORKSPACE_PATH"), config['metadata']['llm_cfg'])
     with open(cfg_file, 'r', encoding='utf-8') as fd:
@@ -58,11 +48,16 @@ def invention_point_refinement_node(
     # 使用 Jinja2 渲染提示词
     up_tpl = Template(up)
     user_prompt = up_tpl.render({
-        "core_terms_text": terms_text if terms_text else "（无初步提取的术语）",
-        "invention_point": state.invention_point if state.invention_point else "（未识别）",
-        "invention_content": state.invention_content if state.invention_content else "（未提供）",
-        "claim_text": state.claim_text if state.claim_text else "（未提供）",
-        "background_tech": state.background_tech if state.background_tech else "（未提供）"
+        "core_terms_text": terms_text,
+        "invention_point": state.invention_point,
+        "required_features": json.dumps(state.required_features, ensure_ascii=False),
+        "optional_features": json.dumps(state.optional_features, ensure_ascii=False),
+        "excluded_generic_terms": "、".join(state.excluded_generic_terms) if state.excluded_generic_terms else "无",
+        "invention_content": state.invention_content,
+        "claim_text": state.claim_text,
+        "background_tech": state.background_tech,
+        "primary_product_object": state.primary_product_object or "未识别",
+        "search_product_objects": "、".join(state.search_product_objects) if state.search_product_objects else "无"
     })
 
     # 初始化 LLM 客户端

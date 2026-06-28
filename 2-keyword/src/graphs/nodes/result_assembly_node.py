@@ -34,6 +34,10 @@ def result_assembly_node(
             keyword_type_display = "HOLDER_BASED"  # 权利要求人+同款+客体
         elif keyword_type == "invention_based":
             keyword_type_display = "INVENTION_BASED"  # 核心发明点+客体
+        elif keyword_type == "required_feature":
+            keyword_type_display = "REQUIRED_FEATURE"  # 必要检索特征
+        elif keyword_type == "object_base":
+            keyword_type_display = "OBJECT_BASE"  # 主商品客体基础词
         else:
             keyword_type_display = "COMBINED"
         

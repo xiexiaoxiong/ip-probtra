@@ -98,14 +98,10 @@ def record_dispatch_node(
         if claim_text_field and claim_text_field in claim_fields:
             claim_text = str(claim_fields.get(claim_text_field, ""))
     else:
-        # 如果没有权利要求表或已处理完，使用数据表中的发明内容
+        # 如果没有权利要求表或已处理完，保留空权利要求，后续走说明书降级路径
         claim_id = get_field_value("patent_number", "")
         claim_type = "INDEPENDENT"
-        claim_text = get_field_value("invention_content", "")
-    
-    # 兜底：权利要求编号为空时生成一个默认值，避免下游节点因为空ID阻断
-    if not claim_id or claim_id.strip() == "":
-        claim_id = f"RECORD-{record_index + 1}"
+        claim_text = ""
     
     return RecordDispatchOutput(
         current_record=current_record,
@@ -117,7 +113,10 @@ def record_dispatch_node(
         claim_text=claim_text,
         background_tech=get_field_value("background_tech", ""),
         technical_field=get_field_value("technical_field", ""),
+        abstract_text=get_field_value("abstract_text", ""),
         invention_content=get_field_value("invention_content", ""),
+        full_specification=get_field_value("full_specification", ""),
+        dependent_claims_text=get_field_value("dependent_claims_text", ""),
         description_figures=description_figures,
         patent_holder=get_field_value("patent_holder", ""),
         patent_number=get_field_value("patent_number", ""),

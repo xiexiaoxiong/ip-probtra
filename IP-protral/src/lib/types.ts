@@ -57,6 +57,7 @@ export interface AnalysisInput {
 export interface PatentInfo {
   title?: string;
   patentNumber?: string;
+  abstract?: string;
   independentClaims?: string[];
   dependentClaims?: string[];
   specification?: string;

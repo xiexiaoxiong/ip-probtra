@@ -38,7 +38,10 @@ def invention_point_extraction_node(
     up_tpl = Template(up)
     user_prompt = up_tpl.render({
         "claim_text": state.claim_text,
+        "abstract_text": state.abstract_text,
         "invention_content": state.invention_content,
+        "background_tech": state.background_tech,
+        "dependent_claims_text": state.dependent_claims_text,
         "description_figures": state.description_figures
     })
     
