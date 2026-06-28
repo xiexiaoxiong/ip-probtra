@@ -114,7 +114,9 @@ def structure_identify_node(
                         ))
                 
                 # 提取权利要求书文本
-                claims_section_text = structure_data.get("claims_section", "")
+                claims_section_text = _normalize_claims_section_text(
+                    str(structure_data.get("claims_section", "") or "")
+                )
                 
                 # 提取元数据 - LLM提取的结果
                 metadata_raw = structure_data.get("metadata", {})
@@ -143,7 +145,17 @@ def structure_identify_node(
                 for fallback_section in fallback_sections:
                     if fallback_section.section_name not in existing_section_names:
                         specification_sections.append(fallback_section)
-                if not claims_section_text and fallback_claims_text:
+                claims_fallback_reason = _get_claims_section_fallback_reason(
+                    llm_claims_text=claims_section_text,
+                    fallback_claims_text=fallback_claims_text,
+                )
+                if claims_fallback_reason and fallback_claims_text:
+                    logger.warning(
+                        "LLM提取的权利要求书文本疑似不完整，改用正则降级结果: %s",
+                        claims_fallback_reason,
+                    )
+                    claims_section_text = fallback_claims_text
+                elif not claims_section_text and fallback_claims_text:
                     claims_section_text = fallback_claims_text
                 if not patent_metadata.patent_number and fallback_metadata.patent_number:
                     patent_metadata.patent_number = fallback_metadata.patent_number
@@ -239,6 +251,127 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
     return metadata
 
 
+def _extract_claim_ids_from_text(claims_text: str) -> List[str]:
+    """
+    从权利要求书文本中提取按行起始出现的权利要求编号。
+    """
+    if not claims_text:
+        return []
+    return re.findall(
+        r'(?m)^\s*(?:权\s*利\s*要\s*求\s*)?(\d+(?:\.\d+)?)\s*[.、:：]',
+        claims_text,
+    )
+
+
+def _normalize_claims_section_text(claims_text: str) -> str:
+    """
+    清洗权利要求书文本，只保留正文：
+    1. 遇到“说明书”章节标题后立即截断；
+    2. 去掉页眉页脚中的“权利要求书/页码/CN号”等噪音行。
+    """
+    text = (claims_text or "").strip()
+    if not text:
+        return ""
+
+    end_match = re.search(
+        r'(?m)^\s*(?:说\s*明\s*书\s*全\s*文|说\s*明\s*书|说明书全文|说明书)\s*$',
+        text,
+    )
+    if end_match:
+        text = text[:end_match.start()].strip()
+
+    cleaned_lines: List[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            cleaned_lines.append("")
+            continue
+        if re.fullmatch(r'权\s*利\s*要\s*求\s*书', stripped):
+            continue
+        if re.fullmatch(r'\d+\s*/\s*\d+\s*页', stripped):
+            continue
+        if re.fullmatch(r'CN\s*\d+\s*[A-Z]?\s*\d*', stripped):
+            continue
+        if re.fullmatch(r'\d+', stripped):
+            continue
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
+def _extract_claims_section_from_raw_text(raw_text: str) -> str:
+    """
+    仅从权利要求书正文提取：
+    - 优先从第一条权利要求（1.）开始；
+    - 到“说明书”章节标题处结束；
+    - 不从正文中的“根据权利要求X所述”位置起算。
+    """
+    text = (raw_text or "").strip()
+    if not text:
+        return ""
+
+    start_match = re.search(r'(?m)^\s*1\s*[.、:：]\s*', text)
+    if start_match:
+        start_pos = start_match.start()
+    else:
+        title_match = re.search(
+            r'(?m)^\s*(?:权\s*利\s*要\s*求\s*书|权利要求书)\s*$',
+            text,
+        )
+        if not title_match:
+            return ""
+        start_pos = title_match.end()
+
+    tail = text[start_pos:]
+    end_match = re.search(
+        r'(?m)^\s*(?:说\s*明\s*书\s*全\s*文|说\s*明\s*书|说明书全文|说明书)\s*$',
+        tail,
+    )
+    end_pos = start_pos + end_match.start() if end_match else len(text)
+    return _normalize_claims_section_text(text[start_pos:end_pos])
+
+
+def _get_claims_section_fallback_reason(
+    llm_claims_text: str,
+    fallback_claims_text: str,
+) -> Optional[str]:
+    """
+    判断是否应放弃LLM提取的权利要求书文本，改用正则降级结果。
+    """
+    llm_text = _normalize_claims_section_text(llm_claims_text)
+    fallback_text = _normalize_claims_section_text(fallback_claims_text)
+
+    if not fallback_text:
+        return None
+    if not llm_text:
+        return "LLM未提取出权利要求书文本"
+
+    llm_claim_ids = _extract_claim_ids_from_text(llm_text)
+    fallback_claim_ids = _extract_claim_ids_from_text(fallback_text)
+
+    if fallback_claim_ids:
+        if "1" in fallback_claim_ids and "1" not in llm_claim_ids:
+            return "LLM结果缺少权利要求1，而正则结果包含权利要求1"
+        if "2" in fallback_claim_ids and "2" not in llm_claim_ids:
+            return "LLM结果缺少权利要求2，而正则结果包含权利要求2"
+        if llm_claim_ids and fallback_claim_ids[0] == "1" and llm_claim_ids[0] != "1":
+            return f"LLM结果首条权利要求编号为{llm_claim_ids[0]}，而非1"
+        if len(fallback_claim_ids) - len(llm_claim_ids) >= 2:
+            return (
+                f"LLM结果仅识别到{len(llm_claim_ids)}条权利要求，"
+                f"正则结果识别到{len(fallback_claim_ids)}条"
+            )
+
+    if (
+        len(fallback_text) >= 500
+        and len(fallback_text) > len(llm_text) * 1.5
+        and re.search(r'(?m)^\s*1\s*[.、:：]', fallback_text) is not None
+    ):
+        return "LLM结果长度明显短于正则结果，疑似被截断"
+
+    return None
+
+
 def _fallback_structure_identify(
     raw_text: str, 
     errors: List[ParseError]
@@ -294,22 +427,7 @@ def _fallback_structure_identify(
                 end_position=content_end,
             ))
         
-        claims_pattern = r"(?:权\s*利\s*要\s*求\s*书|权利要求书|权\s*利\s*要\s*求|权利要求)[：:\s]*([\s\S]*?)(?=(?:\s*(?:说\s*明\s*书\s*全\s*文|说\s*明\s*书|说明书全文|说明书|摘\s*要|摘要|技\s*术\s*领\s*域|技术领域|背\s*景\s*技\s*术|背景技术|发\s*明\s*内\s*容|发明内容|实\s*用\s*新\s*型\s*内\s*容|实用新型内容|附\s*图\s*说\s*明|附图说明))|$)"
-        claim_candidates: List[str] = []
-        for match in re.finditer(claims_pattern, raw_text):
-            candidate = match.group(1).strip()
-            if candidate:
-                claim_candidates.append(candidate)
-
-        if claim_candidates:
-            preferred = [
-                c
-                for c in claim_candidates
-                if len(c) >= 200 and re.search(r'(?m)^\s*1\s*[.、:：]', c) is not None
-            ]
-            claims_text = (preferred or claim_candidates)[0]
-            if not preferred:
-                claims_text = max(claim_candidates, key=len)
+        claims_text = _extract_claims_section_from_raw_text(raw_text)
             
         logger.info(f"降级方案识别完成，章节数量: {len(sections)}")
         

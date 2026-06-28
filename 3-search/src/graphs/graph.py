@@ -88,13 +88,19 @@ def coze_search_wrapper(
     integrations: Coze工作流API
     """
     input_data = CozeSearchInput(
-        keywords=state.keywords
+        patent_record_id=state.patent_record_id,
+        analysis_session_id=state.analysis_session_id,
+        keywords=state.keywords,
+        product_dataset_id=state.product_dataset_id,
+        retrieval_start_time=state.retrieval_start_time,
+        search_run_id=state.search_run_id,
     )
 
     result = coze_search_node(input_data, config, runtime)
 
     return CozeSearchWrapperOutput(
         products=result.products,
+        search_run_id=result.search_run_id,
         total_products_count=result.total_products_count,
         successful_keywords_count=result.successful_keywords_count,
         failed_keywords_count=result.failed_keywords_count,
@@ -117,6 +123,7 @@ def save_results_wrapper(
         patent_record_id=state.patent_record_id,
         analysis_session_id=state.analysis_session_id,
         products=state.products,
+        search_run_id=state.search_run_id,
         product_dataset_id=state.product_dataset_id,
         retrieval_start_time=state.retrieval_start_time,
         successful_keywords_count=state.successful_keywords_count,

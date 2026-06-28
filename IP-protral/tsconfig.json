@@ -38,6 +38,12 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    ".next/types/**/* [0-9].ts",
+    ".next/types/* 2.ts",
+    ".next/types/* 3.ts",
+    ".next/types/* 4.ts",
+    ".next/dev/types/**/* [0-9].ts",
+    ".next/dev/types/* 2.ts"
   ]
 }

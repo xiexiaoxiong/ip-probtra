@@ -10,6 +10,7 @@ from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import DecomposeClaimInput, DecomposeClaimOutput
 from utils.local_llm import invoke_local_llm
+from utils.claim_scoring import build_feature_segments, count_effective_units, normalize_claim_text
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,45 @@ def _parse_features_from_response(content: Any, claim_id: str) -> List[Dict[str,
         feature_text: str = str(item.get("feature_text", "")).strip()
         item_claim_id: str = str(item.get("claim_id", claim_id)).strip() or claim_id
         if feature_id and feature_text:
+            raw_segments = item.get("feature_segments", [])
+            feature_segments = []
+            if isinstance(raw_segments, list):
+                for segment in raw_segments:
+                    if not isinstance(segment, dict):
+                        continue
+                    segment_text = str(segment.get("text", "")).strip()
+                    if not segment_text:
+                        continue
+                    feature_segments.append({
+                        "text": segment_text,
+                        "normalized_text": normalize_claim_text(segment_text),
+                        "start": int(segment.get("start", 0) or 0),
+                        "end": int(segment.get("end", 0) or 0),
+                        "effective_length": count_effective_units(segment_text),
+                    })
             features.append({
                 "feature_id": feature_id,
                 "feature_text": feature_text,
-                "claim_id": item_claim_id
+                "claim_id": item_claim_id,
+                "feature_segments": feature_segments,
             })
     return features
+
+
+def _attach_feature_segments(features: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    enriched: List[Dict[str, Any]] = []
+    for feature in features:
+        feature_text = str(feature.get("feature_text", ""))
+        segments = feature.get("feature_segments") if isinstance(feature.get("feature_segments"), list) else []
+        if not segments:
+            segments = build_feature_segments(feature_text)
+        enriched.append({
+            **feature,
+            "feature_segments": segments,
+            "normalized_feature_text": normalize_claim_text(feature_text),
+            "effective_length": count_effective_units(feature_text),
+        })
+    return enriched
 
 
 def _looks_like_missing_context_reply(text: str) -> bool:
@@ -245,7 +279,7 @@ def _decompose_single_claim(
         response_text = _content_to_text(response.content)
         features = _parse_features_from_response(response.content, claim_id)
         if features:
-            return features
+            return _attach_feature_segments(features)
 
         if attempt_index < len(prompt_candidates):
             if _looks_like_missing_context_reply(response_text):
@@ -262,7 +296,7 @@ def _decompose_single_claim(
         logger.warning(
             f"权利要求{claim_id}大模型拆解失败，降级为基于权利要求文本的规则拆分，得到{len(fallback_features)}个技术特征"
         )
-    return fallback_features
+    return _attach_feature_segments(fallback_features)
 
 
 def decompose_claim_node(

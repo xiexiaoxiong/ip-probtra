@@ -1,5 +1,7 @@
 import ExcelJS from 'exceljs';
 import type { PoolClient } from 'pg';
+import { buildFallbackTokenUnits, computeClaimScores, computeProductScore } from '@/lib/claim-score';
+import { PRODUCT_RISK_CONFIG, SCORE_BAND_CONFIG, scoreToBand, scoreToRiskLevel } from '@/lib/types';
 import type { AnalysisSession, ClaimElementComparison, ProductComparison, ProductInfo } from '@/lib/types';
 
 type JsonRecord = Record<string, unknown>;
@@ -30,9 +32,18 @@ interface ClaimCompareRow extends JsonRecord {
   feature_text?: string;
   evidence?: string;
   comparison_result?: string;
+  similarity_score?: number | string;
+  score_band?: string;
+  feature_full_score?: number | string;
+  feature_awarded_score?: number | string;
+  feature_effective_length?: number | string;
+  matched_effective_length?: number | string;
+  claim_total_effective_length?: number | string;
+  zeroed_by_mismatch?: boolean | string;
   reason?: string;
   reasoning_type?: string;
   evidence_images?: string[] | string | null;
+  token_units?: unknown;
 }
 
 interface ExportProduct {
@@ -98,9 +109,18 @@ async function selectAllIfExists(
   return (await client.query(sql, params)).rows;
 }
 
-function normalizeStatus(status: string): ClaimElementComparison['status'] {
-  const lower = status.toLowerCase();
-  if (!lower) return 'uncertain';
+function normalizeScore(score: unknown, legacyStatus?: string): number {
+  if (typeof score === 'number' && Number.isFinite(score)) {
+    return Math.max(0, Math.min(100, Number(score.toFixed(2))));
+  }
+  if (typeof score === 'string' && score.trim()) {
+    const parsed = Number(score.trim());
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.min(100, Number(parsed.toFixed(2))));
+    }
+  }
+  const lower = (legacyStatus || '').toLowerCase();
+  if (!lower) return 50;
   if (
     lower.includes('不匹配') ||
     lower.includes('not_match') ||
@@ -109,7 +129,7 @@ function normalizeStatus(status: string): ClaimElementComparison['status'] {
     lower.includes('不一致') ||
     lower.includes('区别')
   ) {
-    return 'not_matching';
+    return 0;
   }
   if (
     lower.includes('匹配') ||
@@ -119,70 +139,29 @@ function normalizeStatus(status: string): ClaimElementComparison['status'] {
     lower.includes('一致') ||
     lower.includes('等同')
   ) {
-    return 'matching';
+    return 100;
   }
-  return 'uncertain';
+  return 50;
 }
 
-function computeVerdict(elements: ClaimElementComparison[]): ProductComparison['overallVerdict'] {
-  if (elements.length === 0) return 'uncertain';
-
-  const claimGroups = new Map<string, ClaimElementComparison[]>();
-  for (const element of elements) {
-    const claimId = element.patentReference || 'unknown';
-    if (!claimGroups.has(claimId)) {
-      claimGroups.set(claimId, []);
-    }
-    claimGroups.get(claimId)!.push(element);
-  }
-
-  let hasAnyClaimAllMatching = false;
-  let hasAnyClaimNoNotMatching = false;
-  let allClaimsHaveNotMatching = true;
-
-  for (const claimElements of claimGroups.values()) {
-    const hasNotMatching = claimElements.some((item) => item.status === 'not_matching');
-    const allMatching = claimElements.every((item) => item.status === 'matching');
-
-    if (allMatching) hasAnyClaimAllMatching = true;
-    if (!hasNotMatching) hasAnyClaimNoNotMatching = true;
-    if (!hasNotMatching) allClaimsHaveNotMatching = false;
-  }
-
-  if (hasAnyClaimAllMatching) return 'infringement_likely';
-  if (allClaimsHaveNotMatching) return 'no_infringement';
-  if (hasAnyClaimNoNotMatching) return 'uncertain';
-  return 'uncertain';
+function riskLabel(comparison?: ProductComparison): string {
+  if (!comparison) return '低风险候选';
+  return PRODUCT_RISK_CONFIG[comparison.riskLevel].label;
 }
 
-function verdictLabel(verdict?: ProductComparison['overallVerdict']): string {
-  switch (verdict) {
-    case 'infringement_likely':
-      return '疑似侵权';
-    case 'no_infringement':
-      return '疑似不侵权';
-    default:
-      return '需进一步分析';
-  }
+function scoreLabel(element: ClaimElementComparison): string {
+  const fullScore = element.scoreDetail?.fullScore ?? element.similarityScore;
+  return `${element.similarityScore.toFixed(2)} 分 / ${fullScore.toFixed(2)} 分`;
 }
 
-function statusLabel(status: ClaimElementComparison['status']): string {
-  switch (status) {
-    case 'matching':
-      return '相同/等同';
-    case 'not_matching':
-      return '不相同';
-    default:
-      return '不确定';
-  }
-}
-
-function getVerdictStats(comparison?: ProductComparison): { matching: number; notMatching: number; uncertain: number } {
+function getVerdictStats(comparison?: ProductComparison): { exactMatch: number; exactMismatch: number; uncertain: number } {
   const elements = comparison?.claimElements || [];
   return {
-    matching: elements.filter((item) => item.status === 'matching').length,
-    notMatching: elements.filter((item) => item.status === 'not_matching').length,
-    uncertain: elements.filter((item) => item.status === 'uncertain').length,
+    // 这里必须按 scoreBand 统计，不能再按分数区间统计：
+    // score=0 既可能是“明确不相同”，也可能是“待确认（信息不足）”。
+    exactMatch: elements.filter((item) => item.scoreBand === 'exact_match').length,
+    exactMismatch: elements.filter((item) => item.scoreBand === 'exact_mismatch').length,
+    uncertain: elements.filter((item) => item.scoreBand === 'uncertain').length,
   };
 }
 
@@ -199,28 +178,91 @@ function mapComparisonRows(rows: ClaimCompareRow[]): Map<string, ProductComparis
       comparisonMap.set(key, {
         productId: key,
         productName: productName || key,
-        overallVerdict: 'uncertain',
+        productSimilarityScore: 0,
+        productScoreBand: 'exact_mismatch',
+        riskLevel: 'clear_low_risk',
         claimElements: [],
+        claimScores: [],
       });
     }
 
     const comparison = comparisonMap.get(key)!;
+    const similarityScore = normalizeScore(row.similarity_score, toText(row.comparison_result));
+    const matchedEffectiveLength = normalizeScore(row.matched_effective_length, undefined) || 0;
+    const totalEffectiveLength = normalizeScore(row.feature_effective_length, undefined) || 0;
+    const zeroedByMismatch = normalizeBoolean(row.zeroed_by_mismatch) || false;
     comparison.claimElements.push({
       featureId: toText(row.feature_id) || undefined,
       claimElement: toText(row.feature_text),
       productFeature: toText(row.evidence),
-      status: normalizeStatus(toText(row.comparison_result)),
+      similarityScore,
+      scoreBand: scoreToBand(similarityScore, {
+        zeroedByMismatch,
+        matchedEffectiveLength,
+        totalEffectiveLength,
+      }),
       reasoning: [toText(row.reason), toText(row.reasoning_type)].filter(Boolean).join(' | '),
       patentReference: toText(row.claim_id) || undefined,
       evidenceImages: parseStringArray(row.evidence_images),
+      scoreRationale: toText(row.reason) || undefined,
+      tokenUnits: parseTokenUnits(row.token_units, toText(row.feature_text)),
+      scoreDetail: {
+        fullScore: normalizeScore(row.feature_full_score, undefined),
+        awardedScore: normalizeScore(row.feature_awarded_score, undefined) || similarityScore,
+        effectiveLength: totalEffectiveLength,
+        matchedEffectiveLength,
+        zeroedByMismatch,
+      },
+      isLegacyScore: row.token_units == null && row.feature_full_score == null,
     });
   }
 
   for (const comparison of comparisonMap.values()) {
-    comparison.overallVerdict = computeVerdict(comparison.claimElements);
+    comparison.claimScores = computeClaimScores(comparison.claimElements);
+    const weighted = computeProductScore(comparison.claimScores);
+    comparison.productSimilarityScore = weighted.productSimilarityScore;
+    comparison.productScoreBand = weighted.productScoreBand;
+    comparison.riskLevel = weighted.riskLevel;
+    comparison.highestScoringClaimId = weighted.highestScoringClaimId;
+    comparison.isLegacyScore = comparison.claimElements.every((item) => item.isLegacyScore);
   }
 
   return comparisonMap;
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+  }
+  return undefined;
+}
+
+function parseTokenUnits(value: unknown, featureText: string) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item) => ({
+        text: toText(item.text),
+        normalizedText: toText(item.normalized_text ?? item.normalizedText) || undefined,
+        status: normalizeUnitStatus(toText(item.status ?? item.unit_status)),
+        evidence: toText(item.evidence) || undefined,
+        reason: toText(item.reason) || undefined,
+        start: typeof item.start === 'number' ? item.start : undefined,
+        end: typeof item.end === 'number' ? item.end : undefined,
+        effectiveLength: typeof item.effective_length === 'number' ? item.effective_length : undefined,
+      }))
+      .filter((item) => item.text);
+  }
+  return buildFallbackTokenUnits(featureText);
+}
+
+function normalizeUnitStatus(status: string): 'match' | 'mismatch' | 'uncertain' {
+  const lower = status.trim().toLowerCase();
+  if (['match', 'matching', '相同', '明确相同'].includes(lower)) return 'match';
+  if (['mismatch', 'not_match', '不同', '不相同', '明确不相同'].includes(lower)) return 'mismatch';
+  return 'uncertain';
 }
 
 function mapSessionComparisons(session: AnalysisSession): Map<string, ProductComparison> {
@@ -599,10 +641,10 @@ export async function buildAnalysisReportWorkbook(
     '品牌',
     '主图',
     '商品链接',
-    '比对结论',
-    '相同/等同',
-    '不相同',
-    '不确定',
+    '风险标签',
+    '商品总分',
+    '100分特征',
+    '待确认特征',
     '详情页',
   ];
   headerRow.font = { bold: true };
@@ -628,9 +670,9 @@ export async function buildAnalysisReportWorkbook(
       product.url
         ? { text: '打开商品链接', hyperlink: product.url, tooltip: product.url }
         : '—',
-      verdictLabel(product.comparison?.overallVerdict),
-      stats.matching,
-      stats.notMatching,
+      riskLabel(product.comparison),
+      product.comparison?.productSimilarityScore ?? '—',
+      stats.exactMatch,
       stats.uncertain,
       {
         text: '查看比对表',
@@ -671,18 +713,18 @@ export async function buildAnalysisReportWorkbook(
     };
     sheet.getCell('B2').value = '商品ID';
     sheet.getCell('C2').value = product.id;
-    sheet.getCell('E2').value = '整体结论';
-    sheet.getCell('F2').value = verdictLabel(product.comparison?.overallVerdict);
+    sheet.getCell('E2').value = '风险标签';
+    sheet.getCell('F2').value = riskLabel(product.comparison);
 
     sheet.getCell('B3').value = '商品来源';
     sheet.getCell('C3').value = product.source || '—';
-    sheet.getCell('E3').value = '价格';
-    sheet.getCell('F3').value = product.price || '—';
+    sheet.getCell('E3').value = '商品总分';
+    sheet.getCell('F3').value = product.comparison?.productSimilarityScore ?? '—';
 
     sheet.getCell('B4').value = '品牌';
     sheet.getCell('C4').value = product.brand || '—';
-    sheet.getCell('E4').value = '匹配关键词';
-    sheet.getCell('F4').value = product.matchedKeywords || '—';
+    sheet.getCell('E4').value = '最高权利要求分';
+    sheet.getCell('F4').value = product.comparison?.claimScores.reduce((max, item) => Math.max(max, item.similarityScore), 0) ?? '—';
 
     sheet.getCell('B5').value = '商品链接';
     sheet.getCell('C5').value = product.url
@@ -720,7 +762,8 @@ export async function buildAnalysisReportWorkbook(
       '权利要求',
       '特征内容',
       '商品特征',
-      '比对结论',
+        '相似度',
+        '命中比例',
       '比对分析',
       '证据图片',
       '证据图片链接',
@@ -738,7 +781,7 @@ export async function buildAnalysisReportWorkbook(
 
     if (claimElements.length === 0) {
       const row = sheet.getRow(currentRowNumber);
-      row.values = ['—', '—', '未找到该商品的数据库比对结果', '—', '—', '—', '—', '—'];
+      row.values = ['—', '—', '未找到该商品的数据库比对结果', '—', '—', '—', '—', '—', '—'];
       setBorder(row);
       currentRowNumber += 1;
     } else {
@@ -750,7 +793,10 @@ export async function buildAnalysisReportWorkbook(
           element.patentReference || '—',
           element.claimElement || '—',
           element.productFeature || '—',
-          statusLabel(element.status),
+          scoreLabel(element),
+          element.scoreDetail
+            ? `${element.scoreDetail.matchedEffectiveLength}/${element.scoreDetail.effectiveLength}`
+            : '—',
           element.reasoning || '—',
           '',
           evidenceImages.length > 0 ? evidenceImages.join('\n') : '—',

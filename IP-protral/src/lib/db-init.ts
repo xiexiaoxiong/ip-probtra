@@ -203,13 +203,32 @@ async function ensureCoreTables(): Promise<void> {
       feature_text text,
       evidence text,
       comparison_result text,
+      similarity_score integer,
+      score_band text,
+      feature_full_score double precision,
+      feature_awarded_score double precision,
+      feature_effective_length integer,
+      matched_effective_length integer,
+      claim_total_effective_length integer,
+      zeroed_by_mismatch boolean,
       reason text,
       reasoning_type text,
       evidence_images jsonb,
+      token_units jsonb,
       raw_payload jsonb,
       created_at timestamptz not null default now()
     )
   `);
+
+  await pgQuery(`alter table claim_compare_results add column if not exists similarity_score integer`);
+  await pgQuery(`alter table claim_compare_results add column if not exists score_band text`);
+  await pgQuery(`alter table claim_compare_results add column if not exists feature_full_score double precision`);
+  await pgQuery(`alter table claim_compare_results add column if not exists feature_awarded_score double precision`);
+  await pgQuery(`alter table claim_compare_results add column if not exists feature_effective_length integer`);
+  await pgQuery(`alter table claim_compare_results add column if not exists matched_effective_length integer`);
+  await pgQuery(`alter table claim_compare_results add column if not exists claim_total_effective_length integer`);
+  await pgQuery(`alter table claim_compare_results add column if not exists zeroed_by_mismatch boolean`);
+  await pgQuery(`alter table claim_compare_results add column if not exists token_units jsonb`);
 
   await pgQuery(`alter table analysis_sessions add column if not exists user_id integer references users(id) on delete cascade`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_title text`);

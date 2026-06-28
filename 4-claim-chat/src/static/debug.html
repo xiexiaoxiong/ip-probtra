@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单商品调试 - 特征比对</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f5f7fa; padding: 24px; color: #333; line-height: 1.5; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        h1 { font-size: 22px; margin-bottom: 6px; color: #1a1a2e; }
+        .subtitle { font-size: 13px; color: #888; margin-bottom: 20px; }
+        .section { background: #fff; border-radius: 10px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 18px; }
+        .section h2 { font-size: 15px; color: #1a1a2e; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .section h2 .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #e8f0fe; color: #4a90d9; font-weight: 500; }
+        .search-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+        .input-group { display: flex; flex-direction: column; min-width: 200px; }
+        .input-group label { font-size: 12px; font-weight: 500; margin-bottom: 4px; color: #555; }
+        .input-group input, .input-group select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; background: #fff; }
+        .input-group input:focus, .input-group select:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.1); }
+        .btn { padding: 9px 20px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .btn-primary { background: #4a90d9; color: #fff; }
+        .btn-primary:hover { background: #357abd; }
+        .btn-primary:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .btn-secondary { background: #f0f0f0; color: #555; }
+        .btn-secondary:hover { background: #e5e5e5; }
+        .status { font-size: 13px; padding: 8px 0; }
+        .status.error { color: #e74c3c; }
+        .status.success { color: #27ae60; }
+        .status.pending { color: #f39c12; }
+
+        .product-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .product-chip { padding: 4px 10px; border-radius: 14px; background: #f0f0f0; cursor: pointer; font-size: 12px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: all 0.15s; }
+        .product-chip:hover { background: #e0e0e0; }
+        .product-chip.active { background: #4a90d9; color: #fff; }
+
+        .feature-card { border: 1px solid #eee; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: #fafbfc; }
+        .feature-card.match { border-left: 4px solid #27ae60; }
+        .feature-card.mismatch { border-left: 4px solid #e74c3c; }
+        .feature-card.uncertain { border-left: 4px solid #f39c12; }
+        .feature-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+        .feature-id { font-weight: 600; color: #4a90d9; font-size: 14px; }
+        .feature-tag { padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .feature-tag.match { background: #e8f5e9; color: #2e7d32; }
+        .feature-tag.mismatch { background: #ffebee; color: #c62828; }
+        .feature-tag.uncertain { background: #fff3e0; color: #e65100; }
+        .feature-text { font-size: 13px; color: #444; margin-bottom: 8px; }
+        .feature-segments { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+        .segment { padding: 2px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #ddd; }
+        .segment.match { background: #e8f5e9; border-color: #a5d6a7; color: #2e7d32; }
+        .segment.mismatch { background: #ffebee; border-color: #ef9a9a; color: #c62828; }
+        .segment.uncertain { background: #fff8e1; border-color: #ffcc80; color: #e65100; }
+        .feature-reason { font-size: 12px; color: #666; padding: 8px 10px; background: #fff; border-radius: 4px; border: 1px solid #f0f0f0; white-space: pre-wrap; word-break: break-word; }
+        .feature-reason-label { font-size: 11px; color: #999; margin-bottom: 3px; font-weight: 500; }
+        .feature-meta { font-size: 11px; color: #888; margin-top: 4px; }
+        .meta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+
+        .llm-raw { background: #1e1e2e; color: #d4d4dc; padding: 14px 16px; border-radius: 8px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; max-height: 480px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+        .llm-raw::-webkit-scrollbar { width: 8px; }
+        .llm-raw::-webkit-scrollbar-track { background: #1e1e2e; }
+        .llm-raw::-webkit-scrollbar-thumb { background: #4a4a5e; border-radius: 4px; }
+
+        .diag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .diag-item { background: #f8f9fa; padding: 10px 12px; border-radius: 6px; }
+        .diag-item .k { font-size: 11px; color: #888; margin-bottom: 2px; }
+        .diag-item .v { font-size: 13px; color: #333; word-break: break-all; }
+
+        .summary-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+        .summary-pill { padding: 4px 12px; border-radius: 14px; font-size: 12px; font-weight: 500; }
+        .summary-pill.match { background: #e8f5e9; color: #2e7d32; }
+        .summary-pill.mismatch { background: #ffebee; color: #c62828; }
+        .summary-pill.uncertain { background: #fff3e0; color: #e65100; }
+
+        .empty { text-align: center; padding: 40px 20px; color: #999; font-size: 13px; }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+        .spinner.dark { border-color: #4a90d9; border-top-color: transparent; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        details { margin-top: 8px; }
+        details summary { cursor: pointer; font-size: 12px; color: #4a90d9; padding: 4px 0; user-select: none; }
+        details summary:hover { text-decoration: underline; }
+        details[open] summary { margin-bottom: 6px; }
+
+        .product-meta { font-size: 12px; color: #666; }
+        .product-meta span { margin-right: 12px; }
+        .json-block { background: #fafbfc; border: 1px solid #eee; border-radius: 6px; padding: 10px; font-family: "SF Mono", monospace; font-size: 11px; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+
+        .collapsible-section .section-body { display: none; }
+        .collapsible-section.open .section-body { display: block; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔍 单商品调试</h1>
+    <p class="subtitle">输入专利记录 ID + 商品索引，单独跑一次特征比对，完整查看 LLM 原始响应、解析后的 token_units、最终染色结果。</p>
+
+    <div class="section">
+        <h2>📥 参数 <span class="badge">POST /debug/run_product</span></h2>
+        <div class="search-row">
+            <div class="input-group">
+                <label>专利记录 ID (patent_record_id) *</label>
+                <input type="number" id="patentRecordId" placeholder="如 87" value="87" />
+            </div>
+            <div class="input-group">
+                <label>分析会话 ID (可选)</label>
+                <input type="text" id="sessionId" placeholder="留空则不限" />
+            </div>
+            <div class="input-group">
+                <label>商品索引 (product_index) *</label>
+                <input type="number" id="productIndex" placeholder="从 0 开始" value="0" min="0" />
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-end;">
+                <button class="btn btn-primary" id="runBtn" onclick="runDebug()">运行单商品调试</button>
+                <button class="btn btn-secondary" id="loadListBtn" onclick="loadProductList()">仅加载商品列表</button>
+            </div>
+        </div>
+        <div class="status" id="status"></div>
+        <div id="productChips"></div>
+    </div>
+
+    <!-- 商品基本信息 -->
+    <div class="section" id="selectedProductSection" style="display:none;">
+        <h2>🛒 当前商品</h2>
+        <div id="selectedProductInfo"></div>
+    </div>
+
+    <!-- 诊断信息：LLM 原始响应、解析后类型 -->
+    <div class="section" id="diagSection" style="display:none;">
+        <h2>🔬 诊断信息</h2>
+        <div class="diag-grid" id="diagGrid"></div>
+    </div>
+
+    <!-- LLM 原始响应 -->
+    <div class="section" id="rawResponseSection" style="display:none;">
+        <h2>📜 LLM 原始响应 <span class="badge" id="rawLenBadge"></span></h2>
+        <div class="llm-raw" id="llmRaw"></div>
+    </div>
+
+    <!-- 独立权利要求 -->
+    <div class="section" id="claimsSection" style="display:none;">
+        <h2>📋 独立权利要求 <span class="badge" id="claimsBadge"></span></h2>
+        <div id="claimsList"></div>
+    </div>
+
+    <!-- 技术特征 -->
+    <div class="section" id="featuresSection" style="display:none;">
+        <h2>🔧 技术特征（拆解结果） <span class="badge" id="featuresBadge"></span></h2>
+        <div id="featuresList"></div>
+    </div>
+
+    <!-- 逐特征分析结果 -->
+    <div class="section" id="analysisSection" style="display:none;">
+        <h2>📊 逐特征分析结果 <span class="badge" id="analysisBadge"></span></h2>
+        <div class="summary-bar" id="summaryBar"></div>
+        <div id="analysisList" style="margin-top: 14px;"></div>
+    </div>
+
+    <!-- 规则审查结果 -->
+    <div class="section" id="reviewSection" style="display:none;">
+        <h2>🧠 规则审查结果 <span class="badge" id="reviewBadge"></span></h2>
+        <div class="summary-bar" id="reviewSummaryBar"></div>
+        <div id="reviewList" style="margin-top: 14px;"></div>
+    </div>
+
+    <!-- 最终比对结果 -->
+    <div class="section" id="finalSection" style="display:none;">
+        <h2>🎯 最终比对结果（apply_rules 染色后） <span class="badge" id="finalBadge"></span></h2>
+        <div id="finalContent"></div>
+    </div>
+
+    <div class="empty" id="emptyState">输入参数后点击「运行单商品调试」开始</div>
+</div>
+
+<script>
+const API_BASE = 'http://localhost:5106';
+let availableProducts = [];
+let lastResult = null;
+
+function esc(s) {
+    const div = document.createElement('div');
+    div.textContent = s == null ? '' : String(s);
+    return div.innerHTML;
+}
+
+function setStatus(msg, type='') {
+    const el = document.getElementById('status');
+    el.className = 'status ' + type;
+    el.innerHTML = msg;
+}
+
+function showSections(show) {
+    const ids = ['diagSection','rawResponseSection','claimsSection','featuresSection','analysisSection','reviewSection','finalSection','selectedProductSection'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = show ? 'block' : 'none';
+    });
+    document.getElementById('emptyState').style.display = show ? 'none' : 'block';
+}
+
+async function loadProductList() {
+    const patentRecordId = parseInt(document.getElementById('patentRecordId').value) || 0;
+    const sessionId = document.getElementById('sessionId').value.trim();
+    if (!patentRecordId) { setStatus('请先输入专利记录 ID', 'error'); return; }
+    setStatus('正在加载商品列表...', 'pending');
+    try {
+        const resp = await fetch(`${API_BASE}/debug/run_product`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patent_record_id: patentRecordId, analysis_session_id: sessionId, product_index: 0 })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        availableProducts = data.available_products || [];
+        renderProductChips();
+        setStatus(`✅ 共找到 ${availableProducts.length} 个商品，点击切换查看；或点击「运行单商品调试」跑当前选中商品`, 'success');
+        // 展示商品列表时也显示 claims/features
+        renderSelectedProduct(data);
+        renderClaims(data.independent_claims || []);
+        renderFeatures(data.features || []);
+    } catch (e) {
+        setStatus(`❌ 加载失败：${e.message}`, 'error');
+    }
+}
+
+function renderProductChips() {
+    const wrap = document.getElementById('productChips');
+    if (!availableProducts.length) { wrap.innerHTML = ''; return; }
+    const curIdx = parseInt(document.getElementById('productIndex').value) || 0;
+    wrap.innerHTML = availableProducts.map(p => `
+        <span class="product-chip ${p.index === curIdx ? 'active' : ''}" onclick="selectProduct(${p.index})" title="${esc(p.name)}">
+            #${p.index} ${esc((p.name || '').slice(0, 40))}
+        </span>
+    `).join('');
+}
+
+function selectProduct(idx) {
+    document.getElementById('productIndex').value = idx;
+    renderProductChips();
+    runDebug();
+}
+
+async function runDebug() {
+    const patentRecordId = parseInt(document.getElementById('patentRecordId').value) || 0;
+    const sessionId = document.getElementById('sessionId').value.trim();
+    const productIndex = parseInt(document.getElementById('productIndex').value) || 0;
+    if (!patentRecordId) { setStatus('请先输入专利记录 ID', 'error'); return; }
+
+    const btn = document.getElementById('runBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>LLM 比对中…';
+
+    setStatus('正在调用 LLM（可能需要 30-90 秒）...', 'pending');
+    showSections(false);
+
+    const t0 = Date.now();
+    try {
+        const resp = await fetch(`${API_BASE}/debug/run_product`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patent_record_id: patentRecordId, analysis_session_id: sessionId, product_index: productIndex })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        lastResult = data;
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        setStatus(`✅ 完成 (${elapsed}s) · debug_run_id=${esc(data.debug_run_id || '-')}`, 'success');
+
+        availableProducts = data.available_products || [];
+        renderProductChips();
+        renderSelectedProduct(data);
+        renderDiag(data);
+        renderRawResponse(data);
+        renderClaims(data.independent_claims || []);
+        renderFeatures(data.features || []);
+        renderAnalysis(data.raw_analysis || []);
+        renderReviewedAnalysis(data.reviewed_analysis || []);
+        renderFinalResult(data.comparison_result || {});
+
+        showSections(true);
+    } catch (e) {
+        setStatus(`❌ 失败：${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '运行单商品调试';
+    }
+}
+
+function renderSelectedProduct(data) {
+    const p = data.selected_product || {};
+    document.getElementById('selectedProductInfo').innerHTML = `
+        <div style="font-weight:600; font-size:15px; margin-bottom:8px;">${esc(p.name || '-')}</div>
+        <div class="product-meta">
+            <span>ID: ${esc(p.id || '-')}</span>
+            <span>图片数: ${(p.images || []).length}</span>
+        </div>
+        ${p.description ? `<details style="margin-top:10px;"><summary>商品描述（${(p.description || '').length} 字）</summary><div class="feature-reason" style="margin-top:4px;">${esc(p.description)}</div></details>` : ''}
+    `;
+}
+
+function renderDiag(data) {
+    const raw = data.raw_analysis || [];
+    const finalRes = data.comparison_result || {};
+    const features = data.features || [];
+    const items = raw.filter(it => it && it.feature_id);
+    const totalUnits = raw.reduce((s, it) => s + (Array.isArray(it.token_units) ? it.token_units.length : 0), 0);
+    const matchedUnits = raw.reduce((s, it) => s + (Array.isArray(it.token_units) ? it.token_units.filter(u => (u.unit_status || u.status) === 'match').length : 0), 0);
+    const mismatchUnits = raw.reduce((s, it) => s + (Array.isArray(it.token_units) ? it.token_units.filter(u => (u.unit_status || u.status) === 'mismatch').length : 0), 0);
+
+    document.getElementById('diagGrid').innerHTML = `
+        <div class="diag-item">
+            <div class="k">debug_run_id</div>
+            <div class="v">${esc(data.debug_run_id || '-')}</div>
+        </div>
+        <div class="diag-item">
+            <div class="k">LLM 原始分析条目数 (feature_id 非空)</div>
+            <div class="v">${items.length} / ${features.length}（缺 ${features.length - items.length} 个特征）</div>
+        </div>
+        <div class="diag-item">
+            <div class="k">token_units 总数 / match / mismatch</div>
+            <div class="v">${totalUnits} / ${matchedUnits} / ${mismatchUnits}</div>
+        </div>
+        <div class="diag-item">
+            <div class="k">最终商品分（product_similarity_score）</div>
+            <div class="v">${esc(finalRes.product_similarity_score ?? '-')} · ${esc(finalRes.product_score_band ?? '-')}</div>
+        </div>
+    `;
+}
+
+function renderRawResponse(data) {
+    // 拼装 LLM 原始响应：把 raw_analysis dump 出来
+    const raw = data.raw_analysis || [];
+    const reviewed = data.reviewed_analysis || [];
+    const finalRes = data.comparison_result || {};
+    let text = '';
+    text += '【LLM 原始分析条目 raw_analysis】\n';
+    text += JSON.stringify(raw, null, 2);
+    text += '\n\n【规则审查后 reviewed_analysis】\n';
+    text += JSON.stringify(reviewed, null, 2);
+    text += '\n\n【apply_rules 后 comparison_result】\n';
+    text += JSON.stringify(finalRes, null, 2);
+
+    document.getElementById('llmRaw').textContent = text;
+    document.getElementById('rawLenBadge').textContent = text.length + ' 字';
+}
+
+function renderClaims(claims) {
+    const el = document.getElementById('claimsList');
+    if (!claims.length) { el.innerHTML = '<div class="empty">无独立权利要求</div>'; return; }
+    el.innerHTML = claims.map((c, i) => `
+        <div class="feature-card">
+            <div class="feature-header">
+                <span class="feature-id">权利要求 ${esc(c.claim_id || i+1)}</span>
+            </div>
+            <div class="feature-text">${esc(c.claim_text || '-')}</div>
+        </div>
+    `).join('');
+    document.getElementById('claimsBadge').textContent = `${claims.length} 条`;
+}
+
+function renderFeatures(features) {
+    const el = document.getElementById('featuresList');
+    if (!features.length) { el.innerHTML = '<div class="empty">无特征</div>'; return; }
+    el.innerHTML = features.map(f => {
+        const segs = f.feature_segments || [];
+        return `
+            <div class="feature-card">
+                <div class="feature-header">
+                    <span class="feature-id">${esc(f.feature_id || '-')}</span>
+                    <span class="feature-tag uncertain">${f.claim_id ? '权利要求 ' + esc(f.claim_id) : ''}</span>
+                </div>
+                <div class="feature-text">${esc(f.feature_text || '-')}</div>
+                ${segs.length ? `<div class="feature-segments">${segs.map(s => `<span class="segment uncertain">${esc(s.text || s)}</span>`).join('')}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+    document.getElementById('featuresBadge').textContent = `${features.length} 个`;
+}
+
+function getBandClass(scoreBand) {
+    if (scoreBand === '明确相同' || scoreBand === 'exact_match') return 'match';
+    if (scoreBand === '明确不相同' || scoreBand === 'exact_mismatch') return 'mismatch';
+    if (scoreBand === '待确认' || scoreBand === 'uncertain' || scoreBand === '中等相似' || scoreBand === 'medium_similarity' || scoreBand === '低相似' || scoreBand === 'low_similarity') return 'uncertain';
+    return '';
+}
+
+function getFinalSummary(features) {
+    return (features || []).reduce((acc, feature) => {
+        const cls = getBandClass(feature.score_band);
+        if (cls === 'match') acc.match += 1;
+        else if (cls === 'mismatch') acc.mismatch += 1;
+        else if (cls === 'uncertain') acc.uncertain += 1;
+        return acc;
+    }, { match: 0, mismatch: 0, uncertain: 0 });
+}
+
+function getAnalysisSummary(items) {
+    return (items || []).reduce((acc, item) => {
+        const units = item.token_units || [];
+        const hasMismatch = units.some(u => (u.unit_status || u.status) === 'mismatch');
+        const hasMatch = units.some(u => (u.unit_status || u.status) === 'match');
+        if (hasMismatch) acc.mismatch += 1;
+        else if (hasMatch) acc.match += 1;
+        else acc.uncertain += 1;
+        return acc;
+    }, { match: 0, mismatch: 0, uncertain: 0 });
+}
+
+function renderAnalysisBlock(items, opts) {
+    const el = document.getElementById(opts.listId);
+    const summaryEl = document.getElementById(opts.summaryId);
+    const badgeEl = document.getElementById(opts.badgeId);
+    if (!items.length) {
+        el.innerHTML = `<div class="empty">${opts.emptyText}</div>`;
+        summaryEl.innerHTML = '';
+        badgeEl.textContent = '0 条';
+        return;
+    }
+    const summary = getAnalysisSummary(items);
+    summaryEl.innerHTML = `
+        <span class="summary-pill match">明确相同 ${summary.match}</span>
+        <span class="summary-pill mismatch">明确不相同 ${summary.mismatch}</span>
+        <span class="summary-pill uncertain">待确认 ${summary.uncertain}</span>
+    `;
+
+    el.innerHTML = items.map((it, i) => {
+        const units = it.token_units || [];
+        const matched = units.filter(u => (u.unit_status || u.status) === 'match').length;
+        const mismatched = units.filter(u => (u.unit_status || u.status) === 'mismatch').length;
+        const uncertain = units.filter(u => (u.unit_status || u.status) === 'uncertain' || (!u.unit_status && !u.status)).length;
+        const cardClass = it.reasoning_type === '可判断不具有' ? 'mismatch'
+                        : (it.reasoning_type === '相关信息缺失' ? 'uncertain' : 'match');
+        const tagText = it.reasoning_type || '-';
+        return `
+            <div class="feature-card ${cardClass}">
+                <div class="feature-header">
+                    <span class="feature-id">#${i+1} ${esc(it.feature_id || '-')}</span>
+                    <span class="feature-tag ${cardClass}">${esc(tagText)}</span>
+                </div>
+                ${units.length ? `<div class="feature-segments">${units.map(u => {
+                    const st = (u.unit_status || u.status || 'uncertain');
+                    return `<span class="segment ${st}" title="${esc(u.reason || '')}">${esc(u.text || '-')}</span>`;
+                }).join('')}</div>` : ''}
+                <div class="meta-row" style="margin-bottom:6px;">
+                    <span class="product-meta"><b>units:</b> ${units.length}</span>
+                    <span class="product-meta" style="color:#27ae60;"><b>match</b> ${matched}</span>
+                    <span class="product-meta" style="color:#e74c3c;"><b>mismatch</b> ${mismatched}</span>
+                    <span class="product-meta" style="color:#f39c12;"><b>uncertain</b> ${uncertain}</span>
+                </div>
+                <div class="feature-reason-label">evidence（商品原文）</div>
+                <div class="feature-reason">${esc(it.evidence || '(空)')}</div>
+                <div class="feature-reason-label" style="margin-top:6px;">reason（特征级汇总）</div>
+                <div class="feature-reason">${esc(it.reason || '(空)')}</div>
+            </div>
+        `;
+    }).join('');
+
+    badgeEl.textContent = `${items.length} 条`;
+}
+
+function renderAnalysis(items) {
+    renderAnalysisBlock(items, {
+        listId: 'analysisList',
+        summaryId: 'summaryBar',
+        badgeId: 'analysisBadge',
+        emptyText: 'LLM 未返回任何分析',
+    });
+}
+
+function renderReviewedAnalysis(items) {
+    renderAnalysisBlock(items, {
+        listId: 'reviewList',
+        summaryId: 'reviewSummaryBar',
+        badgeId: 'reviewBadge',
+        emptyText: '规则审查未返回任何结果',
+    });
+}
+
+function renderFinalResult(res) {
+    const el = document.getElementById('finalContent');
+    if (!res || Object.keys(res).length === 0) { el.innerHTML = '<div class="empty">无最终结果</div>'; return; }
+    const features = res.features || [];
+    const claimScores = res.claim_scores || [];
+    const simScore = res.product_similarity_score ?? '-';
+    const simBand = res.product_score_band ?? '-';
+    const summary = getFinalSummary(features);
+    const simBandClass = getBandClass(simBand);
+    el.innerHTML = `
+        <div class="diag-grid" style="margin-bottom:14px;">
+            <div class="diag-item">
+                <div class="k">product_similarity_score</div>
+                <div class="v" style="font-size:18px; font-weight:600;">${esc(simScore)}</div>
+            </div>
+            <div class="diag-item">
+                <div class="k">product_score_band</div>
+                <div class="v" style="font-size:18px; font-weight:600;"><span class="feature-tag ${simBandClass}">${esc(simBand)}</span></div>
+            </div>
+        </div>
+        <div class="summary-bar" style="margin-bottom:14px;">
+            <span class="summary-pill match">明确相同 ${summary.match}</span>
+            <span class="summary-pill mismatch">明确不相同 ${summary.mismatch}</span>
+            <span class="summary-pill uncertain">待确认 ${summary.uncertain}</span>
+        </div>
+        ${claimScores.length ? `
+            <h3 style="font-size:13px; margin:10px 0 8px; color:#555;">按权利要求聚合</h3>
+            ${claimScores.map(cs => `
+                <div class="feature-card">
+                    <div class="feature-header">
+                        <span class="feature-id">权利要求 ${esc(cs.claim_id)}</span>
+                        <span class="feature-tag ${getBandClass(cs.score_band)}">${esc(cs.score_band)} · ${esc(cs.similarity_score)}</span>
+                    </div>
+                    <div class="product-meta">
+                        有效长度: ${cs.claim_matched_effective_length ?? 0} / ${cs.claim_total_effective_length ?? 0}
+                        ${cs.zeroed_by_mismatch ? ' · <span style="color:#e74c3c;">zeroed_by_mismatch</span>' : ''}
+                    </div>
+                </div>
+            `).join('')}
+        ` : ''}
+        <h3 style="font-size:13px; margin:14px 0 8px; color:#555;">逐特征最终染色（按 score_band 着色）</h3>
+        ${features.map(f => {
+            const cardClass = getBandClass(f.score_band);
+            const units = f.token_units || [];
+            return `
+                <div class="feature-card ${cardClass}">
+                    <div class="feature-header">
+                        <span class="feature-id">${esc(f.feature_id || '-')}</span>
+                        <span class="feature-tag ${cardClass}">${esc(f.score_band || '-')} · ${esc(f.similarity_score ?? '-')}</span>
+                    </div>
+                    <div class="feature-text">${esc(f.feature_text || '-')}</div>
+                    ${units.length ? `<div class="feature-segments">${units.map(u => {
+                        const st = (u.status || u.unit_status || 'uncertain');
+                        return `<span class="segment ${st}" title="${esc(u.reason || '')}">${esc(u.text || '-')}</span>`;
+                    }).join('')}</div>` : ''}
+                    ${f.zeroed_by_mismatch ? '<div class="feature-meta" style="color:#e74c3c;">⚠ zeroed_by_mismatch=true</div>' : ''}
+                </div>
+            `;
+        }).join('')}
+    `;
+    document.getElementById('finalBadge').textContent = `${features.length} 个特征 · ${simBand}`;
+}
+</script>
+</body>
+</html>

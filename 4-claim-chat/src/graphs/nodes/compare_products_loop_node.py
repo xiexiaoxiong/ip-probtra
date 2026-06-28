@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 MAX_PARALLEL_WORKERS: int = 10
 
 
+def _score_band(score: float) -> str:
+    if score > 70:
+        return "明确相同"
+    if score >= 30:
+        return "中等相似"
+    return "明确不相同" if score <= 0 else "低相似"
+
+
 def _feature_key(feature: Dict[str, Any]) -> tuple[str, str, str]:
     feature_id = str(feature.get("feature_id", "")).strip()
     claim_id = str(feature.get("claim_id", "")).strip()
@@ -56,6 +64,7 @@ def _compare_single_product(
         "features": features,
         "product_data": product,
         "raw_analysis": [],
+        "reviewed_analysis": [],
         "product_name": "",
         "comparison_result": {},
         "specification_text": specification_text
@@ -70,22 +79,51 @@ def _compare_single_product(
         return {"index": idx, "result": comp_result, "error": None}
     except Exception as e:
         logger.error(f"处理商品 '{product_name}' 时出错: {e}")
-        # 异常处理：为该商品生成 UNCERTAIN 结果
+        # 异常处理：为该商品生成可兼容的新结构兜底结果
         error_features: List[Dict[str, Any]] = []
+        claim_scores_map: Dict[str, Dict[str, Any]] = {}
         for feat in features:
+            claim_id = str(feat.get("claim_id", ""))
+            fallback_score = 0.0
             error_features.append({
                 "feature_id": str(feat.get("feature_id", "")),
                 "feature_text": str(feat.get("feature_text", "")),
                 "evidence": "",
-                "comparison_result": "UNCERTAIN",
+                "similarity_score": fallback_score,
+                "score_band": _score_band(fallback_score),
                 "reason": f"处理过程异常: {e}",
                 "reasoning_type": "相关信息缺失",
-                "claim_id": str(feat.get("claim_id", ""))
+                "claim_id": claim_id,
+                "evidence_images": [],
+                "score_rationale": "处理过程异常，按低相似兜底",
+                "token_units": [],
+                "feature_full_score": 0.0,
+                "feature_awarded_score": 0.0,
+                "feature_effective_length": int(feat.get("effective_length", 0) or 0),
+                "matched_effective_length": 0,
+                "claim_total_effective_length": 0,
+                "zeroed_by_mismatch": False,
             })
+            claim_scores_map[claim_id] = {
+                "claim_id": claim_id,
+                "similarity_score": fallback_score,
+                "score_band": _score_band(fallback_score),
+                "claim_total_effective_length": 0,
+                "claim_matched_effective_length": 0,
+                "zeroed_by_mismatch": False,
+            }
+        claim_scores = [
+            claim_scores_map[claim_id]
+            for claim_id in sorted(claim_scores_map)
+        ]
+        product_similarity_score = max((item["similarity_score"] for item in claim_scores), default=0.0)
         error_result: Dict[str, Any] = {
             "product_id": product.get("id"),
             "product_name": product_name,
-            "features": error_features
+            "features": error_features,
+            "claim_scores": claim_scores,
+            "product_similarity_score": product_similarity_score,
+            "product_score_band": _score_band(product_similarity_score),
         }
         return {"index": idx, "result": error_result, "error": str(e)}
 

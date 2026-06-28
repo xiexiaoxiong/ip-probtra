@@ -58,14 +58,14 @@ def bootstrap_local_env() -> None:
 
 
 def ensure_claim_compare_async_columns() -> None:
-    """Auto-migrate async task columns required by module4."""
+    """Auto-migrate claim compare columns required by module4."""
     from storage.database.db import get_engine
     from sqlalchemy import text
 
     try:
         engine = get_engine()
         with engine.begin() as conn:
-            existing_columns = {
+            existing_run_columns = {
                 row[0]
                 for row in conn.execute(
                     text(
@@ -77,18 +77,48 @@ def ensure_claim_compare_async_columns() -> None:
                     )
                 ).fetchall()
             }
+            existing_result_columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'claim_compare_results'
+                        """
+                    )
+                ).fetchall()
+            }
 
             statements: list[str] = []
-            if "run_id" not in existing_columns:
+            if "run_id" not in existing_run_columns:
                 statements.append("ALTER TABLE claim_compare_runs ADD COLUMN run_id TEXT")
-            if "status" not in existing_columns:
+            if "status" not in existing_run_columns:
                 statements.append("ALTER TABLE claim_compare_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'")
-            if "error_message" not in existing_columns:
+            if "error_message" not in existing_run_columns:
                 statements.append("ALTER TABLE claim_compare_runs ADD COLUMN error_message TEXT")
-            if "started_at" not in existing_columns:
+            if "started_at" not in existing_run_columns:
                 statements.append("ALTER TABLE claim_compare_runs ADD COLUMN started_at TIMESTAMPTZ")
-            if "finished_at" not in existing_columns:
+            if "finished_at" not in existing_run_columns:
                 statements.append("ALTER TABLE claim_compare_runs ADD COLUMN finished_at TIMESTAMPTZ")
+            if "similarity_score" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN similarity_score INTEGER")
+            if "score_band" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN score_band TEXT")
+            if "feature_full_score" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN feature_full_score DOUBLE PRECISION")
+            if "feature_awarded_score" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN feature_awarded_score DOUBLE PRECISION")
+            if "feature_effective_length" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN feature_effective_length INTEGER")
+            if "matched_effective_length" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN matched_effective_length INTEGER")
+            if "claim_total_effective_length" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN claim_total_effective_length INTEGER")
+            if "zeroed_by_mismatch" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN zeroed_by_mismatch BOOLEAN")
+            if "token_units" not in existing_result_columns:
+                statements.append("ALTER TABLE claim_compare_results ADD COLUMN token_units JSONB")
 
             for statement in statements:
                 logger.info("Applying module4 async schema migration: %s", statement)
@@ -1339,6 +1369,136 @@ async def health_check():
 @app.get(path="/graph_parameter")
 async def http_graph_inout_parameter(request: Request):
     return service.graph_inout_schema()
+
+
+@app.get("/debug")
+async def debug_page():
+    """单商品调试页面：拉取专利+商品数据，挑一个商品跑 LLM 比对，完整展示 LLM 原始响应 + 解析结果。"""
+    debug_html = STATIC_DIR / "debug.html"
+    if debug_html.exists():
+        return FileResponse(str(debug_html))
+    raise HTTPException(status_code=404, detail="Debug page not found")
+
+
+@app.post("/debug/run_product")
+async def debug_run_product(request: Request):
+    """
+    调试用：取一个商品跑一次完整比对，返回 LLM 原始响应 + 解析结果 + 染色后的最终结果。
+    body: { patent_record_id: int, analysis_session_id?: str, product_index?: int (default 0) }
+    """
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.runtime import Runtime
+    from graphs.state import (
+        ParseAndFetchInput,
+        DecomposeClaimInput,
+    )
+
+    def _build_runtime() -> Runtime:
+        # 复用 ctx（new_context 已经填好 run_id/space_id/project_id）
+        return Runtime(context=ctx, store=None, stream_writer=lambda *_: None, previous=None)
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    patent_record_id = int(body.get("patent_record_id") or 0)
+    if patent_record_id <= 0:
+        raise HTTPException(status_code=400, detail="patent_record_id 必填且必须 > 0")
+    analysis_session_id = str(body.get("analysis_session_id") or "")
+    product_index = int(body.get("product_index") or 0)
+
+    ctx = new_context(method="debug_run_product")
+    request_context.set(ctx)
+    debug_run_id = f"debug_{ctx.run_id}"
+    logger.info(f"[DEBUG] 启动: patent_record_id={patent_record_id}, session={analysis_session_id}, product_index={product_index}")
+
+    try:
+        # 直接调节点函数（service.run_node 找不到主图节点，原因是 graph_helper 是基于 agent_proj 的）
+        from graphs.nodes.parse_and_fetch_node import parse_and_fetch_node
+        from graphs.nodes.decompose_claim_node import decompose_claim_node
+
+        # 1. 拉取数据
+        parse_input = ParseAndFetchInput(
+            patent_record_id=patent_record_id,
+            analysis_session_id=analysis_session_id,
+            run_id=debug_run_id,
+        )
+        parse_output = parse_and_fetch_node(parse_input, RunnableConfig(), _build_runtime())
+        if parse_output.error_status:
+            raise HTTPException(status_code=400, detail=parse_output.error_status)
+        if not parse_output.products:
+            raise HTTPException(status_code=404, detail="该专利下未找到任何商品")
+        if product_index < 0 or product_index >= len(parse_output.products):
+            raise HTTPException(
+                status_code=400,
+                detail=f"product_index 越界，可选范围 0 ~ {len(parse_output.products) - 1}",
+            )
+
+        # 2. 拆解权利要求
+        decompose_input = DecomposeClaimInput(
+            independent_claims=parse_output.independent_claims,
+            specification_text=parse_output.specification_text,
+            specification_images=parse_output.specification_images,
+        )
+        decompose_output = decompose_claim_node(decompose_input, RunnableConfig(), _build_runtime())
+        features = decompose_output.features
+        if not features:
+            raise HTTPException(status_code=500, detail="decompose_claim 返回空 features")
+
+        # 3. 跑单个商品的子图（analyze_features + apply_rules）
+        from graphs.loop_graph import product_comparison_graph
+        target_product = parse_output.products[product_index]
+        loop_state = {
+            "features": features,
+            "product_data": target_product,
+            "raw_analysis": [],
+            "reviewed_analysis": [],
+            "product_name": target_product.get("name", ""),
+            "comparison_result": {},
+            "specification_text": parse_output.specification_text,
+        }
+        run_config = RunnableConfig(
+            configurable={"thread_id": debug_run_id, "run_id": debug_run_id, "llm_cfg": "config/analyze_features_llm_cfg.json"},
+            run_id=debug_run_id,
+            tags=["debug_run_product", ctx.run_id],
+            metadata={"llm_cfg": "config/analyze_features_llm_cfg.json"},
+        )
+        loop_result = await product_comparison_graph.ainvoke(loop_state, config=run_config)
+
+        return {
+            "ok": True,
+            "debug_run_id": debug_run_id,
+            "patent_record_id": patent_record_id,
+            "analysis_session_id": analysis_session_id,
+            "product_index": product_index,
+            "available_products": [
+                {"index": i, "name": p.get("name", ""), "id": p.get("id", "")}
+                for i, p in enumerate(parse_output.products)
+            ],
+            "selected_product": {
+                "name": target_product.get("name", ""),
+                "description": target_product.get("description", ""),
+                "images": target_product.get("images", []),
+                "id": target_product.get("id", ""),
+            },
+            "independent_claims": parse_output.independent_claims,
+            "features": features,
+            "raw_analysis": loop_result.get("raw_analysis", []),
+            "reviewed_analysis": loop_result.get("reviewed_analysis", []),
+            "comparison_result": loop_result.get("comparison_result", {}),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[DEBUG] 失败: {e}\n{traceback.format_exc()}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+    finally:
+        try:
+            cozeloop.flush()
+        except Exception:
+            pass
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Start FastAPI server")

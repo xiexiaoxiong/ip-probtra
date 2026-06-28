@@ -16,7 +16,9 @@ import { Separator } from '@/components/ui/separator';
 import { Shield, ExternalLink, ArrowLeft, Loader2, AlertCircle, FileSearch, Database, Download } from 'lucide-react';
 import Link from 'next/link';
 import { FeishuConfig } from '@/components/feishu-config';
+import { ResultsScoreTable } from '@/components/results-score-table';
 import type { ProductInfo } from '@/lib/types';
+import { PRODUCT_RISK_CONFIG } from '@/lib/types';
 
 export default function ResultsPage() {
   return (
@@ -207,56 +209,35 @@ function ResultsContent() {
     }
   };
 
-  // 统计 - 基于独立权利要求级比对结果
-  // 1. 疑似侵权：存在至少一个独立权利要求，其所有特征都相同或等同
-  // 2. 疑似不侵权：所有独立权利要求都有至少一个特征不相同
-  // 3. 需要进一步分析：没有权利要求全相同，且至少有一个权利要求没有不相同特征
   const verdictStats = {
-    infringementLikely: 0,
-    needsReview: 0,
-    noInfringement: 0,
+    highRisk: 0,
+    mediumRisk: 0,
+    lowRisk: 0,
+    clearLowRisk: 0,
   };
 
-  // 按 claim_id 分组特征
-  function groupByClaimId(elements: ProductComparison['claimElements']) {
-    const map = new Map<string, ProductComparison['claimElements']>();
-    for (const el of elements) {
-      const claimId = el.patentReference || 'unknown';
-      if (!map.has(claimId)) map.set(claimId, []);
-      map.get(claimId)!.push(el);
+  for (const comp of comparisons) {
+    switch (comp.riskLevel) {
+      case 'high_risk':
+        verdictStats.highRisk++;
+        break;
+      case 'medium_risk':
+        verdictStats.mediumRisk++;
+        break;
+      case 'clear_low_risk':
+        verdictStats.clearLowRisk++;
+        break;
+      default:
+        verdictStats.lowRisk++;
+        break;
     }
-    return map;
   }
 
-  for (const comp of comparisons) {
-    const elements = comp.claimElements || [];
-    if (elements.length === 0) continue;
-    
-    const claimGroups = groupByClaimId(elements);
-    
-    let hasAnyClaimAllMatching = false;
-    let hasAnyClaimNoNotMatching = false;
-    let allClaimsHaveNotMatching = true;
-    
-    for (const [, claimElements] of claimGroups) {
-      const hasNotMatching = claimElements.some(e => e.status === 'not_matching');
-      const allMatching = claimElements.every(e => e.status === 'matching');
-      
-      if (allMatching) hasAnyClaimAllMatching = true;
-      if (!hasNotMatching) hasAnyClaimNoNotMatching = true;
-      if (!hasNotMatching) allClaimsHaveNotMatching = false;
-    }
-    
-    if (hasAnyClaimAllMatching) {
-      verdictStats.infringementLikely++;
-    } else if (allClaimsHaveNotMatching) {
-      verdictStats.noInfringement++;
-    } else if (hasAnyClaimNoNotMatching) {
-      verdictStats.needsReview++;
-    } else {
-      verdictStats.needsReview++;
-    }
-  }
+  const sortedProducts = [...products].sort((a, b) => {
+    const scoreA = getComparison(a.id)?.productSimilarityScore ?? -1;
+    const scoreB = getComparison(b.id)?.productSimilarityScore ?? -1;
+    return scoreB - scoreA;
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -358,22 +339,26 @@ function ResultsContent() {
               {/* 统计结果 */}
               <div>
                 <span className="text-xs text-muted-foreground">分析结果</span>
-                <div className="grid grid-cols-4 gap-3 mt-2">
+                <div className="grid grid-cols-5 gap-3 mt-2">
                   <div className="rounded-lg border bg-muted/30 p-3 text-center">
                     <div className="text-xl font-bold">{products.length}</div>
                     <div className="text-[11px] text-muted-foreground">检索商品总数</div>
                   </div>
-                  <div className="rounded-lg border bg-red-50/50 p-3 text-center dark:bg-red-950/20">
-                    <div className="text-xl font-bold text-red-700">{verdictStats.infringementLikely}</div>
-                    <div className="text-[11px] text-red-600">疑似侵权商品</div>
+                  <div className="rounded-lg border bg-green-50/50 p-3 text-center dark:bg-green-950/20">
+                    <div className="text-xl font-bold text-green-700">{verdictStats.highRisk}</div>
+                    <div className="text-[11px] text-green-600">高相似度商品</div>
                   </div>
                   <div className="rounded-lg border bg-amber-50/50 p-3 text-center dark:bg-amber-950/20">
-                    <div className="text-xl font-bold text-amber-700">{verdictStats.needsReview}</div>
-                    <div className="text-[11px] text-amber-600">需要进一步分析</div>
+                    <div className="text-xl font-bold text-amber-700">{verdictStats.mediumRisk}</div>
+                    <div className="text-[11px] text-amber-600">中等相似度商品</div>
                   </div>
-                  <div className="rounded-lg border bg-green-50/50 p-3 text-center dark:bg-green-950/20">
-                    <div className="text-xl font-bold text-green-700">{verdictStats.noInfringement}</div>
-                    <div className="text-[11px] text-green-600">疑似不侵权商品</div>
+                  <div className="rounded-lg border bg-red-50/50 p-3 text-center dark:bg-red-950/20">
+                    <div className="text-xl font-bold text-red-700">{verdictStats.lowRisk}</div>
+                    <div className="text-[11px] text-red-600">低相似度商品</div>
+                  </div>
+                  <div className="rounded-lg border bg-slate-50/50 p-3 text-center dark:bg-slate-950/20">
+                    <div className="text-xl font-bold text-slate-700 dark:text-slate-200">{verdictStats.clearLowRisk}</div>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300">疑似不侵权</div>
                   </div>
                 </div>
               </div>
@@ -385,61 +370,7 @@ function ResultsContent() {
         {products.length > 0 ? (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">商品列表</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {products.map((product) => {
-                const comparison = getComparison(product.id);
-                
-                // 计算该商品的侵权判定结果（基于权利要求级逻辑）
-                let productVerdict: 'infringement_likely' | 'needs_review' | 'no_infringement' = 'needs_review';
-                if (comparison && comparison.claimElements.length > 0) {
-                  const claimGroups = groupByClaimId(comparison.claimElements);
-                  let hasAnyClaimAllMatching = false;
-                  let allClaimsHaveNotMatching = true;
-                  
-                  for (const [, claimElements] of claimGroups) {
-                    const hasNotMatching = claimElements.some(e => e.status === 'not_matching');
-                    const allMatching = claimElements.every(e => e.status === 'matching');
-                    if (allMatching) hasAnyClaimAllMatching = true;
-                    if (!hasNotMatching) allClaimsHaveNotMatching = false;
-                  }
-                  
-                  if (hasAnyClaimAllMatching) productVerdict = 'infringement_likely';
-                  else if (allClaimsHaveNotMatching) productVerdict = 'no_infringement';
-                  else productVerdict = 'needs_review';
-                }
-
-                const verdictLabels = {
-                  infringement_likely: { label: '疑似侵权', color: 'text-red-700', bg: 'bg-red-50 border-red-200' },
-                  needs_review: { label: '需进一步分析', color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200' },
-                  no_infringement: { label: '疑似不侵权', color: 'text-green-700', bg: 'bg-green-50 border-green-200' },
-                };
-                const vConfig = verdictLabels[productVerdict];
-
-                return (
-                  <Link
-                    key={product.id}
-                    href={`/results/${product.id}?session=${sessionId}`}
-                    className="block rounded-lg border bg-background hover:shadow-md transition-shadow overflow-hidden"
-                  >
-                    <div className="p-4 flex gap-3">
-                      <div className="h-20 w-20 shrink-0 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
-                        {product.imageUrl ? (
-                          <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="text-2xl text-muted-foreground">📦</span>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-semibold line-clamp-2 mb-1.5">{product.name}</h3>
-                        <Badge variant="outline" className={`${vConfig.bg} ${vConfig.color} border text-xs`}>
-                          {vConfig.label}
-                        </Badge>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
+            <ResultsScoreTable products={sortedProducts} comparisons={comparisons} sessionId={sessionId || ''} />
           </div>
         ) : !isSessionFinished ? (
           <Card>

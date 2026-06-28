@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 import httpx
@@ -15,6 +15,7 @@ from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 
 from graphs.state import CozeSearchInput, CozeSearchOutput
+from graphs.nodes.save_results_node import persist_search_results
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,7 @@ def coze_search_node(
     if not keywords:
         return CozeSearchOutput(
             products=[],
+            search_run_id=int(state.search_run_id or 0),
             total_products_count=0,
             successful_keywords_count=0,
             failed_keywords_count=0,
@@ -224,6 +226,7 @@ def coze_search_node(
     if not COZE_API_TOKEN:
         return CozeSearchOutput(
             products=[],
+            search_run_id=int(state.search_run_id or 0),
             total_products_count=0,
             successful_keywords_count=0,
             failed_keywords_count=len(keywords),
@@ -238,26 +241,53 @@ def coze_search_node(
             COZE_PER_KEYWORD_PRODUCT_LIMIT,
         )
 
-        keyword_results: List[Tuple[str, List[Dict[str, Any]]]] = []
-        max_workers = max(1, min(COZE_MAX_CONCURRENT, len(keywords)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            keyword_results = list(executor.map(_search_products_for_keyword, keywords))
-
         all_products: List[Dict[str, Any]] = []
+        max_workers = max(1, min(COZE_MAX_CONCURRENT, len(keywords)))
         successful = 0
         failed = 0
-        for keyword, products in keyword_results:
-            if products:
-                successful += 1
-                all_products.extend(products)
-            else:
-                failed += 1
-                logger.warning("关键词 '%s' 未检索到商品", keyword)
+        search_run_id = int(state.search_run_id or 0)
 
-        all_products = _deduplicate_products(all_products)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_keyword = {
+                executor.submit(_search_products_for_keyword, keyword): keyword
+                for keyword in keywords
+            }
+
+            for future in as_completed(future_to_keyword):
+                keyword = future_to_keyword[future]
+                products: List[Dict[str, Any]] = []
+                try:
+                    _, products = future.result()
+                except Exception as error:
+                    failed += 1
+                    logger.warning("关键词 '%s' 检索异常: %s", keyword, error)
+                    continue
+
+                if products:
+                    successful += 1
+                    all_products.extend(products)
+                else:
+                    failed += 1
+                    logger.warning("关键词 '%s' 未检索到商品", keyword)
+
+                all_products = _deduplicate_products(all_products)
+                persisted = persist_search_results(
+                    patent_record_id=state.patent_record_id,
+                    analysis_session_id=state.analysis_session_id,
+                    products=all_products,
+                    product_dataset_id=state.product_dataset_id,
+                    retrieval_start_time=state.retrieval_start_time,
+                    search_run_id=search_run_id,
+                    successful_keywords_count=successful,
+                    failed_keywords_count=failed,
+                    is_complete=False,
+                    error_message="",
+                )
+                search_run_id = persisted.search_run_id
 
         return CozeSearchOutput(
             products=all_products,
+            search_run_id=search_run_id,
             total_products_count=len(all_products),
             successful_keywords_count=successful,
             failed_keywords_count=failed,
@@ -269,6 +299,7 @@ def coze_search_node(
         logger.error("Coze搜索异常: %s", e, exc_info=True)
         return CozeSearchOutput(
             products=[],
+            search_run_id=int(state.search_run_id or 0),
             total_products_count=0,
             successful_keywords_count=0,
             failed_keywords_count=len(keywords),

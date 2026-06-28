@@ -212,26 +212,31 @@ export async function readTableRecords(
 // 数据转换：将飞书表格记录映射为业务模型
 // ============================================================
 
-import type { PatentInfo, ProductInfo, ProductComparison, InfringementVerdict, MatchStatus } from './types';
+import { buildFallbackTokenUnits, computeClaimScores, computeProductScore } from './claim-score';
+import { scoreToBand, scoreToRiskLevel } from './types';
+import type { PatentInfo, ProductInfo, ProductComparison } from './types';
 
 /** 从飞书记录中提取文本字段 */
-function getTextField(record: Record<string, unknown>, field: string): string {
-  const value = record[field];
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    // 飞书多行文本字段格式: [{ type: "text", text: "xxx" }]
-    return value
-      .map((item: unknown) => {
-        if (typeof item === 'string') return item;
-        if (item && typeof item === 'object' && 'text' in item) return (item as { text: string }).text;
-        return '';
-      })
-      .join('');
+function getTextField(record: Record<string, unknown>, ...fields: string[]): string {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+      const text = value
+        .map((item: unknown) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object' && 'text' in item) return (item as { text: string }).text;
+          return '';
+        })
+        .join('');
+      if (text) return text;
+    }
+    if (value && typeof value === 'object' && 'text' in value) {
+      const text = (value as { text: string }).text || '';
+      if (text) return text;
+    }
   }
-  if (value && typeof value === 'object' && 'text' in value) {
-    return (value as { text: string }).text || '';
-  }
-  return String(value || '');
+  return '';
 }
 
 /** 从飞书记录中提取链接字段 */
@@ -256,12 +261,14 @@ function getLinkField(record: Record<string, unknown>, field: string): string {
 }
 
 /** 从飞书记录中提取数字字段 */
-function getNumberField(record: Record<string, unknown>, field: string): number | undefined {
-  const value = record[field];
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const num = parseFloat(value);
-    if (!isNaN(num)) return num;
+function getNumberField(record: Record<string, unknown>, ...fields: string[]): number | undefined {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const num = parseFloat(value);
+      if (!isNaN(num)) return num;
+    }
   }
   return undefined;
 }
@@ -322,6 +329,7 @@ export function mapComparisons(
     productId: string;
     productName: string;
     elements: ProductComparison['claimElements'];
+    claimScores: ProductComparison['claimScores'];
   }>();
 
   for (const record of records) {
@@ -329,54 +337,121 @@ export function mapComparisons(
     const productName = getTextField(record, '商品名称') || getTextField(record, 'product_name') || productId;
 
     if (!productMap.has(productId)) {
-      productMap.set(productId, { productId, productName, elements: [] });
+      productMap.set(productId, { productId, productName, elements: [], claimScores: [] });
     }
 
     const group = productMap.get(productId)!;
+    const similarityScore = getNumberField(record, '相似度分数') ?? getNumberField(record, 'similarity_score')
+      ?? legacyStatusToScore(getTextField(record, '匹配状态') || getTextField(record, '比对结果') || getTextField(record, 'status'));
+    const feishuMatched = getNumberField(record, 'matched_effective_length') ?? 0;
+    const feishuTotal = getNumberField(record, 'feature_effective_length') ?? 0;
+    const feishuZeroed = getBooleanField(record, 'zeroed_by_mismatch');
     group.elements.push({
+      featureId: getTextField(record, '特征编号') || getTextField(record, 'feature_id') || undefined,
       claimElement: getTextField(record, '权利要求特征') || getTextField(record, '专利技术特征') || getTextField(record, 'claim_element'),
       productFeature: getTextField(record, '商品特征') || getTextField(record, '产品技术特征') || getTextField(record, 'product_feature'),
-      status: normalizeMatchStatus(
-        getTextField(record, '匹配状态') || getTextField(record, '比对结果') || getTextField(record, 'status')
-      ),
+      similarityScore,
+      scoreBand: normalizeScoreBand(getTextField(record, '分段标签') || getTextField(record, 'score_band'))
+        || scoreToBand(similarityScore, {
+          zeroedByMismatch: feishuZeroed,
+          matchedEffectiveLength: feishuMatched,
+          totalEffectiveLength: feishuTotal,
+        }),
       reasoning: getTextField(record, '推理过程') || getTextField(record, '比对分析') || getTextField(record, 'reasoning'),
-      patentReference: getTextField(record, '专利原文') || getTextField(record, 'patent_reference') || undefined,
+      patentReference: getTextField(record, 'claim_id') || getTextField(record, '专利原文') || getTextField(record, 'patent_reference') || undefined,
       productReference: getTextField(record, '商品原文') || getTextField(record, 'product_reference') || undefined,
+      evidenceImages: extractListField(record, 'evidence_images') || undefined,
+      scoreRationale: getTextField(record, 'score_rationale') || undefined,
+      tokenUnits: parseTokenUnits(record['token_units'], getTextField(record, '权利要求特征') || getTextField(record, 'claim_element')),
+      scoreDetail: {
+        fullScore: getNumberField(record, 'feature_full_score') ?? similarityScore,
+        awardedScore: getNumberField(record, 'feature_awarded_score') ?? similarityScore,
+        effectiveLength: feishuTotal,
+        matchedEffectiveLength: feishuMatched,
+        zeroedByMismatch: feishuZeroed,
+      },
+      isLegacyScore: !('token_units' in record) && !('feature_full_score' in record),
     });
   }
 
-  return Array.from(productMap.values()).map(group => ({
-    productId: group.productId,
-    productName: group.productName,
-    overallVerdict: determineVerdict(group.elements),
-    claimElements: group.elements,
-    ruleApplied: undefined,
-  }));
+  return Array.from(productMap.values()).map((group) => {
+    const claimScores = computeClaimScores(group.elements);
+    const weighted = computeProductScore(claimScores);
+    return {
+      productId: group.productId,
+      productName: group.productName,
+      productSimilarityScore: weighted.productSimilarityScore,
+      productScoreBand: weighted.productScoreBand,
+      riskLevel: weighted.riskLevel,
+      claimElements: group.elements,
+      claimScores,
+      highestScoringClaimId: weighted.highestScoringClaimId,
+      isLegacyScore: group.elements.every((item) => item.isLegacyScore),
+      ruleApplied: undefined,
+    };
+  });
 }
 
-/** 标准化匹配状态 */
-function normalizeMatchStatus(status: string): MatchStatus {
+function legacyStatusToScore(status: string): number {
   const lower = status.toLowerCase();
-  if (lower.includes('匹配') || lower.includes('match') || lower.includes('相同') || lower.includes('一致')) {
-    return 'matching';
-  }
+  if (!lower) return 50;
   if (lower.includes('不匹配') || lower.includes('not_match') || lower.includes('不同') || lower.includes('不一致')) {
-    return 'not_matching';
+    return 0;
   }
+  if (lower.includes('匹配') || lower.includes('match') || lower.includes('相同') || lower.includes('一致') || lower.includes('等同')) {
+    return 100;
+  }
+  return 50;
+}
+
+function normalizeScoreBand(band: string): ProductComparison['claimElements'][0]['scoreBand'] | undefined {
+  const lower = band.trim().toLowerCase();
+  if (!lower) return undefined;
+  if (lower.includes('明确相同') || lower.includes('exact_match')) return 'exact_match';
+  if (lower.includes('明确不相同') || lower.includes('exact_mismatch')) return 'exact_mismatch';
+  if (lower.includes('高相似') || lower.includes('high_similarity')) return 'high_similarity';
+  if (lower.includes('中等相似') || lower.includes('medium_similarity')) return 'medium_similarity';
+  if (lower.includes('低相似') || lower.includes('low_similarity')) return 'low_similarity';
+  if (lower.includes('待确认') || lower.includes('uncertain')) return 'uncertain';
+  return undefined;
+}
+
+function parseTokenUnits(value: unknown, claimElement: string) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item) => ({
+        text: getTextField(item, 'text'),
+        normalizedText: getTextField(item, 'normalized_text', 'normalizedText') || undefined,
+        status: normalizeUnitStatus(getTextField(item, 'status', 'unit_status')),
+        evidence: getTextField(item, 'evidence') || undefined,
+        reason: getTextField(item, 'reason') || undefined,
+        start: getNumberField(item, 'start'),
+        end: getNumberField(item, 'end'),
+        effectiveLength: getNumberField(item, 'effective_length', 'effectiveLength'),
+      }))
+      .filter((item) => item.text);
+  }
+  return buildFallbackTokenUnits(claimElement);
+}
+
+function normalizeUnitStatus(status: string): 'match' | 'mismatch' | 'uncertain' {
+  const lower = status.trim().toLowerCase();
+  if (['match', 'matching', '相同', '明确相同'].includes(lower)) return 'match';
+  if (['mismatch', 'not_match', '不同', '不相同', '明确不相同'].includes(lower)) return 'mismatch';
   return 'uncertain';
 }
 
-/** 根据各要素匹配状态推断总体判定 */
-function determineVerdict(elements: ProductComparison['claimElements']): InfringementVerdict {
-  if (elements.length === 0) return 'uncertain';
-
-  const matching = elements.filter(e => e.status === 'matching').length;
-  const notMatching = elements.filter(e => e.status === 'not_matching').length;
-  const total = elements.length;
-
-  if (notMatching === 0 && matching === total) return 'infringement_likely';
-  if (notMatching > 0 && matching === 0) return 'no_infringement';
-  return 'uncertain';
+function getBooleanField(record: Record<string, unknown>, ...candidates: string[]): boolean | undefined {
+  for (const key of candidates) {
+    const value = record[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+    }
+  }
+  return undefined;
 }
 
 /** 判断飞书 API 凭证是否已配置 */

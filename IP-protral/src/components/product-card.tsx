@@ -5,8 +5,8 @@
 // 用于结果汇总页面，展示单个商品的侵权概要
 // ============================================================
 
-import type { ProductInfo, ProductComparison, InfringementVerdict } from '@/lib/types';
-import { VERDICT_CONFIG } from '@/lib/types';
+import type { ProductInfo, ProductComparison, ProductRiskLevel } from '@/lib/types';
+import { PRODUCT_RISK_CONFIG } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ExternalLink, ChevronRight } from 'lucide-react';
@@ -19,11 +19,11 @@ interface ProductCardProps {
 }
 
 export function ProductCard({ product, comparison, sessionId }: ProductCardProps) {
-  const verdict: InfringementVerdict = comparison?.overallVerdict || 'uncertain';
-  const config = VERDICT_CONFIG[verdict];
-
-  const matchingCount = comparison?.claimElements.filter((e) => e.status === 'matching').length || 0;
+  const verdict: ProductRiskLevel = comparison?.riskLevel || 'low_risk';
+  const config = PRODUCT_RISK_CONFIG[verdict];
+  const exactMatchCount = comparison?.claimElements.filter((e) => e.similarityScore === 100).length || 0;
   const totalElements = comparison?.claimElements.length || 0;
+  const topClaimScore = comparison?.claimScores.reduce((max, item) => Math.max(max, item.similarityScore), 0) || 0;
 
   return (
     <Link href={`/results/${product.id}?session=${sessionId}`}>
@@ -63,8 +63,9 @@ export function ProductCard({ product, comparison, sessionId }: ProductCardProps
               {comparison && totalElements > 0 && (
                 <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                   <span>权利要求要素: {totalElements}</span>
-                  <span>相同/等同: {matchingCount}</span>
-                  <span>不相同: {totalElements - matchingCount - comparison.claimElements.filter((e) => e.status === 'uncertain').length}</span>
+                  <span>商品总分: {comparison.productSimilarityScore}</span>
+                  <span>最高权利要求分: {topClaimScore}</span>
+                  <span>100 分特征: {exactMatchCount}</span>
                 </div>
               )}
 

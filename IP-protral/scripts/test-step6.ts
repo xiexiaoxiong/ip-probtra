@@ -6,12 +6,13 @@
  * 测试内容:
  * 1. mapComparisonsFromApi - 从模块4 API 响应提取比对数据
  * 2. groupDbRowsByProduct - 将数据库扁平行分组为嵌套格式
- * 3. normalizeStatus - 状态标准化
- * 4. determineVerdict - 侵权判定
+ * 3. normalizeScore - 分数标准化
+ * 4. computeProductScore - 商品级评分
  * 5. enrichProductsFromDb - 补充商品详情（需要数据库连接）
  */
 
-import type { ProductComparison, ProductInfo, MatchStatus, InfringementVerdict } from '@/lib/types';
+import { scoreToBand, scoreToRiskLevel } from '@/lib/types';
+import type { ProductComparison, ProductInfo } from '@/lib/types';
 
 // ============================================================
 // 从 route.ts 提取的核心函数
@@ -36,8 +37,8 @@ function getStringField(record: Record<string, unknown>, ...candidates: string[]
   return '';
 }
 
-function normalizeStatus(status: string): MatchStatus {
-  if (!status) return 'uncertain';
+function normalizeScore(status: string): number {
+  if (!status) return 50;
   const lower = status.trim().toLowerCase();
   const compact = lower.replace(/[\s_-]+/g, '');
   if (
@@ -54,7 +55,7 @@ function normalizeStatus(status: string): MatchStatus {
     || lower.includes('not match')
     || compact.includes('nomatch')
     || compact.includes('notmatch')
-  ) return 'not_matching';
+  ) return 0;
   if (
     lower.includes('匹配')
     || lower.includes('matching')
@@ -62,17 +63,28 @@ function normalizeStatus(status: string): MatchStatus {
     || lower.includes('相同')
     || lower.includes('一致')
     || lower.includes('等同')
-  ) return 'matching';
-  return 'uncertain';
+  ) return 100;
+  return 50;
 }
 
-function determineVerdict(elements: ProductComparison['claimElements']): InfringementVerdict {
-  if (elements.length === 0) return 'uncertain';
-  const matching = elements.filter(e => e.status === 'matching').length;
-  const notMatching = elements.filter(e => e.status === 'not_matching').length;
-  if (notMatching === 0 && matching === elements.length) return 'infringement_likely';
-  if (notMatching > 0 && matching === 0) return 'no_infringement';
-  return 'uncertain';
+function computeProductScore(elements: ProductComparison['claimElements']): Pick<ProductComparison, 'claimScores' | 'productSimilarityScore' | 'productScoreBand' | 'riskLevel'> {
+  const claimMap = new Map<string, number[]>();
+  for (const element of elements) {
+    const claimId = element.patentReference || 'unknown';
+    if (!claimMap.has(claimId)) claimMap.set(claimId, []);
+    claimMap.get(claimId)!.push(element.similarityScore);
+  }
+  const claimScores = Array.from(claimMap.entries()).map(([claimId, scores]) => {
+    const similarityScore = Math.min(...scores);
+    return { claimId, similarityScore, scoreBand: scoreToBand(similarityScore) };
+  });
+  const productSimilarityScore = Math.max(...claimScores.map((item) => item.similarityScore), 0);
+  return {
+    claimScores,
+    productSimilarityScore,
+    productScoreBand: scoreToBand(productSimilarityScore),
+    riskLevel: scoreToRiskLevel(productSimilarityScore),
+  };
 }
 
 function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
@@ -108,11 +120,14 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
         const statusRaw = getStringField(f, 'comparison_result', 'status', '匹配状态', '比对结果', 'matchStatus', 'result');
         const reason = getStringField(f, 'reason', '推理过程', '比对分析', '分析', 'reasoning');
         const reasoningType = getStringField(f, 'reasoning_type', '推理类型');
+        const similarityScore = typeof f.similarity_score === 'number' ? f.similarity_score : normalizeScore(statusRaw);
 
         productMap.get(id)!.elements.push({
+          featureId: getStringField(f, 'feature_id') || undefined,
           claimElement: featureText || '',
           productFeature: evidence || '',
-          status: normalizeStatus(statusRaw),
+          similarityScore,
+          scoreBand: scoreToBand(similarityScore),
           reasoning: [reason, reasoningType].filter(Boolean).join(' | ') || '',
           patentReference: getStringField(f, 'claim_id') || undefined,
         });
@@ -143,15 +158,16 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
     productMap.get(id)!.elements.push({
       claimElement: claimElement || '',
       productFeature: productFeature || '',
-      status: normalizeStatus(status),
+      similarityScore: normalizeScore(status),
+      scoreBand: scoreToBand(normalizeScore(status)),
       reasoning: reasoning || '',
     });
   }
 
-  return Array.from(productMap.values()).map(group => ({
+  return Array.from(productMap.values()).map((group) => ({
     productId: group.productId,
     productName: group.productName,
-    overallVerdict: determineVerdict(group.elements),
+    ...computeProductScore(group.elements),
     claimElements: group.elements,
   }));
 }
@@ -405,8 +421,8 @@ function runTests() {
     console.log(`  - 商品数量: ${result.length} (期望: 2)`);
     console.log(`  - 商品5的特征数: ${result[0]?.claimElements.length} (期望: 2)`);
     console.log(`  - 商品6的特征数: ${result[1]?.claimElements.length} (期望: 2)`);
-    console.log(`  - 商品5 verdict: ${result[0]?.overallVerdict} (期望: infringement_likely)`);
-    console.log(`  - 商品6 verdict: ${result[1]?.overallVerdict} (期望: uncertain)`);
+    console.log(`  - 商品5 总分: ${result[0]?.productSimilarityScore} (期望: 100)`);
+    console.log(`  - 商品6 总分: ${result[1]?.productSimilarityScore} (期望: 100)`);
     
     if (result.length === 2 && result[0]?.claimElements.length === 2) {
       console.log('  ✅ 通过');
@@ -511,27 +527,27 @@ function runTests() {
     failed++;
   }
 
-  // 测试 6: normalizeStatus
-  printHeader('测试 6: normalizeStatus 状态标准化');
+  // 测试 6: normalizeScore
+  printHeader('测试 6: normalizeScore 分数标准化');
   const statusTests = [
-    { input: '匹配', expected: 'matching' },
-    { input: '不匹配', expected: 'not_matching' },
-    { input: 'MATCH', expected: 'matching' },
-    { input: 'NOT_MATCH', expected: 'not_matching' },
-    { input: 'NO_MATCH', expected: 'not_matching' },
-    { input: 'no-match', expected: 'not_matching' },
-    { input: 'no match', expected: 'not_matching' },
-    { input: '相同', expected: 'matching' },
-    { input: '不同', expected: 'not_matching' },
-    { input: '等同', expected: 'matching' },
-    { input: '区别', expected: 'not_matching' },
-    { input: '', expected: 'uncertain' },
-    { input: 'unknown', expected: 'uncertain' },
+    { input: '匹配', expected: 100 },
+    { input: '不匹配', expected: 0 },
+    { input: 'MATCH', expected: 100 },
+    { input: 'NOT_MATCH', expected: 0 },
+    { input: 'NO_MATCH', expected: 0 },
+    { input: 'no-match', expected: 0 },
+    { input: 'no match', expected: 0 },
+    { input: '相同', expected: 100 },
+    { input: '不同', expected: 0 },
+    { input: '等同', expected: 100 },
+    { input: '区别', expected: 0 },
+    { input: '', expected: 50 },
+    { input: 'unknown', expected: 50 },
   ];
   
   let statusPassed = 0;
   for (const test of statusTests) {
-    const result = normalizeStatus(test.input);
+    const result = normalizeScore(test.input);
     const ok = result === test.expected;
     if (ok) statusPassed++;
     console.log(`  ${ok ? '✅' : '❌'} "${test.input}" -> "${result}" (期望: "${test.expected}")`);
@@ -543,46 +559,47 @@ function runTests() {
     failed++;
   }
 
-  // 测试 7: determineVerdict
-  printHeader('测试 7: determineVerdict 侵权判定');
+  // 测试 7: computeProductScore
+  printHeader('测试 7: computeProductScore 商品评分');
   const verdictTests = [
     { 
-      name: '全部匹配',
+      name: '全部 100 分',
       elements: [
-        { claimElement: 'a', productFeature: 'a', status: 'matching' as MatchStatus, reasoning: '' },
-        { claimElement: 'b', productFeature: 'b', status: 'matching' as MatchStatus, reasoning: '' },
+        { claimElement: 'a', productFeature: 'a', similarityScore: 100, scoreBand: scoreToBand(100), reasoning: '', patentReference: '1' },
+        { claimElement: 'b', productFeature: 'b', similarityScore: 100, scoreBand: scoreToBand(100), reasoning: '', patentReference: '1' },
       ],
-      expected: 'infringement_likely',
+      expected: 100,
     },
     { 
-      name: '全部不匹配',
+      name: '全部 0 分',
       elements: [
-        { claimElement: 'a', productFeature: 'x', status: 'not_matching' as MatchStatus, reasoning: '' },
-        { claimElement: 'b', productFeature: 'y', status: 'not_matching' as MatchStatus, reasoning: '' },
+        { claimElement: 'a', productFeature: 'x', similarityScore: 0, scoreBand: scoreToBand(0), reasoning: '', patentReference: '1' },
+        { claimElement: 'b', productFeature: 'y', similarityScore: 0, scoreBand: scoreToBand(0), reasoning: '', patentReference: '1' },
       ],
-      expected: 'no_infringement',
+      expected: 0,
     },
     { 
-      name: '混合',
+      name: '两组权利要求取最高最小分',
       elements: [
-        { claimElement: 'a', productFeature: 'a', status: 'matching' as MatchStatus, reasoning: '' },
-        { claimElement: 'b', productFeature: 'x', status: 'not_matching' as MatchStatus, reasoning: '' },
+        { claimElement: 'a', productFeature: 'a', similarityScore: 80, scoreBand: scoreToBand(80), reasoning: '', patentReference: '1' },
+        { claimElement: 'b', productFeature: 'x', similarityScore: 60, scoreBand: scoreToBand(60), reasoning: '', patentReference: '1' },
+        { claimElement: 'c', productFeature: 'y', similarityScore: 20, scoreBand: scoreToBand(20), reasoning: '', patentReference: '2' },
       ],
-      expected: 'uncertain',
+      expected: 60,
     },
     { 
       name: '空',
       elements: [],
-      expected: 'uncertain',
+      expected: 0,
     },
   ];
   
   let verdictPassed = 0;
   for (const test of verdictTests) {
-    const result = determineVerdict(test.elements);
-    const ok = result === test.expected;
+    const result = computeProductScore(test.elements);
+    const ok = result.productSimilarityScore === test.expected;
     if (ok) verdictPassed++;
-    console.log(`  ${ok ? '✅' : '❌'} ${test.name}: "${result}" (期望: "${test.expected}")`);
+    console.log(`  ${ok ? '✅' : '❌'} ${test.name}: "${result.productSimilarityScore}" (期望: "${test.expected}")`);
   }
   console.log(`\n  通过: ${verdictPassed}/${verdictTests.length}`);
   if (verdictPassed === verdictTests.length) {

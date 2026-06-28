@@ -15,6 +15,9 @@ class FeatureItem(BaseModel):
     feature_id: str = Field(..., description="技术特征编号，如1A、1B、7A")
     feature_text: str = Field(..., description="权利要求技术特征原文")
     claim_id: str = Field(default="", description="所属独立权利要求编号")
+    feature_segments: List[Dict[str, Any]] = Field(default=[], description="特征内部最小判断单元列表")
+    normalized_feature_text: str = Field(default="", description="标准化后的特征文本")
+    effective_length: int = Field(default=0, description="特征有效长度")
 
 
 class ProductInfo(BaseModel):
@@ -32,6 +35,26 @@ class FeatureAnalysisItem(BaseModel):
     reason: str = Field(default="", description="作出分析结论的解释")
     reasoning_type: str = Field(..., description="推理类型枚举")
     evidence_images: List[str] = Field(default=[], description="能体现该特征的商品图片URL列表")
+    suggested_score: int = Field(default=50, description="LLM建议相似度分值，范围0-100")
+    score_band_hint: str = Field(default="", description="LLM建议分段标签")
+    score_rationale: str = Field(default="", description="分值说明")
+    token_units: List[Dict[str, Any]] = Field(default=[], description="特征内部最小判断单元状态列表")
+    feature_full_score: float = Field(default=0.0, description="特征理论满分")
+    feature_awarded_score: float = Field(default=0.0, description="特征实际得分")
+    feature_effective_length: int = Field(default=0, description="特征有效长度")
+    matched_effective_length: int = Field(default=0, description="已确认匹配的有效长度")
+    claim_total_effective_length: int = Field(default=0, description="所属权利要求总有效长度")
+    zeroed_by_mismatch: bool = Field(default=False, description="是否因明确不相同导致claim归零")
+
+
+class ClaimScoreItem(BaseModel):
+    """独立权利要求聚合分"""
+    claim_id: str = Field(..., description="独立权利要求编号")
+    similarity_score: float = Field(..., description="该独立权利要求的聚合分")
+    score_band: str = Field(..., description="分值分段标签")
+    claim_total_effective_length: int = Field(default=0, description="权利要求总有效长度")
+    claim_matched_effective_length: int = Field(default=0, description="权利要求累计匹配有效长度")
+    zeroed_by_mismatch: bool = Field(default=False, description="是否因明确不相同归零")
 
 
 class FeatureComparisonItem(BaseModel):
@@ -39,17 +62,29 @@ class FeatureComparisonItem(BaseModel):
     feature_id: str = Field(..., description="技术特征编号")
     feature_text: str = Field(..., description="权利要求技术特征原文")
     evidence: str = Field(default="", description="商品文字或图片中的证据引用")
-    comparison_result: str = Field(..., description="比对结果：MATCH/NO_MATCH/UNCERTAIN")
+    similarity_score: float = Field(..., description="相似度分值，范围0-100")
+    score_band: str = Field(..., description="分值分段标签")
     reason: str = Field(default="", description="作出比对结论的解释")
     reasoning_type: str = Field(..., description="推理类型枚举")
     claim_id: str = Field(default="", description="所属独立权利要求编号")
     evidence_images: List[str] = Field(default=[], description="能体现该特征的商品图片URL列表")
+    score_rationale: str = Field(default="", description="分值说明")
+    token_units: List[Dict[str, Any]] = Field(default=[], description="特征内部最小判断单元状态列表")
+    feature_full_score: float = Field(default=0.0, description="特征理论满分")
+    feature_awarded_score: float = Field(default=0.0, description="特征实际得分")
+    feature_effective_length: int = Field(default=0, description="特征有效长度")
+    matched_effective_length: int = Field(default=0, description="已确认匹配的有效长度")
+    claim_total_effective_length: int = Field(default=0, description="所属权利要求总有效长度")
+    zeroed_by_mismatch: bool = Field(default=False, description="是否因明确不相同导致claim归零")
 
 
 class ProductComparisonResult(BaseModel):
     """单个商品的比对结果（包含多个独立权利要求的比对）"""
     product_name: str = Field(..., description="商品名称")
     features: List[FeatureComparisonItem] = Field(default=[], description="所有独立权利要求的特征比对结果列表")
+    claim_scores: List[ClaimScoreItem] = Field(default=[], description="按独立权利要求聚合的最小特征分")
+    product_similarity_score: float = Field(default=0.0, description="商品总分，取各独立权利要求总分最大值")
+    product_score_band: str = Field(default="明确不相同", description="商品总分的分段标签")
 
 
 # ============ 全局状态 ============
@@ -65,7 +100,7 @@ class GlobalState(BaseModel):
     independent_claims: List[Dict[str, str]] = Field(default=[], description="独立权利要求列表 [{claim_id, claim_text}]")
     specification_text: str = Field(default="", description="专利说明书全文（用于理解权利要求）")
     specification_images: List[str] = Field(default=[], description="说明书附图URL列表")
-    features: List[Dict[str, str]] = Field(default=[], description="所有独立权利要求拆解后的技术特征列表（含claim_id）")
+    features: List[Dict[str, Any]] = Field(default=[], description="所有独立权利要求拆解后的技术特征列表（含claim_id与最小单元）")
     products: List[Dict[str, Any]] = Field(default=[], description="商品信息列表")
     all_comparison_results: List[Dict[str, Any]] = Field(default=[], description="所有商品的比对结果")
     error_status: str = Field(default="", description="异常状态信息")
@@ -125,12 +160,12 @@ class DecomposeClaimInput(BaseModel):
 
 class DecomposeClaimOutput(BaseModel):
     """权利要求拆解节点的输出"""
-    features: List[Dict[str, str]] = Field(..., description="拆解后的技术特征列表（含claim_id）")
+    features: List[Dict[str, Any]] = Field(..., description="拆解后的技术特征列表（含claim_id与最小单元）")
 
 
 class CompareLoopInput(BaseModel):
     """商品比对循环节点的输入"""
-    features: List[Dict[str, str]] = Field(..., description="技术特征列表（含claim_id）")
+    features: List[Dict[str, Any]] = Field(..., description="技术特征列表（含claim_id与最小单元）")
     products: List[Dict[str, Any]] = Field(..., description="商品信息列表")
     specification_text: str = Field(default="", description="专利说明书全文，传递给子图用于辅助理解技术特征")
 
@@ -161,7 +196,7 @@ class WriteResultsOutput(BaseModel):
 
 class AnalyzeFeaturesInput(BaseModel):
     """特征分析节点（子图）的输入"""
-    features: List[Dict[str, str]] = Field(..., description="技术特征列表（含claim_id）")
+    features: List[Dict[str, Any]] = Field(..., description="技术特征列表（含claim_id与最小单元）")
     product_data: Dict[str, Any] = Field(..., description="单个商品数据")
     specification_text: str = Field(default="", description="专利说明书全文，用于辅助理解技术特征含义")
 
@@ -172,11 +207,25 @@ class AnalyzeFeaturesOutput(BaseModel):
     product_name: str = Field(default="", description="商品名称")
 
 
-class ApplyRulesInput(BaseModel):
-    """规则应用节点（子图）的输入"""
+class ReviewAnalysisInput(BaseModel):
+    """规则审查节点（子图）的输入"""
     raw_analysis: List[Dict[str, Any]] = Field(..., description="LLM原始分析结果列表")
     product_name: str = Field(default="", description="商品名称")
-    features: List[Dict[str, str]] = Field(..., description="技术特征列表（用于补全feature_text和claim_id）")
+    product_data: Dict[str, Any] = Field(default={}, description="单个商品原始数据")
+    features: List[Dict[str, Any]] = Field(default=[], description="技术特征列表")
+
+
+class ReviewAnalysisOutput(BaseModel):
+    """规则审查节点（子图）的输出"""
+    reviewed_analysis: List[Dict[str, Any]] = Field(..., description="规则审查后的分析结果列表")
+
+
+class ApplyRulesInput(BaseModel):
+    """规则应用节点（子图）的输入"""
+    reviewed_analysis: List[Dict[str, Any]] = Field(..., description="规则审查后的分析结果列表")
+    product_name: str = Field(default="", description="商品名称")
+    product_data: Dict[str, Any] = Field(default={}, description="单个商品原始数据")
+    features: List[Dict[str, Any]] = Field(..., description="技术特征列表（用于补全feature_text、claim_id和最小单元）")
 
 
 class ApplyRulesOutput(BaseModel):

@@ -414,6 +414,24 @@ export interface Module3Result {
   runId: string;
 }
 
+export type Module3TaskStatus = 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | 'timeout';
+
+export interface Module3AsyncStartResult {
+  runId: string;
+  searchRunId?: number;
+  status: Module3TaskStatus | 'accepted';
+}
+
+export interface Module3RunStatusResult {
+  runId: string;
+  searchRunId?: number;
+  status: Module3TaskStatus;
+  totalProductsCount: number;
+  isComplete?: boolean;
+  errorMessage?: string;
+  isFinished: boolean;
+}
+
 export async function runModule3(
   patentRecordId: number,
   analysisSessionId: string,
@@ -445,6 +463,107 @@ export async function runModule3(
           ? data.error_message
           : undefined,
     runId: String(data.run_id || ''),
+  };
+}
+
+export async function startModule3Async(
+  patentRecordId: number,
+  analysisSessionId: string,
+  runId: string,
+  inputKeywords?: string[],
+  onProgress?: (message: string) => void,
+): Promise<Module3AsyncStartResult> {
+  const configs = getModuleConfigs();
+  const endpoint = `${configs.module3.url}?async_mode=true`;
+  if (onProgress) {
+    onProgress('正在提交模块3后台任务...');
+  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: createHeaders(configs.module3.token, { 'x-run-id': runId }),
+    body: JSON.stringify({
+      patent_record_id: patentRecordId,
+      analysis_session_id: analysisSessionId,
+      input_keywords: inputKeywords || [],
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 300)}`);
+  }
+  const data = (await response.json()) as ModuleResponse;
+  return {
+    runId: String(data.run_id || runId),
+    searchRunId: typeof data.search_run_id === 'number' ? data.search_run_id : undefined,
+    status: String(data.status || 'accepted') === 'processing' ? 'accepted' : String(data.status || 'accepted') as Module3AsyncStartResult['status'],
+  };
+}
+
+export async function getModule3RunStatus(runId: string): Promise<Module3RunStatusResult> {
+  const configs = getModuleConfigs();
+  const endpoint = `${getModuleBaseUrl(configs.module3.url)}/result/${encodeURIComponent(runId)}`;
+  const response = await fetch(endpoint, {
+    method: 'GET',
+    headers: createHeaders(configs.module3.token),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  let data: ModuleResponse | null = null;
+  try {
+    data = (await response.json()) as ModuleResponse;
+  } catch {
+    data = null;
+  }
+
+  if (response.status === 408) {
+    return {
+      runId: String(data?.run_id || runId),
+      searchRunId: typeof data?.search_run_id === 'number' ? data.search_run_id : undefined,
+      status: 'timeout',
+      totalProductsCount: typeof data?.total_products_count === 'number' ? data.total_products_count : 0,
+      isComplete: typeof data?.is_complete === 'boolean' ? data.is_complete : undefined,
+      errorMessage:
+        typeof data?.message === 'string'
+          ? data.message
+          : typeof data?.error_message === 'string'
+            ? data.error_message
+            : undefined,
+      isFinished: true,
+    };
+  }
+
+  if (!response.ok && response.status !== 500) {
+    const errorText = data ? JSON.stringify(data).slice(0, 300) : await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
+  }
+
+  const statusRaw = String(data?.status || (response.status === 500 ? 'failed' : 'processing'));
+  const mappedStatus: Module3TaskStatus =
+    statusRaw === 'completed' ? 'completed'
+      : statusRaw === 'failed' ? 'error'
+        : statusRaw === 'cancelled' ? 'cancelled'
+          : statusRaw === 'timeout' ? 'timeout'
+            : 'running';
+
+  return {
+    runId: String(data?.run_id || runId),
+    searchRunId: typeof data?.search_run_id === 'number' ? data.search_run_id : undefined,
+    status: mappedStatus,
+    totalProductsCount: typeof data?.total_products_count === 'number' ? data.total_products_count : 0,
+    isComplete: typeof data?.is_complete === 'boolean' ? data.is_complete : undefined,
+    errorMessage:
+      typeof data?.error_message === 'string'
+        ? data.error_message
+        : typeof data?.exception_message === 'string'
+          ? data.exception_message
+          : typeof data?.message === 'string' && mappedStatus !== 'running'
+            ? data.message
+            : typeof data?.error === 'string'
+              ? data.error
+              : undefined,
+    isFinished: mappedStatus === 'completed' || mappedStatus === 'error' || mappedStatus === 'cancelled' || mappedStatus === 'timeout',
   };
 }
 

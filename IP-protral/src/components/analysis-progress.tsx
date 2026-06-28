@@ -13,7 +13,7 @@ interface AnalysisProgressProps {
 }
 
 export function AnalysisProgress({ steps }: AnalysisProgressProps) {
-  const completedCount = steps.filter((s) => s.status === 'completed' || s.status === 'error').length;
+  const completedCount = steps.filter((s) => s.status === 'completed' || s.status === 'partial' || s.status === 'error').length;
   const errorCount = steps.filter((s) => s.status === 'error').length;
   const progress = (completedCount / steps.length) * 100;
 
@@ -43,6 +43,8 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
                 ? 'border-primary/30 bg-primary/5'
                 : step.status === 'waiting_input'
                   ? 'border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20'
+                : step.status === 'partial'
+                  ? 'border-sky-200 bg-sky-50/60 dark:border-sky-800 dark:bg-sky-950/20'
                 : step.status === 'completed'
                   ? 'border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20'
                   : step.status === 'error'
@@ -61,6 +63,9 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
               {step.status === 'waiting_input' && (
                 <Clock3 className="h-5 w-5 text-amber-600" />
               )}
+              {step.status === 'partial' && (
+                <Clock3 className="h-5 w-5 text-sky-600" />
+              )}
               {step.status === 'completed' && (
                 <CheckCircle2 className="h-5 w-5 text-green-600" />
               )}
@@ -78,6 +83,7 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
                 <h4 className={`text-sm font-semibold ${
                   step.status === 'running' ? 'text-primary' :
                   step.status === 'waiting_input' ? 'text-amber-700 dark:text-amber-400' :
+                  step.status === 'partial' ? 'text-sky-700 dark:text-sky-400' :
                   step.status === 'completed' ? 'text-green-700 dark:text-green-400' :
                   step.status === 'error' ? 'text-destructive' :
                   'text-foreground'
@@ -97,10 +103,13 @@ export function AnalysisProgress({ steps }: AnalysisProgressProps) {
               {step.status === 'waiting_input' && (
                 <p className="text-xs text-amber-700 mt-1 dark:text-amber-400">等待用户补充关键词...</p>
               )}
+              {step.status === 'partial' && (
+                <p className="text-xs text-sky-700 mt-1 dark:text-sky-400">已完成首轮处理，后台仍在继续补全...</p>
+              )}
             </div>
 
             {/* 耗时 */}
-            {step.status === 'completed' && step.startedAt && step.completedAt && (
+            {(step.status === 'completed' || step.status === 'partial') && step.startedAt && step.completedAt && (
               <span className="text-xs text-muted-foreground shrink-0">
                 {((step.completedAt - step.startedAt) / 1000).toFixed(1)}s
               </span>

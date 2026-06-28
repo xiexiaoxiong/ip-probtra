@@ -15,13 +15,25 @@ import { createUnauthorizedResponse, getCurrentUserFromRequest } from '@/lib/aut
 import {
   runModule1,
   runModule2,
-  runModule3,
+  startModule3Async,
+  getModule3RunStatus,
   startModule4Async,
   getModule4RunStatus,
   detectIndustry,
   warmupCozeSearch,
 } from '@/lib/workflow-client';
-import type { Module1Result, Module2Result, Module3Result, Module4Result, Module4TaskStatus } from '@/lib/workflow-client';
+import type {
+  Module1Result,
+  Module2Result,
+  Module3AsyncStartResult,
+  Module3Result,
+  Module3RunStatusResult,
+  Module3TaskStatus,
+  Module4Result,
+  Module4TaskStatus,
+} from '@/lib/workflow-client';
+import { buildFallbackTokenUnits, computeClaimScores, computeProductScore as computeWeightedProductScore } from '@/lib/claim-score';
+import { scoreToBand, scoreToRiskLevel } from '@/lib/types';
 import type { IndustryType } from '@/lib/types';
 import {
   createSession,
@@ -58,6 +70,9 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
     productId: string;
     productName: string;
     elements: ProductComparison['claimElements'];
+    claimScores: ProductComparison['claimScores'];
+    productSimilarityScore?: number;
+    productScoreBand?: ProductComparison['productScoreBand'];
   }>();
 
   for (const item of rawResults) {
@@ -73,7 +88,39 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
     if (Array.isArray(features) && features.length > 0) {
       const id = productId || productName || `product_${productMap.size + 1}`;
       if (!productMap.has(id)) {
-        productMap.set(id, { productId: id, productName: productName || id, elements: [] });
+        productMap.set(id, { productId: id, productName: productName || id, elements: [], claimScores: [] });
+      }
+      const group = productMap.get(id)!;
+      const productScore = getScoreField(record, 'product_similarity_score');
+      if (productScore != null) {
+        group.productSimilarityScore = productScore;
+        // product 级 score_band 暂不重算，依赖 computeProductScore 时基于 claimScores 再算
+        group.productScoreBand = normalizeScoreBand(getStringField(record, 'product_score_band'));
+      }
+
+      const claimScoresRaw = record['claim_scores'];
+      if (Array.isArray(claimScoresRaw)) {
+        group.claimScores = claimScoresRaw
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+          .map((item) => {
+            const claimScore = getScoreField(item, 'similarity_score', 'score') ?? 0;
+            const claimMatched = getScoreField(item, 'claim_matched_effective_length') ?? 0;
+            const claimTotal = getScoreField(item, 'claim_total_effective_length') ?? 0;
+            const claimZeroed = getBooleanField(item, 'zeroed_by_mismatch');
+            return {
+              claimId: getStringField(item, 'claim_id', 'claimId') || 'unknown',
+              similarityScore: claimScore,
+              scoreBand: normalizeScoreBand(getStringField(item, 'score_band', 'scoreBand'))
+                || scoreToBand(claimScore, {
+                  zeroedByMismatch: claimZeroed,
+                  matchedEffectiveLength: claimMatched,
+                  totalEffectiveLength: claimTotal,
+                }),
+              claimTotalEffectiveLength: claimTotal,
+              claimMatchedEffectiveLength: claimMatched,
+              zeroedByMismatch: claimZeroed,
+            };
+          });
       }
 
       for (const feat of features) {
@@ -82,26 +129,48 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
 
         const featureText = getStringField(f, 'feature_text', '权利要求特征', '专利技术特征', 'featureElement', 'claimElement', 'claim_element');
         const evidence = getStringField(f, 'evidence', '商品特征', '产品技术特征', 'productFeature', 'product_feature', 'product_feature_evidence');
-        const statusRaw = getStringField(f, 'comparison_result', 'status', '匹配状态', '比对结果', 'matchStatus', 'result');
         const reason = getStringField(f, 'reason', '推理过程', '比对分析', '分析', 'reasoning');
         const reasoningType = getStringField(f, 'reasoning_type', '推理类型');
         const featureId = getStringField(f, 'feature_id', '特征编号');
-        
+        const similarityScore = getScoreField(f, 'similarity_score', 'similarityScore')
+          ?? legacyStatusToScore(getStringField(f, 'comparison_result', 'status', '匹配状态', '比对结果', 'matchStatus', 'result'));
+        const featMatchedLength = getScoreField(f, 'matched_effective_length') ?? 0;
+        const featTotalLength = getScoreField(f, 'feature_effective_length') ?? 0;
+        const featZeroed = getBooleanField(f, 'zeroed_by_mismatch');
+        const scoreBand = normalizeScoreBand(getStringField(f, 'score_band', 'scoreBand'))
+          || scoreToBand(similarityScore, {
+            zeroedByMismatch: featZeroed,
+            matchedEffectiveLength: featMatchedLength,
+            totalEffectiveLength: featTotalLength,
+          });
+        const tokenUnits = parseTokenUnits(f['token_units'], featureText || '');
+
         // 提取 evidence_images
         const evidenceImagesRaw = f['evidence_images'];
-        const evidenceImages: string[] = Array.isArray(evidenceImagesRaw) 
+        const evidenceImages: string[] = Array.isArray(evidenceImagesRaw)
           ? evidenceImagesRaw.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
           : [];
 
         // feature_text 作为权利要求特征描述，evidence 作为商品侧证据
-        productMap.get(id)!.elements.push({
+        group.elements.push({
           featureId: featureId || undefined,
           claimElement: featureText || '',
           productFeature: evidence || '',
-          status: normalizeStatus(statusRaw),
+          similarityScore,
+          scoreBand,
           reasoning: [reason, reasoningType].filter(Boolean).join(' | ') || '',
           patentReference: getStringField(f, 'claim_id') || undefined,
           evidenceImages: evidenceImages.length > 0 ? evidenceImages : undefined,
+          scoreRationale: getStringField(f, 'score_rationale', 'scoreRationale') || undefined,
+          tokenUnits,
+          scoreDetail: {
+            fullScore: getScoreField(f, 'feature_full_score') ?? similarityScore,
+            awardedScore: getScoreField(f, 'feature_awarded_score') ?? similarityScore,
+            effectiveLength: featTotalLength,
+            matchedEffectiveLength: featMatchedLength,
+            zeroedByMismatch: featZeroed,
+          },
+          isLegacyScore: !('token_units' in f) && !('feature_full_score' in f),
         });
       }
       continue;
@@ -117,7 +186,7 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
       if (productId || productName) {
         const id = productId || productName || `product_${productMap.size + 1}`;
         if (!productMap.has(id)) {
-          productMap.set(id, { productId: id, productName: productName || id, elements: [] });
+          productMap.set(id, { productId: id, productName: productName || id, elements: [], claimScores: [] });
         }
       }
       continue;
@@ -125,23 +194,65 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
 
     const id = productId || `product_${productMap.size + 1}`;
     if (!productMap.has(id)) {
-      productMap.set(id, { productId: id, productName: productName || id, elements: [] });
+      productMap.set(id, { productId: id, productName: productName || id, elements: [], claimScores: [] });
     }
+    const similarityScore = getScoreField(record, 'similarity_score', 'similarityScore')
+      ?? legacyStatusToScore(getStringField(record, 'status', '匹配状态', '比对结果', 'matchStatus', 'comparison_result'));
+    const flatMatched = getScoreField(record, 'matched_effective_length') ?? 0;
+    const flatTotal = getScoreField(record, 'feature_effective_length') ?? 0;
+    const flatZeroed = getBooleanField(record, 'zeroed_by_mismatch');
 
     productMap.get(id)!.elements.push({
       claimElement: claimElement || '',
       productFeature: productFeature || '',
-      status: normalizeStatus(status),
+      similarityScore,
+      scoreBand: normalizeScoreBand(getStringField(record, 'score_band', 'scoreBand'))
+        || scoreToBand(similarityScore, {
+          zeroedByMismatch: flatZeroed,
+          matchedEffectiveLength: flatMatched,
+          totalEffectiveLength: flatTotal,
+        }),
       reasoning: reasoning || '',
+      patentReference: getStringField(record, 'claim_id', 'patent_reference') || undefined,
+      scoreRationale: getStringField(record, 'score_rationale', 'scoreRationale') || undefined,
+      tokenUnits: parseTokenUnits(record['token_units'], claimElement || ''),
+      scoreDetail: {
+        fullScore: getScoreField(record, 'feature_full_score') ?? similarityScore,
+        awardedScore: getScoreField(record, 'feature_awarded_score') ?? similarityScore,
+        effectiveLength: flatTotal,
+        matchedEffectiveLength: flatMatched,
+        zeroedByMismatch: flatZeroed,
+      },
+      isLegacyScore: !('token_units' in record) && !('feature_full_score' in record),
     });
   }
 
-  return Array.from(productMap.values()).map(group => ({
-    productId: group.productId,
-    productName: group.productName,
-    overallVerdict: determineVerdict(group.elements),
-    claimElements: group.elements,
-  }));
+  return Array.from(productMap.values()).map(group => {
+    const claimScores = group.claimScores.length > 0 ? group.claimScores : computeClaimScores(group.elements);
+    const weighted = computeWeightedProductScore(claimScores);
+    const productScore = group.productSimilarityScore ?? weighted.productSimilarityScore;
+    const productScoreBand = group.productScoreBand ?? weighted.productScoreBand;
+    // 通过 scoreBand 反推 zeroed / matched / total，使 scoreToRiskLevel 也能正确区分"待确认"和"明确不相同"
+    const productZeroed = claimScores.some((c) => c.zeroedByMismatch);
+    const productMatched = claimScores.reduce((s, c) => s + (c.claimMatchedEffectiveLength ?? 0), 0);
+    const productTotal = claimScores.reduce((s, c) => s + (c.claimTotalEffectiveLength ?? 0), 0);
+    const riskLevel = scoreToRiskLevel(productScore, {
+      zeroedByMismatch: productZeroed,
+      matchedEffectiveLength: productMatched,
+      totalEffectiveLength: productTotal,
+    });
+    return {
+      productId: group.productId,
+      productName: group.productName,
+      productSimilarityScore: productScore,
+      productScoreBand,
+      riskLevel,
+      claimElements: group.elements,
+      claimScores,
+      highestScoringClaimId: weighted.highestScoringClaimId,
+      isLegacyScore: group.elements.every((item) => item.isLegacyScore),
+    };
+  });
 }
 
 function getStringField(record: Record<string, unknown>, ...candidates: string[]): string {
@@ -163,11 +274,38 @@ function getStringField(record: Record<string, unknown>, ...candidates: string[]
   return '';
 }
 
-function normalizeStatus(status: string): ProductComparison['claimElements'][0]['status'] {
-  if (!status) return 'uncertain';
+function getScoreField(record: Record<string, unknown>, ...candidates: string[]): number | undefined {
+  for (const key of candidates) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.max(0, Math.min(100, Number(value.toFixed(2))));
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value.trim());
+      if (Number.isFinite(parsed)) {
+        return Math.max(0, Math.min(100, Number(parsed.toFixed(2))));
+      }
+    }
+  }
+  return undefined;
+}
+
+function getBooleanField(record: Record<string, unknown>, ...candidates: string[]): boolean | undefined {
+  for (const key of candidates) {
+    const value = record[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+    }
+  }
+  return undefined;
+}
+
+function legacyStatusToScore(status: string): number {
+  if (!status) return 50;
   const lower = status.trim().toLowerCase();
   const compact = lower.replace(/[\s_-]+/g, '');
-
   if (
     lower.includes('不匹配')
     || lower.includes('不相同')
@@ -183,9 +321,8 @@ function normalizeStatus(status: string): ProductComparison['claimElements'][0][
     || compact.includes('nomatch')
     || compact.includes('notmatch')
   ) {
-    return 'not_matching';
+    return 0;
   }
-
   if (
     lower.includes('匹配')
     || lower.includes('matching')
@@ -194,18 +331,46 @@ function normalizeStatus(status: string): ProductComparison['claimElements'][0][
     || lower.includes('一致')
     || lower.includes('等同')
   ) {
-    return 'matching';
+    return 100;
   }
-
-  return 'uncertain';
+  return 50;
 }
 
-function determineVerdict(elements: ProductComparison['claimElements']): ProductComparison['overallVerdict'] {
-  if (elements.length === 0) return 'uncertain';
-  const matching = elements.filter(e => e.status === 'matching').length;
-  const notMatching = elements.filter(e => e.status === 'not_matching').length;
-  if (notMatching === 0 && matching === elements.length) return 'infringement_likely';
-  if (notMatching > 0 && matching === 0) return 'no_infringement';
+function normalizeScoreBand(band: string): ProductComparison['claimElements'][0]['scoreBand'] | undefined {
+  const lower = band.trim().toLowerCase();
+  if (!lower) return undefined;
+  if (lower.includes('明确相同') || lower.includes('exact_match')) return 'exact_match';
+  if (lower.includes('明确不相同') || lower.includes('exact_mismatch')) return 'exact_mismatch';
+  if (lower.includes('高相似') || lower.includes('high_similarity')) return 'high_similarity';
+  if (lower.includes('中等相似') || lower.includes('medium_similarity')) return 'medium_similarity';
+  if (lower.includes('低相似') || lower.includes('low_similarity')) return 'low_similarity';
+  if (lower.includes('待确认') || lower.includes('uncertain')) return 'uncertain';
+  return undefined;
+}
+
+function parseTokenUnits(value: unknown, claimElement: string) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item) => ({
+        text: getStringField(item, 'text'),
+        normalizedText: getStringField(item, 'normalized_text', 'normalizedText') || undefined,
+        status: normalizeUnitStatus(getStringField(item, 'status', 'unit_status')),
+        evidence: getStringField(item, 'evidence') || undefined,
+        reason: getStringField(item, 'reason') || undefined,
+        start: getScoreField(item, 'start'),
+        end: getScoreField(item, 'end'),
+        effectiveLength: getScoreField(item, 'effective_length', 'effectiveLength'),
+      }))
+      .filter((item) => item.text);
+  }
+  return buildFallbackTokenUnits(claimElement);
+}
+
+function normalizeUnitStatus(status: string): 'match' | 'mismatch' | 'uncertain' {
+  const lower = status.trim().toLowerCase();
+  if (['match', 'matching', '相同', '明确相同'].includes(lower)) return 'match';
+  if (['mismatch', 'not_match', '不同', '不相同', '明确不相同'].includes(lower)) return 'mismatch';
   return 'uncertain';
 }
 
@@ -235,12 +400,21 @@ function groupDbRowsByProduct(rows: unknown[]): unknown[] {
     if (r['claim_id'] != null) feature['claim_id'] = r['claim_id'];
     if (r['evidence'] != null) feature['evidence'] = r['evidence'];
     if (r['comparison_result'] != null) feature['comparison_result'] = r['comparison_result'];
+    if (r['similarity_score'] != null) feature['similarity_score'] = r['similarity_score'];
+    if (r['score_band'] != null) feature['score_band'] = r['score_band'];
+    if (r['feature_full_score'] != null) feature['feature_full_score'] = r['feature_full_score'];
+    if (r['feature_awarded_score'] != null) feature['feature_awarded_score'] = r['feature_awarded_score'];
+    if (r['feature_effective_length'] != null) feature['feature_effective_length'] = r['feature_effective_length'];
+    if (r['matched_effective_length'] != null) feature['matched_effective_length'] = r['matched_effective_length'];
+    if (r['claim_total_effective_length'] != null) feature['claim_total_effective_length'] = r['claim_total_effective_length'];
+    if (r['zeroed_by_mismatch'] != null) feature['zeroed_by_mismatch'] = r['zeroed_by_mismatch'];
     if (r['reason'] != null) feature['reason'] = r['reason'];
     if (r['reasoning_type'] != null) feature['reasoning_type'] = r['reasoning_type'];
     if (r['evidence_images'] != null) feature['evidence_images'] = r['evidence_images'];
+    if (r['token_units'] != null) feature['token_units'] = r['token_units'];
     if (r['raw_payload'] != null && typeof r['raw_payload'] === 'object') {
       const payload = r['raw_payload'] as Record<string, unknown>;
-      for (const k of ['feature_id', 'feature_text', 'claim_id', 'evidence', 'comparison_result', 'reason', 'reasoning_type', 'evidence_images']) {
+      for (const k of ['feature_id', 'feature_text', 'claim_id', 'evidence', 'comparison_result', 'similarity_score', 'score_band', 'feature_full_score', 'feature_awarded_score', 'feature_effective_length', 'matched_effective_length', 'claim_total_effective_length', 'zeroed_by_mismatch', 'reason', 'reasoning_type', 'evidence_images', 'token_units', 'score_rationale']) {
         if (payload[k] != null && !(k in feature)) feature[k] = payload[k];
       }
     }
@@ -330,19 +504,6 @@ async function persistTextInput(sessionId: string, text: string): Promise<string
   return filePath;
 }
 
-function isRecoverableWorkflowTransportError(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes('fetch failed')
-    || normalized.includes('504')
-    || normalized.includes('超时')
-    || normalized.includes('timeout')
-    || normalized.includes('socket')
-    || normalized.includes('network')
-    || normalized.includes('aborted')
-  );
-}
-
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -398,46 +559,381 @@ async function getLatestClaimCompareRunSnapshot(
   return result.rows[0] || null;
 }
 
-async function waitForSearchRunRecovery(
-  sessionId: string,
-  patentRecordId: number,
-  startedAt: number,
-  maxWaitFromStartMs: number = 12 * 60 * 1000,
-  intervalMs: number = 10 * 1000,
-): Promise<SearchRunSnapshot | null> {
-  while (Date.now() - startedAt < maxWaitFromStartMs) {
-    try {
-      const snapshot = await getLatestSearchRunSnapshot(sessionId, patentRecordId);
-      if (snapshot) {
-        return snapshot;
-      }
-    } catch (error) {
-      console.warn(`[Pipeline ${sessionId}] 查询 search_runs 恢复状态失败:`, error);
-    }
-    await sleep(intervalMs);
-  }
-  return null;
+interface Module4ExecutionOutcome {
+  module4Result: Module4Result | null;
+  module4Error?: string;
+  module4RecoveredFromTransport: boolean;
+  module4TaskStatus?: Module4TaskStatus;
+  module4TaskStartedAt?: string;
+  module4TaskFinishedAt?: string;
 }
 
-async function waitForClaimCompareRunRecovery(
+interface ComparisonArtifacts {
+  products: ProductInfo[];
+  comparisons: ProductComparison[];
+  claimCompareRunId?: number;
+  errorMessage?: string;
+}
+
+async function runModule4Task(input: {
+  sessionId: string;
+  patentRecordId: number;
+  runId: string;
+  progressLabel: string;
+}): Promise<Module4ExecutionOutcome> {
+  const {
+    sessionId,
+    patentRecordId,
+    runId,
+    progressLabel,
+  } = input;
+  let module4Result: Module4Result | null = null;
+  let module4Error: string | undefined;
+  let module4RecoveredFromTransport = false;
+  let module4TaskStatus: Module4TaskStatus | undefined;
+  let module4TaskStartedAt: string | undefined;
+  let module4TaskFinishedAt: string | undefined;
+
+  try {
+    const module4Task = await startModule4Async(
+      patentRecordId,
+      sessionId,
+      runId,
+      (msg) => console.log(`[Pipeline ${sessionId}] ${progressLabel}: ${msg}`),
+    );
+    module4Result = {
+      claimCompareRunId: module4Task.claimCompareRunId,
+      exceptionMessage: undefined,
+      runId: module4Task.runId,
+      allComparisonResults: [],
+      resultSummary: '',
+      tableUrls: [],
+    };
+    module4TaskStatus = module4Task.status === 'accepted' ? 'queued' : module4Task.status;
+    await updateResults(sessionId, {
+      claimCompareRunId: module4Result.claimCompareRunId,
+      module4RunId: module4Result.runId,
+      module4TaskStatus,
+      module4TaskStartedAt,
+      module4TaskFinishedAt,
+      module4TaskError: undefined,
+      module4Exception: undefined,
+    });
+
+    let consecutiveStatusFailures = 0;
+    let lastObservedStatus: string | undefined;
+    let lastObservedClaimCompareRunId = module4Result.claimCompareRunId;
+    let lastObservedStartedAt: string | undefined;
+    let lastObservedFinishedAt: string | undefined;
+    let lastObservedTaskError: string | undefined;
+
+    while (true) {
+      try {
+        const runStatus = await getModule4RunStatus(module4Result.runId);
+        consecutiveStatusFailures = 0;
+        module4TaskStatus = runStatus.status;
+        module4TaskStartedAt = runStatus.startedAt;
+        module4TaskFinishedAt = runStatus.finishedAt;
+        if (runStatus.claimCompareRunId) {
+          module4Result.claimCompareRunId = runStatus.claimCompareRunId;
+        }
+        module4Result.resultSummary = runStatus.resultSummary;
+
+        const taskError = runStatus.errorMessage;
+        const shouldPersistStatus = (
+          lastObservedStatus !== runStatus.status
+          || lastObservedClaimCompareRunId !== module4Result.claimCompareRunId
+          || lastObservedStartedAt !== module4TaskStartedAt
+          || lastObservedFinishedAt !== module4TaskFinishedAt
+          || lastObservedTaskError !== taskError
+        );
+        if (shouldPersistStatus) {
+          await updateResults(sessionId, {
+            claimCompareRunId: module4Result.claimCompareRunId,
+            module4RunId: module4Result.runId,
+            module4TaskStatus: runStatus.status,
+            module4TaskStartedAt,
+            module4TaskFinishedAt,
+            module4TaskError: taskError,
+            module4Exception: undefined,
+          });
+          lastObservedStatus = runStatus.status;
+          lastObservedClaimCompareRunId = module4Result.claimCompareRunId;
+          lastObservedStartedAt = module4TaskStartedAt;
+          lastObservedFinishedAt = module4TaskFinishedAt;
+          lastObservedTaskError = taskError;
+        }
+
+        if (runStatus.status === 'completed') {
+          module4Error = undefined;
+          break;
+        }
+
+        if (runStatus.status === 'error' || runStatus.status === 'cancelled' || runStatus.status === 'timeout') {
+          module4Error = taskError || `模块4任务状态异常: ${runStatus.status}`;
+          break;
+        }
+      } catch (statusError) {
+        consecutiveStatusFailures += 1;
+        const statusErrorMessage = statusError instanceof Error ? statusError.message : String(statusError);
+        console.warn(
+          `[Pipeline ${sessionId}] ${progressLabel} 状态查询失败 (${consecutiveStatusFailures}): ${statusErrorMessage}`,
+        );
+
+        if (consecutiveStatusFailures >= 5) {
+          const snapshot = await getLatestClaimCompareRunSnapshot(sessionId, patentRecordId);
+          if (snapshot && snapshot.status) {
+            module4RecoveredFromTransport = true;
+            module4TaskStatus = snapshot.status as Module4TaskStatus;
+            module4TaskStartedAt = snapshot.started_at || undefined;
+            module4TaskFinishedAt = snapshot.finished_at || undefined;
+            module4Result.claimCompareRunId = snapshot.id;
+            module4Result.resultSummary = snapshot.result_summary || '';
+            await updateResults(sessionId, {
+              claimCompareRunId: snapshot.id,
+              module4RunId: module4Result.runId,
+              module4TaskStatus,
+              module4TaskStartedAt,
+              module4TaskFinishedAt,
+              module4TaskError: snapshot.error_message || undefined,
+              module4Exception: undefined,
+            });
+            if (snapshot.status === 'completed') {
+              module4Error = undefined;
+              break;
+            }
+            if (snapshot.status === 'error' || snapshot.status === 'cancelled' || snapshot.status === 'timeout') {
+              module4Error = snapshot.error_message || `模块4任务状态异常: ${snapshot.status}`;
+              break;
+            }
+          }
+        }
+
+        if (consecutiveStatusFailures >= 12) {
+          throw new Error(`模块4状态查询连续失败: ${statusErrorMessage}`);
+        }
+      }
+
+      await sleep(5000);
+    }
+  } catch (error) {
+    module4Error = error instanceof Error ? error.message : String(error);
+    console.warn(`[Pipeline ${sessionId}] ${progressLabel} 异常: ${module4Error}`);
+  }
+
+  return {
+    module4Result,
+    module4Error,
+    module4RecoveredFromTransport,
+    module4TaskStatus,
+    module4TaskStartedAt,
+    module4TaskFinishedAt,
+  };
+}
+
+async function enrichProductsFromDb(
+  productsFromComparison: ProductInfo[],
+  sessionIdForDb: string,
+  patentRecordIdForDb: number,
+): Promise<ProductInfo[]> {
+  try {
+    const searchProductRows = await pgQuery<Record<string, unknown>>(
+      `SELECT id, product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture
+       FROM search_products
+       WHERE patent_record_id = $1
+         AND analysis_session_id = $2
+       ORDER BY id ASC`,
+      [patentRecordIdForDb, sessionIdForDb],
+    );
+    if (searchProductRows.rows.length === 0) return productsFromComparison;
+
+    const enriched = new Map<string, ProductInfo>();
+    for (const p of productsFromComparison) {
+      enriched.set(p.id, { ...p });
+    }
+    for (const row of searchProductRows.rows) {
+      const searchRowId = row['id'] != null ? String(row['id']) : '';
+      const spId = String(row['product_id'] || '');
+      const spName = String(row['product_name'] || row['name'] || '');
+      const brand = row['brand'] ? String(row['brand']) : undefined;
+      const manufacturer = row['manufacturer'] ? String(row['manufacturer']) : undefined;
+      if (!searchRowId && !spId && !spName) continue;
+      const key = searchRowId || spId || spName;
+      if (enriched.has(key)) {
+        const existing = enriched.get(key)!;
+        if (!existing.url && row['product_url']) existing.url = String(row['product_url']);
+        if (!existing.source && row['product_source']) existing.source = String(row['product_source']);
+        if (!existing.price && row['price']) existing.price = String(row['price']);
+        if (!existing.brand && brand) existing.brand = brand;
+        if (!existing.manufacturer && manufacturer) existing.manufacturer = manufacturer;
+        if (!existing.company && manufacturer) existing.company = manufacturer;
+        if (!existing.description && row['description']) existing.description = String(row['description']);
+        if (!existing.imageUrl && row['picture']) {
+          try {
+            const pics = row['picture'];
+            if (typeof pics === 'string') {
+              const parsed = JSON.parse(pics);
+              existing.imageUrl = Array.isArray(parsed) ? parsed[0] : parsed;
+            } else if (Array.isArray(pics)) {
+              existing.imageUrl = (pics as unknown[])[0] as string;
+            }
+          } catch { /* ignore */ }
+        }
+      } else {
+        let imageUrl: string | undefined;
+        if (row['picture']) {
+          try {
+            const pics = row['picture'];
+            if (typeof pics === 'string') {
+              const parsed = JSON.parse(pics);
+              imageUrl = Array.isArray(parsed) ? parsed[0] : parsed;
+            } else if (Array.isArray(pics)) {
+              imageUrl = (pics as unknown[])[0] as string;
+            }
+          } catch { /* ignore */ }
+        }
+        enriched.set(key, {
+          id: key,
+          name: spName || key,
+          url: row['product_url'] ? String(row['product_url']) : undefined,
+          source: row['product_source'] ? String(row['product_source']) : undefined,
+          price: row['price'] ? String(row['price']) : undefined,
+          brand,
+          manufacturer,
+          company: manufacturer,
+          description: row['description'] ? String(row['description']) : undefined,
+          imageUrl,
+        });
+      }
+    }
+    return Array.from(enriched.values());
+  } catch (err) {
+    console.warn(`[Pipeline ${sessionIdForDb}] 补充商品详情失败:`, err);
+    return productsFromComparison;
+  }
+}
+
+async function loadSearchProductsForSession(
+  sessionIdForDb: string,
+  patentRecordIdForDb: number,
+): Promise<ProductInfo[]> {
+  return enrichProductsFromDb([], sessionIdForDb, patentRecordIdForDb);
+}
+
+async function loadComparisonArtifacts(
   sessionId: string,
   patentRecordId: number,
-  startedAt: number,
-  maxWaitFromStartMs: number = 15 * 60 * 1000,
-  intervalMs: number = 10 * 1000,
-): Promise<ClaimCompareRunSnapshot | null> {
-  while (Date.now() - startedAt < maxWaitFromStartMs) {
-    try {
-      const snapshot = await getLatestClaimCompareRunSnapshot(sessionId, patentRecordId);
-      if (snapshot) {
-        return snapshot;
+  module4Result: Module4Result | null,
+  module4Error?: string,
+): Promise<ComparisonArtifacts> {
+  let products: ProductInfo[] = [];
+  let comparisons: ProductComparison[] = [];
+
+  if (module4Result && module4Result.allComparisonResults.length > 0) {
+    comparisons = mapComparisonsFromApi(module4Result.allComparisonResults);
+    const productMap = new Map<string, ProductInfo>();
+    for (const comp of comparisons) {
+      if (!productMap.has(comp.productId)) {
+        productMap.set(comp.productId, { id: comp.productId, name: comp.productName });
       }
-    } catch (error) {
-      console.warn(`[Pipeline ${sessionId}] 查询 claim_compare_runs 恢复状态失败:`, error);
     }
-    await sleep(intervalMs);
+    products = Array.from(productMap.values());
+    if (patentRecordId > 0) {
+      products = await enrichProductsFromDb(products, sessionId, patentRecordId);
+    }
+    return {
+      products,
+      comparisons,
+      claimCompareRunId: module4Result.claimCompareRunId,
+    };
   }
-  return null;
+
+  const dbComparisonRunId = module4Result?.claimCompareRunId || 0;
+  let dbResults: unknown[] = [];
+  let recoveredDbComparisonRunId = dbComparisonRunId;
+
+  if (dbComparisonRunId > 0) {
+    const rows = await pgQuery<Record<string, unknown>>(
+      `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
+      [dbComparisonRunId],
+    );
+    dbResults = rows.rows;
+  } else if (patentRecordId > 0) {
+    const runRows = await pgQuery<Record<string, unknown>>(
+      `SELECT id
+       FROM claim_compare_runs
+       WHERE patent_record_id = $1
+         AND analysis_session_id = $2
+       ORDER BY id DESC
+       LIMIT 1`,
+      [patentRecordId, sessionId],
+    );
+    if (runRows.rows.length > 0) {
+      const runId = runRows.rows[0].id as number;
+      recoveredDbComparisonRunId = runId;
+      const resultRows = await pgQuery<Record<string, unknown>>(
+        `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
+        [runId],
+      );
+      dbResults = resultRows.rows;
+    }
+  }
+
+  if (dbResults.length === 0 && patentRecordId > 0) {
+    const fallbackRunRows = await pgQuery<Record<string, unknown>>(
+      `SELECT r.id
+       FROM claim_compare_runs r
+       WHERE r.patent_record_id = $1
+         AND r.analysis_session_id = $2
+         AND EXISTS (
+           SELECT 1
+           FROM claim_compare_results rr
+           WHERE rr.claim_compare_run_id = r.id
+         )
+       ORDER BY r.id DESC
+       LIMIT 1`,
+      [patentRecordId, sessionId],
+    );
+    if (fallbackRunRows.rows.length > 0) {
+      const fallbackRunId = fallbackRunRows.rows[0].id as number;
+      const fallbackResultRows = await pgQuery<Record<string, unknown>>(
+        `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
+        [fallbackRunId],
+      );
+      if (fallbackResultRows.rows.length > 0) {
+        recoveredDbComparisonRunId = fallbackRunId;
+        dbResults = fallbackResultRows.rows;
+      }
+    }
+  }
+
+  if (dbResults.length === 0) {
+    return {
+      products: [],
+      comparisons: [],
+      claimCompareRunId: recoveredDbComparisonRunId || undefined,
+      errorMessage: module4Error || module4Result?.resultSummary || '模块4未返回可用的比对数据，数据库中也无比对结果',
+    };
+  }
+
+  const grouped = groupDbRowsByProduct(dbResults);
+  comparisons = mapComparisonsFromApi(grouped);
+  const productMap = new Map<string, ProductInfo>();
+  for (const comp of comparisons) {
+    if (!productMap.has(comp.productId)) {
+      productMap.set(comp.productId, { id: comp.productId, name: comp.productName });
+    }
+  }
+  products = Array.from(productMap.values());
+  if (patentRecordId > 0) {
+    products = await enrichProductsFromDb(products, sessionId, patentRecordId);
+  }
+
+  return {
+    products,
+    comparisons,
+    claimCompareRunId: recoveredDbComparisonRunId || undefined,
+  };
 }
 
 async function getPatentClaimsCount(patentRecordId: number): Promise<number | null> {
@@ -506,6 +1002,9 @@ async function getKeywordTexts(patentRecordId: number, limit: number = 30): Prom
 
 const KEYWORD_CONFIRMATION_TIMEOUT_MS = 30_000;
 const KEYWORD_CONFIRMATION_POLL_MS = 1_000;
+const MODULE3_INITIAL_WAIT_MS = 20 * 60 * 1000;
+const MODULE3_POLL_INTERVAL_MS = 5_000;
+const MODULE3_EXTENDED_POLL_LOG_INTERVAL = 60_000;
 
 async function waitForKeywordConfirmation(
   sessionId: string,
@@ -890,472 +1389,426 @@ async function executePipeline(
 
     // ========== 模块3（步骤4）：商品信息检索 ==========
     let module3Result: Module3Result | null = null;
+    let module3TaskStatus: Module3TaskStatus | undefined;
+    const module3TaskStartedAt = new Date().toISOString();
+    let module3TaskFinishedAt: string | undefined;
     let module3Error: string | undefined;
-    let module3RecoveredFromTransport = false;
     let module3ProductsCount = 0;
     let module3IsComplete = false;
+    let initialWaitExceeded = false;
+    let lastExtendedWaitLogAt = Date.now();
+    let initialArtifacts: ComparisonArtifacts | null = null;
+
     await updateStepStatus(sessionId, 4, 'running');
     console.log(`[Pipeline ${sessionId}] 步骤4: 商品信息检索...`);
     const step4Start = Date.now();
 
-    try {
-      module3Result = await runModule3(
-        module1Result.dbRecordId,
-        sessionId,
-        keywordList,
-        (msg) => console.log(`[Pipeline ${sessionId}] 模块3进度: ${msg}`),
-      );
-      if (module3Result.exceptionMessage) {
-        module3Error = module3Result.exceptionMessage;
-      }
-      module3ProductsCount = module3Result.totalProductsCount || 0;
-      module3IsComplete = module3Result.isComplete ?? false;
-    } catch (e) {
-      module3Error = e instanceof Error ? e.message : String(e);
-      console.warn(`[Pipeline ${sessionId}] 模块3异常: ${module3Error}`);
+    const module3Task: Module3AsyncStartResult = await startModule3Async(
+      module1Result.dbRecordId,
+      sessionId,
+      `${sessionId}-module3`,
+      keywordList,
+      (msg) => console.log(`[Pipeline ${sessionId}] 模块3进度: ${msg}`),
+    );
+    module3TaskStatus = module3Task.status === 'accepted' ? 'queued' : module3Task.status;
+    module3Result = {
+      searchRunId: module3Task.searchRunId,
+      totalProductsCount: 0,
+      isComplete: false,
+      exceptionMessage: undefined,
+      runId: module3Task.runId,
+    };
+    await updateResults(sessionId, {
+      searchRunId: module3Result.searchRunId,
+      module3RunId: module3Result.runId,
+      module3TaskStatus,
+      module3TaskStartedAt,
+      module3TaskFinishedAt,
+      module3TaskError: undefined,
+      module3Exception: undefined,
+    });
 
-      if (isRecoverableWorkflowTransportError(module3Error)) {
-        console.log(`[Pipeline ${sessionId}] 模块3响应异常，转为轮询数据库中的 search_runs...`);
-        const snapshot = await waitForSearchRunRecovery(sessionId, module1Result.dbRecordId, step4Start);
-        if (snapshot) {
-          module3RecoveredFromTransport = true;
-          module3Error = undefined;
-          module3ProductsCount = snapshot.total_products_count;
-          module3IsComplete = snapshot.is_complete;
-          module3Result = {
-            searchRunId: snapshot.id,
-            totalProductsCount: snapshot.total_products_count,
-            isComplete: snapshot.is_complete,
-            exceptionMessage: snapshot.error_message || undefined,
-            runId: '',
-          };
-          console.log(
-            `[Pipeline ${sessionId}] 模块3已从数据库恢复: search_run_id=${snapshot.id}, products=${snapshot.total_products_count}, complete=${snapshot.is_complete}`,
-          );
-        }
-      }
-    }
+    let initialStep5Triggered = false;
+    let initialStep5Completed = false;
+    let lastPersistedModule3Status: string | undefined;
+    let lastPersistedModule3ProductsCount = -1;
+    let lastPersistedModule3RunId = module3Result.searchRunId;
+    let lastPersistedModule3Error: string | undefined;
 
-    if (module1Result.dbRecordId && module3ProductsCount === 0) {
+    while (true) {
+      let runStatus: Module3RunStatusResult | null = null;
+      try {
+        runStatus = await getModule3RunStatus(module3Result.runId);
+      } catch (statusError) {
+        const statusErrorMessage = statusError instanceof Error ? statusError.message : String(statusError);
+        console.warn(`[Pipeline ${sessionId}] 模块3状态查询失败: ${statusErrorMessage}`);
+      }
+
       const latestSearchSnapshot = await getLatestSearchRunSnapshot(sessionId, module1Result.dbRecordId);
       if (latestSearchSnapshot) {
-        module3ProductsCount = latestSearchSnapshot.total_products_count;
-        module3IsComplete = latestSearchSnapshot.is_complete;
-        if (!module3Result) {
-          module3Result = {
-            searchRunId: latestSearchSnapshot.id,
-            totalProductsCount: latestSearchSnapshot.total_products_count,
-            isComplete: latestSearchSnapshot.is_complete,
-            exceptionMessage: latestSearchSnapshot.error_message || undefined,
-            runId: '',
-          };
+        module3ProductsCount = Math.max(module3ProductsCount, latestSearchSnapshot.total_products_count);
+        module3IsComplete = module3IsComplete || latestSearchSnapshot.is_complete;
+        if (!module3Result.searchRunId) {
+          module3Result.searchRunId = latestSearchSnapshot.id;
         }
         if (!module3Error && latestSearchSnapshot.error_message) {
           module3Error = latestSearchSnapshot.error_message;
         }
       }
+
+      if (runStatus) {
+        module3TaskStatus = runStatus.status;
+        if (runStatus.searchRunId && !module3Result.searchRunId) {
+          module3Result.searchRunId = runStatus.searchRunId;
+        }
+        if (runStatus.totalProductsCount > module3ProductsCount) {
+          module3ProductsCount = runStatus.totalProductsCount;
+        }
+        if (typeof runStatus.isComplete === 'boolean') {
+          module3IsComplete = runStatus.isComplete;
+        } else if (runStatus.status === 'completed') {
+          module3IsComplete = true;
+        }
+        if (runStatus.status === 'completed' || runStatus.status === 'error' || runStatus.status === 'cancelled' || runStatus.status === 'timeout') {
+          module3TaskFinishedAt = module3TaskFinishedAt || new Date().toISOString();
+        }
+        if (runStatus.errorMessage) {
+          module3Error = runStatus.errorMessage;
+        }
+      }
+
+      module3Result.totalProductsCount = module3ProductsCount;
+      module3Result.isComplete = module3IsComplete;
+      module3Result.exceptionMessage = module3Error;
+
+      const shouldPersistModule3State = (
+        lastPersistedModule3Status !== module3TaskStatus
+        || lastPersistedModule3ProductsCount !== module3ProductsCount
+        || lastPersistedModule3RunId !== module3Result.searchRunId
+        || lastPersistedModule3Error !== module3Error
+      );
+      if (shouldPersistModule3State) {
+        await updateResults(sessionId, {
+          searchRunId: module3Result.searchRunId,
+          module3RunId: module3Result.runId,
+          module3TaskStatus,
+          module3TaskStartedAt,
+          module3TaskFinishedAt,
+          module3TaskError: module3Error,
+          module3Exception: module3Error,
+        });
+        lastPersistedModule3Status = module3TaskStatus;
+        lastPersistedModule3ProductsCount = module3ProductsCount;
+        lastPersistedModule3RunId = module3Result.searchRunId;
+        lastPersistedModule3Error = module3Error;
+      }
+
+      if (!initialStep5Triggered && module3ProductsCount > 0 && !module3IsComplete) {
+        initialStep5Triggered = true;
+        await updateStepStatus(sessionId, 4, 'partial', '已检索到部分商品，后台继续检索中');
+        break;
+      }
+
+      if (!initialWaitExceeded && (Date.now() - step4Start) >= MODULE3_INITIAL_WAIT_MS && module3ProductsCount === 0 && !module3IsComplete) {
+        initialWaitExceeded = true;
+        lastExtendedWaitLogAt = Date.now();
+        console.log(`[Pipeline ${sessionId}] 步骤4首个等待上限已到，仍未检索到商品，继续等待后台检索结果...`);
+        await updateStepStatus(sessionId, 4, 'running', '首个等待上限已到，暂未检索到商品，继续等待后台检索结果');
+      }
+
+      if (initialWaitExceeded && module3ProductsCount === 0 && (Date.now() - lastExtendedWaitLogAt) >= MODULE3_EXTENDED_POLL_LOG_INTERVAL) {
+        lastExtendedWaitLogAt = Date.now();
+        console.log(`[Pipeline ${sessionId}] 步骤4仍未检索到商品，后台继续轮询中...`);
+      }
+
+      const module3ReachedTerminal =
+        module3TaskStatus === 'completed'
+        || module3TaskStatus === 'error'
+        || module3TaskStatus === 'cancelled'
+        || module3TaskStatus === 'timeout';
+
+      if (module3ReachedTerminal || module3IsComplete) {
+        module3TaskFinishedAt = module3TaskFinishedAt || new Date().toISOString();
+        break;
+      }
+
+      await sleep(MODULE3_POLL_INTERVAL_MS);
+    }
+
+    if (initialStep5Triggered) {
+      await updateStepStatus(sessionId, 5, 'running');
+      console.log(`[Pipeline ${sessionId}] 步骤5: 基于当前商品启动首轮分析...`);
+      const step5InitialStart = Date.now();
+      const initialOutcome = await runModule4Task({
+        sessionId,
+        patentRecordId: module1Result.dbRecordId,
+        runId: `${sessionId}-module4-initial`,
+        progressLabel: '模块4首轮进度',
+      });
+      stepTimings['step5_initial'] = Date.now() - step5InitialStart;
+
+      if (initialOutcome.module4RecoveredFromTransport) {
+        console.warn(
+          `[Pipeline ${sessionId}] 模块4首轮 HTTP 响应中断，但后台任务已完成并写入数据库 `
+          + `(耗时 ${stepTimings['step5_initial']}ms, claim_compare_run_id=${initialOutcome.module4Result?.claimCompareRunId || 'unknown'})`,
+        );
+      }
+
+      if (initialOutcome.module4Error) {
+        await updateStepStatus(sessionId, 5, 'error', initialOutcome.module4Error);
+        await updateResults(sessionId, {
+          initialClaimCompareRunId: initialOutcome.module4Result?.claimCompareRunId,
+          claimCompareRunId: initialOutcome.module4Result?.claimCompareRunId,
+          step5Phase: 'initial',
+          partialAnalysisAvailable: false,
+          module4RunId: initialOutcome.module4Result?.runId,
+          module4TaskStatus: initialOutcome.module4TaskStatus,
+          module4TaskStartedAt: initialOutcome.module4TaskStartedAt,
+          module4TaskFinishedAt: initialOutcome.module4TaskFinishedAt,
+          module4TaskError: initialOutcome.module4Error,
+          module4Exception: initialOutcome.module4Error,
+        });
+      } else {
+        initialArtifacts = await loadComparisonArtifacts(
+          sessionId,
+          module1Result.dbRecordId,
+          initialOutcome.module4Result,
+          initialOutcome.module4Error,
+        );
+        if (initialArtifacts.comparisons.length > 0) {
+          initialStep5Completed = true;
+          await updateStepStatus(sessionId, 5, 'partial', '已完成首轮分析，等待检索完成后自动全量补跑');
+          await updateResults(sessionId, {
+            products: initialArtifacts.products,
+            comparisons: initialArtifacts.comparisons,
+            initialClaimCompareRunId: initialArtifacts.claimCompareRunId,
+            claimCompareRunId: initialArtifacts.claimCompareRunId,
+            resultsCompleteness: 'partial',
+            step5Phase: 'initial',
+            partialAnalysisAvailable: true,
+            module4RunId: initialOutcome.module4Result?.runId,
+            module4TaskStatus: initialOutcome.module4TaskStatus,
+            module4TaskStartedAt: initialOutcome.module4TaskStartedAt,
+            module4TaskFinishedAt: initialOutcome.module4TaskFinishedAt,
+            module4TaskError: undefined,
+            module4Exception: undefined,
+          });
+        } else {
+          const initialMessage = initialArtifacts.errorMessage || '首轮分析未返回可用的比对结果';
+          await updateStepStatus(sessionId, 5, 'error', initialMessage);
+          await updateResults(sessionId, {
+            initialClaimCompareRunId: initialArtifacts.claimCompareRunId,
+            claimCompareRunId: initialArtifacts.claimCompareRunId,
+            step5Phase: 'initial',
+            partialAnalysisAvailable: false,
+            module4RunId: initialOutcome.module4Result?.runId,
+            module4TaskStatus: initialOutcome.module4TaskStatus,
+            module4TaskStartedAt: initialOutcome.module4TaskStartedAt,
+            module4TaskFinishedAt: initialOutcome.module4TaskFinishedAt,
+            module4TaskError: initialMessage,
+            module4Exception: initialMessage,
+          });
+        }
+      }
+    }
+
+    while (!module3IsComplete && module3TaskStatus !== 'completed' && module3TaskStatus !== 'error' && module3TaskStatus !== 'cancelled' && module3TaskStatus !== 'timeout') {
+      let runStatus: Module3RunStatusResult | null = null;
+      try {
+        runStatus = await getModule3RunStatus(module3Result.runId);
+      } catch (statusError) {
+        const statusErrorMessage = statusError instanceof Error ? statusError.message : String(statusError);
+        console.warn(`[Pipeline ${sessionId}] 模块3状态查询失败: ${statusErrorMessage}`);
+      }
+
+      const latestSearchSnapshot = await getLatestSearchRunSnapshot(sessionId, module1Result.dbRecordId);
+      if (latestSearchSnapshot) {
+        module3ProductsCount = Math.max(module3ProductsCount, latestSearchSnapshot.total_products_count);
+        module3IsComplete = module3IsComplete || latestSearchSnapshot.is_complete;
+        if (!module3Result.searchRunId) {
+          module3Result.searchRunId = latestSearchSnapshot.id;
+        }
+        if (!module3Error && latestSearchSnapshot.error_message) {
+          module3Error = latestSearchSnapshot.error_message;
+        }
+      }
+      if (runStatus) {
+        module3TaskStatus = runStatus.status;
+        if (runStatus.totalProductsCount > module3ProductsCount) {
+          module3ProductsCount = runStatus.totalProductsCount;
+        }
+        if (typeof runStatus.isComplete === 'boolean') {
+          module3IsComplete = runStatus.isComplete;
+        } else if (runStatus.status === 'completed') {
+          module3IsComplete = true;
+        }
+        if (runStatus.searchRunId && !module3Result.searchRunId) {
+          module3Result.searchRunId = runStatus.searchRunId;
+        }
+        if (runStatus.errorMessage) {
+          module3Error = runStatus.errorMessage;
+        }
+        if (runStatus.status === 'completed' || runStatus.status === 'error' || runStatus.status === 'cancelled' || runStatus.status === 'timeout') {
+          module3TaskFinishedAt = module3TaskFinishedAt || new Date().toISOString();
+        }
+      }
+      await updateResults(sessionId, {
+        searchRunId: module3Result.searchRunId,
+        module3RunId: module3Result.runId,
+        module3TaskStatus,
+        module3TaskStartedAt,
+        module3TaskFinishedAt,
+        module3TaskError: module3Error,
+        module3Exception: module3Error,
+      });
+      if (module3IsComplete || module3TaskStatus === 'completed' || module3TaskStatus === 'error' || module3TaskStatus === 'cancelled' || module3TaskStatus === 'timeout') {
+        break;
+      }
+      await sleep(MODULE3_POLL_INTERVAL_MS);
     }
 
     stepTimings['step4'] = Date.now() - step4Start;
-    const shouldContinueToStep5 = module3ProductsCount > 0;
-    const step4TerminalMessage = shouldContinueToStep5
-      ? (module3RecoveredFromTransport && !module3IsComplete
-          ? '模块3 HTTP 响应中断，但后台已写入部分商品数据，继续步骤5'
-          : undefined)
-      : (module3Error || '步骤4未检索到任何商品，已停止后续步骤');
-    await updateStepStatus(sessionId, 4, shouldContinueToStep5 ? 'completed' : 'error', step4TerminalMessage);
-    await updateResults(sessionId, {
-      products: [],
-      searchRunId: module3Result?.searchRunId,
-      module3RunId: module3Result?.runId,
-      module3Exception: module3Error,
-    });
-    console.log(
-      `[Pipeline ${sessionId}] 步骤4${shouldContinueToStep5 ? '(有商品,继续)' : '(无商品,终止)'} `
-      + `(products=${module3ProductsCount}, complete=${module3IsComplete}, 耗时 ${stepTimings['step4']}ms)`,
-    );
-
-    if (!shouldContinueToStep5) {
+    if (module3ProductsCount === 0) {
+      const msg = module3Error || '步骤4未检索到任何商品，后台任务已结束';
+      await updateStepStatus(sessionId, 4, 'error', msg);
       await updateSessionStatus(sessionId, 'error');
+      await updateResults(sessionId, {
+        step5Phase: initialStep5Triggered ? 'initial' : undefined,
+      });
       return;
     }
 
-    // ========== 模块4（步骤5）：技术特征比对 ==========
-    let module4Result: Module4Result | null = null;
-    let module4Error: string | undefined;
-    let module4RecoveredFromTransport = false;
-    let module4TaskStatus: Module4TaskStatus | undefined;
-    let module4TaskStartedAt: string | undefined;
-    let module4TaskFinishedAt: string | undefined;
-    await updateStepStatus(sessionId, 5, 'running');
-    console.log(`[Pipeline ${sessionId}] 步骤5: 技术特征比对（最耗时步骤，可能需要数分钟）...`);
-    const step5Start = Date.now();
-
-    try {
-      const module4Task = await startModule4Async(
-        module1Result.dbRecordId,
-        sessionId,
-        `${sessionId}-module4`,
-        (msg) => console.log(`[Pipeline ${sessionId}] 模块4进度: ${msg}`),
-      );
-      module4Result = {
-        claimCompareRunId: module4Task.claimCompareRunId,
-        exceptionMessage: undefined,
-        runId: module4Task.runId,
-        allComparisonResults: [],
-        resultSummary: '',
-        tableUrls: [],
-      };
-      module4TaskStatus = module4Task.status === 'accepted' ? 'queued' : module4Task.status;
-      await updateResults(sessionId, {
-        claimCompareRunId: module4Result.claimCompareRunId,
-        module4RunId: module4Result.runId,
-        module4TaskStatus,
-        module4TaskStartedAt,
-        module4TaskFinishedAt,
-        module4TaskError: undefined,
-        module4Exception: undefined,
-      });
-
-      let consecutiveStatusFailures = 0;
-      let lastObservedStatus: string | undefined;
-      let lastObservedClaimCompareRunId = module4Result.claimCompareRunId;
-      let lastObservedStartedAt: string | undefined;
-      let lastObservedFinishedAt: string | undefined;
-      let lastObservedTaskError: string | undefined;
-
-      while (true) {
-        try {
-          const runStatus = await getModule4RunStatus(module4Result.runId);
-          consecutiveStatusFailures = 0;
-          module4TaskStatus = runStatus.status;
-          module4TaskStartedAt = runStatus.startedAt;
-          module4TaskFinishedAt = runStatus.finishedAt;
-          if (runStatus.claimCompareRunId) {
-            module4Result.claimCompareRunId = runStatus.claimCompareRunId;
-          }
-          module4Result.resultSummary = runStatus.resultSummary;
-
-          const taskError = runStatus.errorMessage;
-          const shouldPersistStatus = (
-            lastObservedStatus !== runStatus.status
-            || lastObservedClaimCompareRunId !== module4Result.claimCompareRunId
-            || lastObservedStartedAt !== module4TaskStartedAt
-            || lastObservedFinishedAt !== module4TaskFinishedAt
-            || lastObservedTaskError !== taskError
-          );
-          if (shouldPersistStatus) {
-            await updateResults(sessionId, {
-              claimCompareRunId: module4Result.claimCompareRunId,
-              module4RunId: module4Result.runId,
-              module4TaskStatus: runStatus.status,
-              module4TaskStartedAt,
-              module4TaskFinishedAt,
-              module4TaskError: taskError,
-              module4Exception: undefined,
-            });
-            lastObservedStatus = runStatus.status;
-            lastObservedClaimCompareRunId = module4Result.claimCompareRunId;
-            lastObservedStartedAt = module4TaskStartedAt;
-            lastObservedFinishedAt = module4TaskFinishedAt;
-            lastObservedTaskError = taskError;
-          }
-
-          if (runStatus.status === 'completed') {
-            module4Error = undefined;
-            break;
-          }
-
-          if (runStatus.status === 'error' || runStatus.status === 'cancelled' || runStatus.status === 'timeout') {
-            module4Error = taskError || `模块4任务状态异常: ${runStatus.status}`;
-            break;
-          }
-        } catch (statusError) {
-          consecutiveStatusFailures += 1;
-          const statusErrorMessage = statusError instanceof Error ? statusError.message : String(statusError);
-          console.warn(
-            `[Pipeline ${sessionId}] 模块4状态查询失败 (${consecutiveStatusFailures}): ${statusErrorMessage}`,
-          );
-
-          if (consecutiveStatusFailures >= 5) {
-            const snapshot = await getLatestClaimCompareRunSnapshot(sessionId, module1Result.dbRecordId);
-            if (snapshot && snapshot.status) {
-              module4RecoveredFromTransport = true;
-              module4TaskStatus = snapshot.status as Module4TaskStatus;
-              module4TaskStartedAt = snapshot.started_at || undefined;
-              module4TaskFinishedAt = snapshot.finished_at || undefined;
-              module4Result.claimCompareRunId = snapshot.id;
-              module4Result.resultSummary = snapshot.result_summary || '';
-              await updateResults(sessionId, {
-                claimCompareRunId: snapshot.id,
-                module4RunId: module4Result.runId,
-                module4TaskStatus,
-                module4TaskStartedAt,
-                module4TaskFinishedAt,
-                module4TaskError: snapshot.error_message || undefined,
-                module4Exception: undefined,
-              });
-              if (snapshot.status === 'completed') {
-                module4Error = undefined;
-                break;
-              }
-              if (snapshot.status === 'error' || snapshot.status === 'cancelled' || snapshot.status === 'timeout') {
-                module4Error = snapshot.error_message || `模块4任务状态异常: ${snapshot.status}`;
-                break;
-              }
-            }
-          }
-
-          if (consecutiveStatusFailures >= 12) {
-            throw new Error(`模块4状态查询连续失败: ${statusErrorMessage}`);
-          }
-        }
-
-        await sleep(5000);
-      }
-    } catch (e) {
-      module4Error = e instanceof Error ? e.message : String(e);
-      console.warn(`[Pipeline ${sessionId}] 模块4异常: ${module4Error}`);
-    }
-
-    stepTimings['step5'] = Date.now() - step5Start;
-    if (module4RecoveredFromTransport) {
-      console.warn(
-        `[Pipeline ${sessionId}] 模块4 HTTP 响应中断，但后台任务已完成并写入数据库 `
-        + `(耗时 ${stepTimings['step5']}ms, claim_compare_run_id=${module4Result?.claimCompareRunId || 'unknown'})`,
-      );
-    }
-    await updateStepStatus(
-      sessionId,
-      5,
-      module4Error ? 'error' : 'completed',
-      undefined,
-    );
+    const step4TerminalMessage = module3TaskStatus && module3TaskStatus !== 'completed'
+      ? `模块3最终状态为 ${module3TaskStatus}，将基于当前已检索到的 ${module3ProductsCount} 个商品继续分析`
+      : initialStep5Completed
+        ? '模块3已完成全部检索，开始执行全量补跑'
+        : undefined;
+    await updateStepStatus(sessionId, 4, 'completed', step4TerminalMessage);
     await updateResults(sessionId, {
-      comparisons: [],
-      claimCompareRunId: module4Result?.claimCompareRunId,
-      module4RunId: module4Result?.runId,
-      module4TaskStatus,
-      module4TaskStartedAt,
-      module4TaskFinishedAt,
-      module4TaskError: module4Error,
-      module4Exception: module4Error,
+      searchRunId: module3Result?.searchRunId,
+      module3RunId: module3Result?.runId,
+      module3TaskStatus,
+      module3TaskStartedAt,
+      module3TaskFinishedAt,
+      module3TaskError: module3Error,
+      module3Exception: module3Error,
     });
-    console.log(`[Pipeline ${sessionId}] 步骤5${module4RecoveredFromTransport ? '(数据库恢复,继续)' : module4Error ? '异常' : '完成'} (耗时 ${stepTimings['step5']}ms)`);
+    console.log(
+      `[Pipeline ${sessionId}] 步骤4完成 `
+      + `(products=${module3ProductsCount}, complete=${module3IsComplete}, status=${module3TaskStatus || 'unknown'}, 耗时 ${stepTimings['step4']}ms)`,
+    );
+
+    // ========== 模块4（步骤5）：技术特征比对终轮补跑 ==========
+    await updateStepStatus(sessionId, 5, 'running');
+    console.log(`[Pipeline ${sessionId}] 步骤5: 执行全量补跑...`);
+    const step5FinalStart = Date.now();
+    const finalOutcome = await runModule4Task({
+      sessionId,
+      patentRecordId: module1Result.dbRecordId,
+      runId: `${sessionId}-module4-final`,
+      progressLabel: '模块4终轮进度',
+    });
+    stepTimings['step5_final'] = Date.now() - step5FinalStart;
+    stepTimings['step5'] = (stepTimings['step5_initial'] || 0) + stepTimings['step5_final'];
+
+    if (finalOutcome.module4RecoveredFromTransport) {
+      console.warn(
+        `[Pipeline ${sessionId}] 模块4终轮 HTTP 响应中断，但后台任务已完成并写入数据库 `
+        + `(耗时 ${stepTimings['step5_final']}ms, claim_compare_run_id=${finalOutcome.module4Result?.claimCompareRunId || 'unknown'})`,
+      );
+    }
+
+    let finalArtifacts: ComparisonArtifacts | null = null;
+    let finalModule4Error = finalOutcome.module4Error;
+    if (!finalModule4Error) {
+      finalArtifacts = await loadComparisonArtifacts(
+        sessionId,
+        module1Result.dbRecordId,
+        finalOutcome.module4Result,
+        finalOutcome.module4Error,
+      );
+      if (finalArtifacts.comparisons.length === 0) {
+        finalModule4Error = finalArtifacts.errorMessage || '终轮补跑未返回可用的比对结果';
+      }
+    }
+
+    if (finalModule4Error) {
+      const fallbackProducts = (initialArtifacts?.products && initialArtifacts.products.length > 0)
+        ? initialArtifacts.products
+        : await loadSearchProductsForSession(sessionId, module1Result.dbRecordId);
+      await updateStepStatus(sessionId, 5, 'error', finalModule4Error);
+      await updateStepStatus(sessionId, 6, 'error', `终轮补跑失败: ${finalModule4Error}`);
+      await updateSessionStatus(sessionId, 'error');
+      await updateResults(sessionId, {
+        products: fallbackProducts,
+        comparisons: initialArtifacts?.comparisons ?? [],
+        claimCompareRunId: initialArtifacts?.claimCompareRunId,
+        initialClaimCompareRunId: initialArtifacts?.claimCompareRunId,
+        finalClaimCompareRunId: finalOutcome.module4Result?.claimCompareRunId,
+        resultsCompleteness: initialArtifacts?.comparisons.length ? 'partial' : undefined,
+        step5Phase: 'rerun',
+        partialAnalysisAvailable: Boolean(initialArtifacts?.comparisons.length),
+        module2Exception: module2Result?.exceptionType || module2Error,
+        module3Exception: module3Error,
+        module4RunId: finalOutcome.module4Result?.runId,
+        module4TaskStatus: finalOutcome.module4TaskStatus,
+        module4TaskStartedAt: finalOutcome.module4TaskStartedAt,
+        module4TaskFinishedAt: finalOutcome.module4TaskFinishedAt,
+        module4TaskError: finalModule4Error,
+        module4Exception: finalModule4Error,
+      });
+      return;
+    }
+
+    await updateStepStatus(sessionId, 5, 'completed');
+    await updateResults(sessionId, {
+      products: finalArtifacts?.products ?? [],
+      comparisons: finalArtifacts?.comparisons ?? [],
+      claimCompareRunId: finalArtifacts?.claimCompareRunId,
+      initialClaimCompareRunId: initialArtifacts?.claimCompareRunId,
+      finalClaimCompareRunId: finalArtifacts?.claimCompareRunId,
+      resultsCompleteness: 'final',
+      step5Phase: 'completed',
+      partialAnalysisAvailable: Boolean(initialArtifacts?.comparisons.length),
+      module4RunId: finalOutcome.module4Result?.runId,
+      module4TaskStatus: finalOutcome.module4TaskStatus,
+      module4TaskStartedAt: finalOutcome.module4TaskStartedAt,
+      module4TaskFinishedAt: finalOutcome.module4TaskFinishedAt,
+      module4TaskError: undefined,
+      module4Exception: undefined,
+    });
+    console.log(`[Pipeline ${sessionId}] 步骤5完成 (总耗时 ${stepTimings['step5']}ms)`);
 
     // ========== 步骤6：提取分析结果 ==========
+    await updateStepStatus(sessionId, 6, 'running');
     const step6Start = Date.now();
-    let patent: PatentInfo | undefined;
-    let products: ProductInfo[] = [];
-    let comparisons: ProductComparison[] = [];
+    const patent: PatentInfo | undefined = patentFromModule1;
+    const products: ProductInfo[] = finalArtifacts?.products ?? [];
+    const comparisons: ProductComparison[] = finalArtifacts?.comparisons ?? [];
 
-    // 尝试从搜索商品数据表补充商品详情
-    async function enrichProductsFromDb(productsFromComparison: ProductInfo[], sessionIdForDb: string, patentRecordIdForDb: number): Promise<ProductInfo[]> {
-      try {
-        const searchProductRows = await pgQuery<Record<string, unknown>>(
-          `SELECT id, product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture
-           FROM search_products
-           WHERE patent_record_id = $1
-             AND analysis_session_id = $2
-           ORDER BY id ASC`,
-          [patentRecordIdForDb, sessionIdForDb],
-        );
-        if (searchProductRows.rows.length === 0) return productsFromComparison;
-
-        const enriched = new Map<string, ProductInfo>();
-        for (const p of productsFromComparison) {
-          enriched.set(p.id, { ...p });
-        }
-        for (const row of searchProductRows.rows) {
-          const searchRowId = row['id'] != null ? String(row['id']) : '';
-          const spId = String(row['product_id'] || '');
-          const spName = String(row['product_name'] || row['name'] || '');
-          if (!searchRowId && !spId && !spName) continue;
-          const key = searchRowId || spId || spName;
-          if (enriched.has(key)) {
-            const existing = enriched.get(key)!;
-            if (!existing.url && row['product_url']) existing.url = String(row['product_url']);
-            if (!existing.source && row['product_source']) existing.source = String(row['product_source']);
-            if (!existing.price && row['price']) existing.price = String(row['price']);
-            if (!existing.description && row['description']) existing.description = String(row['description']);
-            if (!existing.imageUrl && row['picture']) {
-              try {
-                const pics = row['picture'];
-                if (typeof pics === 'string') {
-                  const parsed = JSON.parse(pics);
-                  existing.imageUrl = Array.isArray(parsed) ? parsed[0] : parsed;
-                } else if (Array.isArray(pics)) {
-                  existing.imageUrl = (pics as unknown[])[0] as string;
-                }
-              } catch { /* ignore */ }
-            }
-          } else {
-            let imageUrl: string | undefined;
-            if (row['picture']) {
-              try {
-                const pics = row['picture'];
-                if (typeof pics === 'string') {
-                  const parsed = JSON.parse(pics);
-                  imageUrl = Array.isArray(parsed) ? parsed[0] : parsed;
-                } else if (Array.isArray(pics)) {
-                  imageUrl = (pics as unknown[])[0] as string;
-                }
-              } catch { /* ignore */ }
-            }
-            enriched.set(key, {
-              id: key,
-              name: spName || key,
-              url: row['product_url'] ? String(row['product_url']) : undefined,
-              source: row['product_source'] ? String(row['product_source']) : undefined,
-              price: row['price'] ? String(row['price']) : undefined,
-              description: row['description'] ? String(row['description']) : undefined,
-              imageUrl,
-            });
-          }
-        }
-        return Array.from(enriched.values());
-      } catch (err) {
-        console.warn(`[Pipeline ${sessionIdForDb}] 补充商品详情失败:`, err);
-        return productsFromComparison;
-      }
-    }
-
-    // 方案1：从模块4 API 响应提取
-    if (module4Result && module4Result.allComparisonResults.length > 0) {
-      console.log(`[Pipeline ${sessionId}] 模块4返回 ${module4Result.allComparisonResults.length} 条比对结果`);
-      comparisons = mapComparisonsFromApi(module4Result.allComparisonResults);
-
-      const productMap = new Map<string, ProductInfo>();
-      for (const comp of comparisons) {
-        if (!productMap.has(comp.productId)) {
-          productMap.set(comp.productId, { id: comp.productId, name: comp.productName });
-        }
-      }
-      products = Array.from(productMap.values());
-
-      // 补充商品详情（图片、URL、描述等）
-      if (module1Result.dbRecordId && module1Result.dbRecordId > 0) {
-        products = await enrichProductsFromDb(products, sessionId, module1Result.dbRecordId);
-      }
-
-      console.log(`[Pipeline ${sessionId}] 从模块4响应提取 ${products.length} 个商品和 ${comparisons.length} 个比对结果`);
-
+    if (comparisons.length === 0) {
+      const msg = finalArtifacts?.errorMessage || '终轮补跑未返回可用的比对数据';
       stepTimings['step6'] = Date.now() - step6Start;
-      await updateStepStatus(sessionId, 6, 'completed');
-    } else {
-      // 方案2：模块4 API 无数据时，从 PostgreSQL 数据库读取比对结果
-      console.log(`[Pipeline ${sessionId}] 模块4 API 无比对数据，尝试从数据库恢复比对结果...`);
-
-      try {
-        const dbComparisonRunId = module4Result?.claimCompareRunId || 0;
-        let dbResults: unknown[] = [];
-        let recoveredDbComparisonRunId = dbComparisonRunId;
-
-        if (dbComparisonRunId > 0) {
-          const rows = await pgQuery<Record<string, unknown>>(
-            `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
-            [dbComparisonRunId],
-          );
-          dbResults = rows.rows;
-        } else if (module1Result.dbRecordId && module1Result.dbRecordId > 0) {
-          const runRows = await pgQuery<Record<string, unknown>>(
-            `SELECT id
-             FROM claim_compare_runs
-             WHERE patent_record_id = $1
-               AND analysis_session_id = $2
-             ORDER BY id DESC
-             LIMIT 1`,
-            [module1Result.dbRecordId, sessionId],
-          );
-          if (runRows.rows.length > 0) {
-            const runId = runRows.rows[0].id as number;
-            recoveredDbComparisonRunId = runId;
-            const resultRows = await pgQuery<Record<string, unknown>>(
-              `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
-              [runId],
-            );
-            dbResults = resultRows.rows;
-          }
-        }
-
-        if (dbResults.length === 0 && module1Result.dbRecordId && module1Result.dbRecordId > 0) {
-          const fallbackRunRows = await pgQuery<Record<string, unknown>>(
-            `SELECT r.id
-             FROM claim_compare_runs r
-             WHERE r.patent_record_id = $1
-               AND r.analysis_session_id = $2
-               AND EXISTS (
-                 SELECT 1
-                 FROM claim_compare_results rr
-                 WHERE rr.claim_compare_run_id = r.id
-               )
-             ORDER BY r.id DESC
-             LIMIT 1`,
-            [module1Result.dbRecordId, sessionId],
-          );
-          if (fallbackRunRows.rows.length > 0) {
-            const fallbackRunId = fallbackRunRows.rows[0].id as number;
-            const fallbackResultRows = await pgQuery<Record<string, unknown>>(
-              `SELECT * FROM claim_compare_results WHERE claim_compare_run_id = $1 ORDER BY id ASC`,
-              [fallbackRunId],
-            );
-            if (fallbackResultRows.rows.length > 0) {
-              recoveredDbComparisonRunId = fallbackRunId;
-              dbResults = fallbackResultRows.rows;
-              if (module4Result) {
-                module4Result.claimCompareRunId = fallbackRunId;
-              }
-              await updateResults(sessionId, {
-                claimCompareRunId: fallbackRunId,
-              });
-              console.warn(
-                `[Pipeline ${sessionId}] 模块4结果回退到最新有明细的 claim_compare_run_id=${fallbackRunId}，原始 run_id=${dbComparisonRunId || 'none'}`,
-              );
-            }
-          }
-        }
-
-        if (dbResults.length > 0) {
-          console.log(
-            `[Pipeline ${sessionId}] 从数据库读取到 ${dbResults.length} 条比对结果 `
-            + `(claim_compare_run_id=${recoveredDbComparisonRunId || 'unknown'})`,
-          );
-
-          // 将数据库行按商品分组转换为嵌套格式，再用 mapComparisonsFromApi 映射
-          const grouped = groupDbRowsByProduct(dbResults);
-          comparisons = mapComparisonsFromApi(grouped);
-
-          const productMap = new Map<string, ProductInfo>();
-          for (const comp of comparisons) {
-            if (!productMap.has(comp.productId)) {
-              productMap.set(comp.productId, { id: comp.productId, name: comp.productName });
-            }
-          }
-          products = Array.from(productMap.values());
-
-          // 补充商品详情（图片、URL、描述等）
-          if (module1Result.dbRecordId && module1Result.dbRecordId > 0) {
-            products = await enrichProductsFromDb(products, sessionId, module1Result.dbRecordId);
-          }
-
-          console.log(`[Pipeline ${sessionId}] 从数据库恢复 ${products.length} 个商品和 ${comparisons.length} 个比对结果`);
-
-          stepTimings['step6'] = Date.now() - step6Start;
-          await updateStepStatus(sessionId, 6, 'completed');
-        } else {
-          const msg = module4Error || module4Result?.resultSummary || '模块4未返回可用的比对数据，数据库中也无比对结果';
-          console.warn(`[Pipeline ${sessionId}] ${msg}`);
-          stepTimings['step6'] = Date.now() - step6Start;
-          await updateStepStatus(sessionId, 6, 'error', msg);
-        }
-      } catch (dbError) {
-        const msg = module4Error || module4Result?.resultSummary || '模块4未返回可用的比对数据';
-        const errorMsg = dbError instanceof Error ? dbError.message : String(dbError);
-        console.warn(`[Pipeline ${sessionId}] ${msg}，数据库恢复失败: ${errorMsg}`);
-        stepTimings['step6'] = Date.now() - step6Start;
-        await updateStepStatus(sessionId, 6, 'error', `${msg}，数据库恢复失败: ${errorMsg}`);
-      }
+      await updateStepStatus(sessionId, 6, 'error', msg);
+      await updateSessionStatus(sessionId, 'error');
+      await updateResults(sessionId, {
+        products: initialArtifacts?.products ?? [],
+        comparisons: initialArtifacts?.comparisons ?? [],
+        claimCompareRunId: initialArtifacts?.claimCompareRunId,
+        initialClaimCompareRunId: initialArtifacts?.claimCompareRunId,
+        finalClaimCompareRunId: finalArtifacts?.claimCompareRunId,
+        resultsCompleteness: initialArtifacts?.comparisons.length ? 'partial' : undefined,
+        step5Phase: 'rerun',
+        partialAnalysisAvailable: Boolean(initialArtifacts?.comparisons.length),
+        module2Exception: module2Result?.exceptionType || module2Error,
+        module3Exception: module3Error,
+        module4Exception: msg,
+      });
+      return;
     }
+
+    stepTimings['step6'] = Date.now() - step6Start;
+    await updateStepStatus(sessionId, 6, 'completed');
 
     // ========== 汇总完成 ==========
     const totalTime = Date.now() - pipelineStart;
@@ -1364,9 +1817,15 @@ async function executePipeline(
       patent,
       products,
       comparisons,
+      claimCompareRunId: finalArtifacts?.claimCompareRunId,
+      initialClaimCompareRunId: initialArtifacts?.claimCompareRunId,
+      finalClaimCompareRunId: finalArtifacts?.claimCompareRunId,
+      resultsCompleteness: 'final',
+      step5Phase: 'completed',
+      partialAnalysisAvailable: Boolean(initialArtifacts?.comparisons.length),
       module2Exception: module2Result?.exceptionType || module2Error,
-      module3Exception: module3Result?.exceptionType || module3Error,
-      module4Exception: module4Result?.exceptionType || module4Error,
+      module3Exception: module3Error,
+      module4Exception: undefined,
     });
 
     // 输出性能摘要

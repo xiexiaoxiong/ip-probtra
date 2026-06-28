@@ -6,7 +6,8 @@
 // ============================================================
 
 import type { ClaimElementComparison } from '@/lib/types';
-import { MATCH_CONFIG } from '@/lib/types';
+import { SCORE_BAND_CONFIG, scoreToBand } from '@/lib/types';
+import { ClaimTokenHighlight } from '@/components/claim-token-highlight';
 import {
   Table,
   TableBody,
@@ -25,31 +26,28 @@ interface ClaimChartTableProps {
 }
 
 export function ClaimChartTable({ claimElements }: ClaimChartTableProps) {
-  const stats = {
-    matching: claimElements.filter((e) => e.status === 'matching').length,
-    not_matching: claimElements.filter((e) => e.status === 'not_matching').length,
-    uncertain: claimElements.filter((e) => e.status === 'uncertain').length,
-    total: claimElements.length,
-  };
+  const normalizedElements = claimElements.map((element) => {
+    const similarityScore = Number.isFinite(element.similarityScore) ? element.similarityScore : 0;
+    const scoreBand = SCORE_BAND_CONFIG[element.scoreBand]
+      ? element.scoreBand
+      : scoreToBand(similarityScore, {
+          zeroedByMismatch: element.scoreDetail?.zeroedByMismatch,
+          matchedEffectiveLength: element.scoreDetail?.matchedEffectiveLength,
+          totalEffectiveLength: element.scoreDetail?.effectiveLength,
+        });
+    return {
+      ...element,
+      similarityScore,
+      scoreBand,
+      evidenceImages: Array.isArray(element.evidenceImages)
+        ? element.evidenceImages.filter((img): img is string => typeof img === 'string' && img.trim().length > 0)
+        : [],
+      tokenUnits: Array.isArray(element.tokenUnits) ? element.tokenUnits : [],
+    };
+  });
 
   return (
     <div className="space-y-4">
-      {/* 统计概要 */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-lg border bg-red-50/50 p-3 text-center dark:bg-red-950/20">
-          <div className="text-2xl font-bold text-red-700">{stats.matching}</div>
-          <div className="text-xs text-red-600">相同/等同</div>
-        </div>
-        <div className="rounded-lg border bg-amber-50/50 p-3 text-center dark:bg-amber-950/20">
-          <div className="text-2xl font-bold text-amber-700">{stats.uncertain}</div>
-          <div className="text-xs text-amber-600">不确定</div>
-        </div>
-        <div className="rounded-lg border bg-green-50/50 p-3 text-center dark:bg-green-950/20">
-          <div className="text-2xl font-bold text-green-700">{stats.not_matching}</div>
-          <div className="text-xs text-green-600">不相同</div>
-        </div>
-      </div>
-
       {/* 比对表 */}
       <div className="rounded-lg border overflow-hidden">
         <Table>
@@ -62,7 +60,8 @@ export function ClaimChartTable({ claimElements }: ClaimChartTableProps) {
                   特征内容
                 </div>
               </TableHead>
-              <TableHead className="w-[80px] text-center">比对结论</TableHead>
+              <TableHead className="w-[80px] text-center">状态</TableHead>
+              <TableHead className="w-[120px] text-center">得分</TableHead>
               <TableHead className="w-[140px] text-center">
                 <div className="flex items-center gap-1.5 justify-center">
                   <ImageIcon className="h-3.5 w-3.5" />
@@ -73,8 +72,8 @@ export function ClaimChartTable({ claimElements }: ClaimChartTableProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {claimElements.map((element, index) => {
-              const matchConfig = MATCH_CONFIG[element.status];
+            {normalizedElements.map((element, index) => {
+              const matchConfig = SCORE_BAND_CONFIG[element.scoreBand];
               const featureId = element.featureId || `${index + 1}`;
               const evidenceImages = element.evidenceImages || [];
 
@@ -84,7 +83,12 @@ export function ClaimChartTable({ claimElements }: ClaimChartTableProps) {
                     <span className="text-sm font-mono font-medium">{featureId}</span>
                   </TableCell>
                   <TableCell className="align-top py-3">
-                    <div className="text-sm whitespace-normal break-words">{element.claimElement}</div>
+                    <ClaimTokenHighlight
+                      text={element.claimElement}
+                      tokenUnits={element.tokenUnits}
+                      scoreBand={element.scoreBand}
+                      zeroedByMismatch={element.scoreDetail?.zeroedByMismatch}
+                    />
                   </TableCell>
                   <TableCell className="text-center align-top py-3">
                     <Badge
@@ -93,6 +97,9 @@ export function ClaimChartTable({ claimElements }: ClaimChartTableProps) {
                     >
                       {matchConfig.label}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-center align-top py-3">
+                    <div className="text-sm font-semibold">{element.similarityScore.toFixed(2)}</div>
                   </TableCell>
                   <TableCell className="align-top py-3">
                     {evidenceImages.length > 0 ? (
@@ -135,9 +142,10 @@ export function ClaimChartTable({ claimElements }: ClaimChartTableProps) {
       <div className="rounded-lg bg-muted/30 p-4 text-xs text-muted-foreground space-y-1">
         <p className="font-semibold">比对说明</p>
         <ul className="list-disc pl-4 space-y-0.5">
-          <li><strong>相同/等同</strong>：商品技术特征与专利权利要求要素在字面或等同意义上匹配</li>
-          <li><strong>不相同</strong>：商品技术特征与专利权利要求要素存在实质差异</li>
-          <li><strong>不确定</strong>：基于现有信息无法做出明确判断，需进一步人工审查</li>
+          <li><strong>绿色底线</strong>：该最小单元已被明确确认相同</li>
+          <li><strong>黄色底线</strong>：该最小单元仍待确认</li>
+          <li><strong>红色底线</strong>：该最小单元已被明确确认不相同</li>
+          <li><strong>得分规则</strong>：按有效字数/单词占所属 claim 的比例累计；若存在明确不相同，该 claim 直接归零</li>
         </ul>
         <p className="mt-2 text-muted-foreground/70">
           注意：本系统仅提供技术特征比对的事实标注，不构成法律结论。所有判断结果均可追溯至专利原文与商品原始描述。

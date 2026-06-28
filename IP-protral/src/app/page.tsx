@@ -168,8 +168,11 @@ export default function HomePage() {
   const keywordPromptVisible =
     isWaitingForKeywordInput
     && (keywordConfirmation?.status === 'timed_wait' || keywordConfirmation?.status === 'editing');
+  const hasPartialProgress = steps.some((step) => step.status === 'partial');
   const pageTitle = isCompleted
     ? '分析完成'
+    : hasPartialProgress
+      ? '部分结果已生成'
     : isWaitingForKeywordInput
       ? '等待补充关键词'
       : isAnalyzing
@@ -177,6 +180,8 @@ export default function HomePage() {
         : '分析中断';
   const pageDescription = isCompleted
     ? '所有模块已完成，请查看分析结果'
+    : hasPartialProgress
+      ? '系统已基于当前商品完成首轮分析，后台会继续检索并自动补跑全量分析'
     : isWaitingForKeywordInput
       ? keywordConfirmation?.status === 'editing'
         ? '步骤3已暂停，请补充关键词并确认后继续检索'
@@ -285,6 +290,15 @@ export default function HomePage() {
             <div className="max-w-xl mx-auto">
               <AnalysisProgress steps={steps} />
             </div>
+
+            {results?.resultsCompleteness === 'partial' && (
+              <Alert className="max-w-xl mx-auto border-sky-200 bg-sky-50/70 text-sky-900 dark:border-sky-800 dark:bg-sky-950/20 dark:text-sky-100">
+                <Clock3 className="h-4 w-4" />
+                <AlertDescription>
+                  已基于当前检索到的商品生成首轮分析结果，后台仍在继续检索并会自动触发全量补跑。
+                </AlertDescription>
+              </Alert>
+            )}
 
             {keywordPromptVisible && (
               <div className="max-w-xl mx-auto rounded-lg border border-amber-200 bg-amber-50/70 p-4 space-y-4 dark:border-amber-800 dark:bg-amber-950/20">

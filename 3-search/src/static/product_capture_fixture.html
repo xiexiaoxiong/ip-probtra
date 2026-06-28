@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>商品页抓取原型测试页</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7fb;
+      color: #1f2937;
+    }
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+      align-items: start;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 20px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+      overflow: hidden;
+    }
+    .gallery {
+      padding: 24px;
+    }
+    .main-image {
+      width: 100%;
+      border-radius: 16px;
+      display: block;
+      margin-bottom: 16px;
+    }
+    .thumbs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .thumbs img {
+      width: 100%;
+      border-radius: 12px;
+      display: block;
+    }
+    .info {
+      padding: 28px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4338ca;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 36px;
+      line-height: 1.25;
+    }
+    .subtitle {
+      margin: 0 0 16px;
+      color: #4b5563;
+      font-size: 17px;
+      line-height: 1.6;
+    }
+    .price {
+      margin: 0 0 18px;
+      font-size: 30px;
+      color: #dc2626;
+      font-weight: 700;
+    }
+    .feature-list {
+      padding-left: 18px;
+      line-height: 1.8;
+      color: #334155;
+    }
+    .detail-grid {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+    .detail-box {
+      padding: 18px;
+      background: #f8fafc;
+      border-radius: 16px;
+    }
+    .banner {
+      height: 260px;
+      margin-top: 32px;
+      border-radius: 24px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='260' viewBox='0 0 1200 260'%3E%3Crect width='1200' height='260' fill='%230f172a'/%3E%3Ccircle cx='170' cy='130' r='92' fill='%233b82f6' fill-opacity='0.35'/%3E%3Ccircle cx='1040' cy='95' r='120' fill='%2322c55e' fill-opacity='0.35'/%3E%3Ctext x='60' y='120' fill='white' font-size='44' font-family='Arial'%3E首发限时活动%3C/text%3E%3Ctext x='60' y='182' fill='%23fde047' font-size='52' font-family='Arial' font-weight='700'%3E可视化训练数据一体采集%3C/text%3E%3C/svg%3E");
+      background-size: cover;
+      background-position: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="card gallery">
+        <img
+          class="main-image"
+          alt="智能阻力训练器主图"
+          src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='720' height='720' viewBox='0 0 720 720'%3E%3Crect width='720' height='720' rx='36' fill='%23dbeafe'/%3E%3Crect x='210' y='126' width='300' height='468' rx='42' fill='%231e3a8a'/%3E%3Crect x='262' y='176' width='196' height='236' rx='22' fill='white'/%3E%3Ctext x='190' y='500' fill='%230f172a' font-size='44' font-family='Arial'%3E智能阻力训练器%3C/text%3E%3Ctext x='212' y='560' fill='%23dc2626' font-size='68' font-family='Arial' font-weight='700'%3E新品上市%3C/text%3E%3C/svg%3E"
+        />
+        <div class="thumbs">
+          <img
+            alt="训练器侧面图"
+            src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Crect width='220' height='220' rx='24' fill='%23e2e8f0'/%3E%3Cpath d='M72 40h46c19 0 34 15 34 34v78c0 15-11 28-26 31l-54 11V40z' fill='%230f172a'/%3E%3C/svg%3E"
+          />
+          <img
+            alt="训练器握把图"
+            src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Crect width='220' height='220' rx='24' fill='%23ede9fe'/%3E%3Crect x='70' y='52' width='82' height='116' rx='24' fill='%237c3aed'/%3E%3Crect x='88' y='40' width='46' height='22' rx='10' fill='%235b21b6'/%3E%3C/svg%3E"
+          />
+          <img
+            alt="训练器传感器图"
+            src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Crect width='220' height='220' rx='24' fill='%23dcfce7'/%3E%3Ccircle cx='110' cy='110' r='54' fill='%2316a34a'/%3E%3Ccircle cx='110' cy='110' r='24' fill='white'/%3E%3C/svg%3E"
+          />
+        </div>
+      </div>
+      <div class="card info">
+        <div class="badge">可测试商品页</div>
+        <h1 class="product-title">智能阻力训练器 Pro Max</h1>
+        <p class="subtitle">
+          打开页面后可以同时提取主标题、卖点说明、价格、规格文字，并对主图与活动横幅做截图留档。
+        </p>
+        <p class="price">活动价: ¥ 1,699</p>
+        <ul class="feature-list">
+          <li>支持可视化力量曲线分析</li>
+          <li>内置惯性传感器与握力反馈模块</li>
+          <li>训练数据支持蓝牙实时同步</li>
+        </ul>
+        <div class="detail-grid">
+          <div class="detail-box">
+            <strong>规格参数</strong>
+            <p>重量 2.4kg，续航 18 小时，铝合金外壳。</p>
+          </div>
+          <div class="detail-box">
+            <strong>适用人群</strong>
+            <p>家庭健身、康复训练、私教课程示范。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="banner" aria-label="活动横幅"></section>
+  </main>
+</body>
+</html>

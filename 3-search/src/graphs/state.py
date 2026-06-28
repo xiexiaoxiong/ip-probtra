@@ -70,12 +70,18 @@ class GetKeywordsOutput(BaseModel):
 
 class CozeSearchInput(BaseModel):
     """Coze搜索节点的输入"""
+    patent_record_id: int = Field(..., description="专利解析主记录ID")
+    analysis_session_id: str = Field(default="", description="分析会话ID")
     keywords: List[str] = Field(default=[], description="关键词列表")
+    product_dataset_id: str = Field(default="", description="数据集ID")
+    retrieval_start_time: str = Field(default="", description="检索开始时间")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
 
 
 class CozeSearchOutput(BaseModel):
     """Coze搜索节点的输出"""
     products: List[Dict[str, Any]] = Field(default=[], description="商品列表")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
     total_products_count: int = Field(default=0, description="商品总数")
     successful_keywords_count: int = Field(default=0, description="成功检索的关键词数量")
     failed_keywords_count: int = Field(default=0, description="失败的关键词数量")
@@ -90,6 +96,7 @@ class SaveResultsInput(BaseModel):
     products: List[Dict[str, Any]] = Field(default=[], description="商品列表")
     product_dataset_id: str = Field(default="", description="数据集ID")
     retrieval_start_time: str = Field(default="", description="检索开始时间")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
     successful_keywords_count: int = Field(default=0, description="成功检索的关键词数量")
     failed_keywords_count: int = Field(default=0, description="失败的关键词数量")
     is_complete: bool = Field(default=True, description="检索是否完整")
@@ -138,12 +145,18 @@ class GetKeywordsWrapperOutput(BaseModel):
 
 class CozeSearchWrapperInput(BaseModel):
     """Coze搜索包装节点的输入"""
+    patent_record_id: int = Field(..., description="专利解析主记录ID")
+    analysis_session_id: str = Field(default="", description="分析会话ID")
     keywords: List[str] = Field(default=[], description="关键词列表")
+    product_dataset_id: str = Field(default="", description="数据集ID")
+    retrieval_start_time: str = Field(default="", description="检索开始时间")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
 
 
 class CozeSearchWrapperOutput(BaseModel):
     """Coze搜索包装节点的输出"""
     products: List[Dict[str, Any]] = Field(default=[], description="商品列表")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
     total_products_count: int = Field(default=0, description="商品总数")
     successful_keywords_count: int = Field(default=0, description="成功检索的关键词数量")
     failed_keywords_count: int = Field(default=0, description="失败的关键词数量")
@@ -156,6 +169,7 @@ class SaveResultsWrapperInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     products: List[Dict[str, Any]] = Field(default=[], description="商品列表")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
     product_dataset_id: str = Field(default="", description="数据集ID")
     retrieval_start_time: str = Field(default="", description="检索开始时间")
     successful_keywords_count: int = Field(default=0, description="成功检索的关键词数量")

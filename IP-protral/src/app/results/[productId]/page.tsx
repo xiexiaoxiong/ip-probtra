@@ -7,8 +7,8 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import type { AnalysisSession } from '@/lib/types';
-import { VERDICT_CONFIG } from '@/lib/types';
+import type { AnalysisSession, ClaimElementComparison, ClaimScoreSummary, ProductComparison, ProductInfo, ScoreBand } from '@/lib/types';
+import { PRODUCT_RISK_CONFIG, SCORE_BAND_CONFIG, scoreToBand, scoreToRiskLevel } from '@/lib/types';
 import { ClaimChartTable } from '@/components/claim-chart-table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -48,7 +48,7 @@ function ProductDetailContent() {
   const router = useRouter();
 
   const sessionId = searchParams.get('session') || '';
-  const productId = params.productId as string;
+  const productId = decodeURIComponent(String(params.productId || ''));
 
   const [session, setSession] = useState<AnalysisSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,10 +109,10 @@ function ProductDetailContent() {
     );
   }
 
-  const products = session.results?.products || [];
-  const comparisons = session.results?.comparisons || [];
-  const product = products.find((p) => p.id === productId);
-  const comparison = comparisons.find((c) => c.productId === productId);
+  const products = Array.isArray(session.results?.products) ? session.results.products : [];
+  const comparisons = Array.isArray(session.results?.comparisons) ? session.results.comparisons : [];
+  const product = findProduct(products, productId);
+  const comparison = findComparison(comparisons, productId, product);
   const feishuUrl = session.results?.feishuUrl;
   const patentTitle = session.results?.patent?.title || '专利文档';
 
@@ -130,35 +130,31 @@ function ProductDetailContent() {
     );
   }
 
-  function getProductVerdict() {
-    if (!comparison || comparison.claimElements.length === 0) return 'uncertain';
-    
-    const claimGroups = new Map<string, typeof comparison.claimElements>();
-    for (const el of comparison.claimElements) {
-      const claimId = el.patentReference || 'unknown';
-      if (!claimGroups.has(claimId)) claimGroups.set(claimId, []);
-      claimGroups.get(claimId)!.push(el);
-    }
-    
-    let hasAnyClaimAllMatching = false;
-    let allClaimsHaveNotMatching = true;
-    
-    for (const [, claimElements] of claimGroups) {
-      const hasNotMatching = claimElements.some(e => e.status === 'not_matching');
-      const allMatching = claimElements.every(e => e.status === 'matching');
-      if (allMatching) hasAnyClaimAllMatching = true;
-      if (!hasNotMatching) allClaimsHaveNotMatching = false;
-    }
-    
-    if (hasAnyClaimAllMatching) return 'infringement_likely';
-    if (allClaimsHaveNotMatching) return 'no_infringement';
-    return 'uncertain';
-  }
-
-  const productVerdict = getProductVerdict();
-  const productVerdictConfig = VERDICT_CONFIG[productVerdict];
+  const productScore = comparison?.productSimilarityScore ?? 0;
+  const claimScores = normalizeClaimScores(comparison?.claimScores);
+  const claimElements = normalizeClaimElements(comparison?.claimElements);
+  const productZeroed = claimScores.some((c) => c.zeroedByMismatch);
+  const productMatched = claimScores.reduce((s, c) => s + (c.claimMatchedEffectiveLength ?? 0), 0);
+  const productTotal = claimScores.reduce((s, c) => s + (c.claimTotalEffectiveLength ?? 0), 0);
+  const productRiskLevel = comparison?.riskLevel
+    || scoreToRiskLevel(productScore, {
+      zeroedByMismatch: productZeroed,
+      matchedEffectiveLength: productMatched,
+      totalEffectiveLength: productTotal,
+    });
+  const productVerdictConfig = PRODUCT_RISK_CONFIG[productRiskLevel];
+  const productScoreBand = normalizeScoreBand(comparison?.productScoreBand, productScore, {
+    zeroedByMismatch: productZeroed,
+    matchedEffectiveLength: productMatched,
+    totalEffectiveLength: productTotal,
+  });
 
   const independentClaims = session.results?.patent?.independentClaims || [];
+  const sortedProducts = [...products].sort((a, b) => {
+    const scoreA = findComparison(comparisons, a.id, a)?.productSimilarityScore ?? -1;
+    const scoreB = findComparison(comparisons, b.id, b)?.productSimilarityScore ?? -1;
+    return scoreB - scoreA;
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -196,10 +192,10 @@ function ProductDetailContent() {
         <div className="rounded-lg border bg-background p-3">
           <div className="text-xs text-muted-foreground mb-2">切换商品:</div>
           <div className="flex gap-1.5 flex-wrap">
-            {products.map((p) => (
+            {sortedProducts.map((p) => (
               <Link
                 key={p.id}
-                href={`/results/${p.id}?session=${sessionId}`}
+                href={`/results/${encodeURIComponent(p.id)}?session=${encodeURIComponent(sessionId)}`}
                 className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
                   p.id === productId
                     ? 'bg-primary text-primary-foreground border-primary'
@@ -234,6 +230,18 @@ function ProductDetailContent() {
                       {productVerdictConfig.label}
                     </Badge>
                   )}
+                  {comparison && (
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span>商品总分: {productScore.toFixed(2)}</span>
+                      <span>分段: {SCORE_BAND_CONFIG[productScoreBand].label}</span>
+                      {comparison.highestScoringClaimId && (
+                        <span>最高分权利要求: {comparison.highestScoringClaimId}</span>
+                      )}
+                      {comparison.isLegacyScore && (
+                        <span>旧版评分</span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {product.description && (
                   <p className="text-sm text-muted-foreground line-clamp-3">{product.description}</p>
@@ -248,6 +256,27 @@ function ProductDetailContent() {
                     </a>
                   )}
                 </div>
+                {claimScores.length > 0 && (
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="flex flex-wrap gap-2">
+                      {claimScores.map((item) => {
+                        const config = SCORE_BAND_CONFIG[normalizeScoreBand(item.scoreBand, item.similarityScore)];
+                        return (
+                          <div key={item.claimId} className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+                            <span className="text-muted-foreground">权利要求 {item.claimId}</span>
+                            <span className="font-semibold">{item.similarityScore.toFixed(2)}</span>
+                            <Badge variant="outline" className={`${config.bgColor} ${config.color} border text-[11px]`}>
+                              {config.label}
+                            </Badge>
+                            {item.zeroedByMismatch && (
+                              <span className="text-red-600">已归零</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -285,9 +314,9 @@ function ProductDetailContent() {
         )}
 
         {/* Claim Chart 比对表 */}
-        {comparison && comparison.claimElements.length > 0 ? (
+        {comparison && claimElements.length > 0 ? (
           <ClaimChartTable
-            claimElements={comparison.claimElements}
+            claimElements={claimElements}
             patentTitle={patentTitle}
             productName={product.name}
           />
@@ -302,4 +331,70 @@ function ProductDetailContent() {
       </main>
     </div>
   );
+}
+
+function findProduct(products: ProductInfo[], productId: string): ProductInfo | undefined {
+  return products.find((p) => String(p.id) === productId);
+}
+
+function findComparison(
+  comparisons: ProductComparison[],
+  productId: string,
+  product?: ProductInfo,
+): ProductComparison | undefined {
+  return comparisons.find((c) => String(c.productId) === productId)
+    || (product ? comparisons.find((c) => c.productName === product.name) : undefined);
+}
+
+function normalizeScoreBand(
+  scoreBand: string | undefined,
+  score: number,
+  options?: { zeroedByMismatch?: boolean; matchedEffectiveLength?: number; totalEffectiveLength?: number }
+): ScoreBand {
+  const fallback = scoreToBand(score, options);
+  if (!scoreBand) return fallback;
+  return SCORE_BAND_CONFIG[scoreBand as ScoreBand] ? (scoreBand as ScoreBand) : fallback;
+}
+
+function normalizeClaimScores(claimScores: ClaimScoreSummary[] | undefined): ClaimScoreSummary[] {
+  if (!Array.isArray(claimScores)) return [];
+  return claimScores
+    .filter((item): item is ClaimScoreSummary => Boolean(item))
+    .map((item) => {
+      const similarityScore = Number.isFinite(item.similarityScore) ? item.similarityScore : 0;
+      return {
+        ...item,
+        similarityScore,
+        scoreBand: normalizeScoreBand(item.scoreBand, similarityScore, {
+          zeroedByMismatch: item.zeroedByMismatch,
+          matchedEffectiveLength: item.claimMatchedEffectiveLength,
+          totalEffectiveLength: item.claimTotalEffectiveLength,
+        }),
+      };
+    });
+}
+
+function normalizeClaimElements(claimElements: ClaimElementComparison[] | undefined): ClaimElementComparison[] {
+  if (!Array.isArray(claimElements)) return [];
+  return claimElements
+    .filter((item): item is ClaimElementComparison => Boolean(item))
+    .map((item) => {
+      const similarityScore = Number.isFinite(item.similarityScore) ? item.similarityScore : 0;
+      return {
+        ...item,
+        claimElement: item.claimElement || '',
+        productFeature: item.productFeature || '',
+        reasoning: item.reasoning || '',
+        similarityScore,
+        scoreBand: normalizeScoreBand(item.scoreBand, similarityScore, {
+          zeroedByMismatch: item.scoreDetail?.zeroedByMismatch,
+          matchedEffectiveLength: item.scoreDetail?.matchedEffectiveLength,
+          totalEffectiveLength: item.scoreDetail?.effectiveLength,
+        }),
+        evidenceImages: Array.isArray(item.evidenceImages)
+          ? item.evidenceImages.filter((img): img is string => typeof img === 'string' && img.trim().length > 0)
+          : [],
+        tokenUnits: Array.isArray(item.tokenUnits) ? item.tokenUnits : [],
+      };
+    });
 }

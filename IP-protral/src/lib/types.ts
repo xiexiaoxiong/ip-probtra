@@ -6,13 +6,15 @@
 export type AnalysisStatus = 'idle' | 'running' | 'completed' | 'error';
 
 /** 单个步骤的状态 */
-export type StepStatus = 'pending' | 'running' | 'waiting_input' | 'completed' | 'error';
+export type StepStatus = 'pending' | 'running' | 'waiting_input' | 'partial' | 'completed' | 'error';
 
-/** 比对结论状态 */
-export type MatchStatus = 'matching' | 'not_matching' | 'uncertain';
+/** 特征级分段标签 */
+export type ScoreBand = 'exact_match' | 'high_similarity' | 'medium_similarity' | 'low_similarity' | 'exact_mismatch' | 'uncertain';
 
-/** 整体侵权判定结果 */
-export type InfringementVerdict = 'infringement_likely' | 'uncertain' | 'no_infringement';
+/** 商品级风险标签 */
+export type ProductRiskLevel = 'high_risk' | 'medium_risk' | 'low_risk' | 'clear_low_risk';
+
+export type ClaimTokenStatus = 'match' | 'mismatch' | 'uncertain';
 
 /** 输入类型 */
 export type InputType = 'url' | 'file' | 'text';
@@ -70,6 +72,29 @@ export interface ProductInfo {
   description?: string;
   source?: string;
   price?: string;
+  brand?: string;
+  manufacturer?: string;
+  company?: string;
+  updatedAt?: string;
+}
+
+export interface ClaimTokenUnit {
+  text: string;
+  normalizedText?: string;
+  status: ClaimTokenStatus;
+  evidence?: string;
+  reason?: string;
+  start?: number;
+  end?: number;
+  effectiveLength?: number;
+}
+
+export interface ClaimElementScoreDetail {
+  fullScore: number;
+  awardedScore: number;
+  effectiveLength: number;
+  matchedEffectiveLength: number;
+  zeroedByMismatch?: boolean;
 }
 
 /** 权利要求要素比对（模块4输出 - 单条） */
@@ -78,7 +103,8 @@ export interface ClaimElementComparison {
   featureId?: string;
   claimElement: string;
   productFeature: string;
-  status: MatchStatus;
+  similarityScore: number;
+  scoreBand: ScoreBand;
   reasoning: string;
   /** 溯源：专利原文引用 */
   patentReference?: string;
@@ -86,14 +112,32 @@ export interface ClaimElementComparison {
   productReference?: string;
   /** 证据图片：能体现该特征的商品图片URL列表 */
   evidenceImages?: string[];
+  scoreRationale?: string;
+  tokenUnits?: ClaimTokenUnit[];
+  scoreDetail?: ClaimElementScoreDetail;
+  isLegacyScore?: boolean;
+}
+
+export interface ClaimScoreSummary {
+  claimId: string;
+  similarityScore: number;
+  scoreBand: ScoreBand;
+  claimTotalEffectiveLength?: number;
+  claimMatchedEffectiveLength?: number;
+  zeroedByMismatch?: boolean;
 }
 
 /** 单个商品的比对结果（模块4输出） */
 export interface ProductComparison {
   productId: string;
   productName: string;
-  overallVerdict: InfringementVerdict;
+  productSimilarityScore: number;
+  productScoreBand: ScoreBand;
+  riskLevel: ProductRiskLevel;
   claimElements: ClaimElementComparison[];
+  claimScores: ClaimScoreSummary[];
+  highestScoringClaimId?: string;
+  isLegacyScore?: boolean;
   /** 比对依据的规则说明 */
   ruleApplied?: string;
 }
@@ -128,10 +172,19 @@ export interface AnalysisResults {
   module2RunId?: string;
   module3RunId?: string;
   module4RunId?: string;
+  module3TaskStatus?: 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | 'timeout';
+  module3TaskStartedAt?: string;
+  module3TaskFinishedAt?: string;
+  module3TaskError?: string;
   module4TaskStatus?: 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | 'timeout';
   module4TaskStartedAt?: string;
   module4TaskFinishedAt?: string;
   module4TaskError?: string;
+  initialClaimCompareRunId?: number;
+  finalClaimCompareRunId?: number;
+  resultsCompleteness?: 'partial' | 'final';
+  step5Phase?: 'initial' | 'rerun' | 'completed';
+  partialAnalysisAvailable?: boolean;
   // 模块异常信息
   module2Exception?: string;
   module3Exception?: string;
@@ -299,16 +352,50 @@ export const INDUSTRY_LABELS: Record<IndustryType, string> = {
   general: '通用',
 };
 
-/** 侵权判定对应的展示配置 */
-export const VERDICT_CONFIG: Record<InfringementVerdict, { label: string; color: string; bgColor: string }> = {
-  infringement_likely: { label: '侵权风险高', color: 'text-red-700', bgColor: 'bg-red-50 border-red-200' },
-  uncertain: { label: '待进一步分析', color: 'text-amber-700', bgColor: 'bg-amber-50 border-amber-200' },
-  no_infringement: { label: '侵权风险低', color: 'text-green-700', bgColor: 'bg-green-50 border-green-200' },
+/** 分值分段展示配置 */
+export const SCORE_BAND_CONFIG: Record<ScoreBand, { label: string; color: string; bgColor: string }> = {
+  exact_match: { label: '高分命中', color: 'text-green-700', bgColor: 'bg-green-50' },
+  high_similarity: { label: '高分命中', color: 'text-green-700', bgColor: 'bg-green-50' },
+  medium_similarity: { label: '部分命中', color: 'text-amber-700', bgColor: 'bg-amber-50' },
+  low_similarity: { label: '低分命中', color: 'text-red-700', bgColor: 'bg-red-50' },
+  exact_mismatch: { label: '明确不相同', color: 'text-red-700', bgColor: 'bg-red-50' },
+  uncertain: { label: '待确认', color: 'text-amber-700', bgColor: 'bg-amber-50' },
 };
 
-/** 比对状态对应的展示配置 */
-export const MATCH_CONFIG: Record<MatchStatus, { label: string; color: string; bgColor: string }> = {
-  matching: { label: '相同/等同', color: 'text-red-700', bgColor: 'bg-red-50' },
-  not_matching: { label: '不相同', color: 'text-green-700', bgColor: 'bg-green-50' },
-  uncertain: { label: '不确定', color: 'text-amber-700', bgColor: 'bg-amber-50' },
+/** 商品风险展示配置 */
+export const PRODUCT_RISK_CONFIG: Record<ProductRiskLevel, { label: string; color: string; bgColor: string }> = {
+  high_risk: { label: '高分命中', color: 'text-green-700', bgColor: 'bg-green-50 border-green-200' },
+  medium_risk: { label: '中风险候选', color: 'text-amber-700', bgColor: 'bg-amber-50 border-amber-200' },
+  low_risk: { label: '低分命中', color: 'text-red-700', bgColor: 'bg-red-50 border-red-200' },
+  clear_low_risk: { label: '明确不相同', color: 'text-red-700', bgColor: 'bg-red-50 border-red-200' },
 };
+
+export function scoreToBand(
+  score: number,
+  options?: { zeroedByMismatch?: boolean; matchedEffectiveLength?: number; totalEffectiveLength?: number }
+): ScoreBand {
+  const zeroed = options?.zeroedByMismatch ?? false;
+  const matched = options?.matchedEffectiveLength ?? 0;
+  const total = options?.totalEffectiveLength ?? 0;
+  // 1. 显式 mismatch 永远优先 → 红色"明确不相同"
+  if (zeroed) return 'exact_mismatch';
+  // 2. 没有任何命中、也没有 mismatch（信息不足） → 黄色"待确认"
+  if (total > 0 && matched === 0) return 'uncertain';
+  // 3. score=0 且 total=0（遗留数据）也按"待确认"处理
+  if (score <= 0) return 'uncertain';
+  if (score >= 100) return 'exact_match';
+  if (score > 70) return 'high_similarity';
+  if (score >= 30) return 'medium_similarity';
+  return 'low_similarity';
+}
+
+export function scoreToRiskLevel(
+  score: number,
+  options?: { zeroedByMismatch?: boolean; matchedEffectiveLength?: number; totalEffectiveLength?: number }
+): ProductRiskLevel {
+  const band = scoreToBand(score, options);
+  if (band === 'exact_match' || band === 'high_similarity') return 'high_risk';
+  if (band === 'medium_similarity' || band === 'uncertain') return 'medium_risk';
+  if (band === 'low_similarity') return 'low_risk';
+  return 'clear_low_risk';
+}
