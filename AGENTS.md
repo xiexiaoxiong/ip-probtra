@@ -40,7 +40,7 @@
   - 本地完整流程：`bash scripts/local_run.sh -m flow`
   - 单节点：`bash scripts/local_run.sh -m node -n node_name`
   - HTTP 服务：`bash scripts/http_run.sh -p <port>`
-- HTTP 端点来自各模块 `src/main.py`，通常包括 `/run`、`/stream_run`、`/run_node/{node}`、`/cancel/{run_id}`、`/health`、`/graph/inout_parameter`。
+- HTTP 端点来自各模块 `src/main.py`，通常包括 `/run`、`/stream_run`、`/node_run/{node_id}`、`/cancel/{run_id}`、`/health`、`/graph_parameter`。
 - LLM 兼容层：各 `src/main.py` 会从 `IP-protral/.env.local`、模块 `.env.local`、当前目录 `.env.local` 读取环境变量，并把 `LOCAL_LLM_*` 映射到 Coze SDK 所需变量；部分模块支持 BigModel 直连兜底。
 
 ### 前端 Portal
@@ -298,7 +298,7 @@ analyze_features
   - `matched_effective_length`
   - `claim_total_effective_length`
   - `zeroed_by_mismatch`
-- 当前目标口径：每个独立权利要求满分 100；待确认按有效字符/英文词比例得分；任一明确不相同会导致该独立权利要求归零；商品总分取各独立权利要求分数最高值。
+- 当前目标口径：全部技术特征共同分配 100 分；待确认按有效字符/英文词比例得分；所有特征得分相加得到商品总分；任一特征明确不相同则整个商品总分直接归零。
 
 数据库迁移：
 
@@ -400,15 +400,17 @@ analyze_features
 
 ## 当前进度判断
 
-基于 2026-06-28 代码阅读：
+基于 2026-06-28 代码阅读和本轮验证：
 
 - 账户管理已基本落地：存在 `auth` API、登录/注册/管理员页面、`users`/`auth_sessions` schema、middleware。
 - Portal 主存储已明显转向 Postgres：`analysis_sessions` 带 `user_id`，分析历史页存在。
 - 模块1已支持 PDF 文本提取、CN 专利元数据正则兜底、附图提取和 Postgres 保存。
 - 模块2通用/健身/家电三套代码存在，主输入已是 `patent_record_id` + `analysis_session_id`。
-- 模块3主流程可写 Postgres，另有 Playwright 商品页抓取原型和测试，但该原型尚未接入主流程。
-- 模块4已进入评分化和 token 高亮后期：state、model、Portal 类型和映射均出现评分字段；仍需以实际测试验证 LLM 输出、规则计分、前端展示是否完全一致。
-- 异步检索 + partial + 终轮补跑已有类型和编排字段，但需进一步通过运行测试确认完整闭环。
+- 模块3主流程可写 Postgres；Playwright 商品页抓取原型保留为独立实验/人工取证工具，不接入默认主流程。
+- 模块4评分化和 token 高亮链路已补脚本验证：token mismatch 会传导到特征、claim、商品归零；无 mismatch 时商品分按特征/claim 分相加。
+- 异步检索 + partial + 终轮补跑已有编排字段，并新增脚本测试覆盖首轮 partial 与终轮 final 结果字段。
+- Portal 结果列表、详情页和分数表已共用结果一致性 helper，并新增脚本测试覆盖排序、详情查找和导出前数据摘要口径。
+- 行业路由与关键词确认流程已抽出纯函数并补脚本测试。
 
 ## 当前工作树提示
 
@@ -444,16 +446,22 @@ analyze_features
 - 对 `3-search/tmp/`、`.next/`、`dist/`、`node_modules/`、各 `.venv/` 默认只读或忽略，除非任务明确要求。
 - 由于工作树已有用户改动，后续任何改动前先跑 `git status --short` 并读相关文件，不要覆盖未理解的变更。
 
-## 待完成工作
+## 已完成工作（2026-06-28 本轮）
 
-1. 跑通本地 PM2 或单模块联调，验证模块1-4接口与 Portal 编排实际一致。
-2. 为模块3异步检索、partial 结果、终轮模块4补跑补齐端到端测试。
-3. 验证模块4 token 级 LLM 输出、`review_analysis`、`apply_rules`、`claim_scoring.py` 的一致性。
-4. 确认 `claim_compare_results` 新增字段在实际数据库中都能自动迁移。
-5. 清理或更新仍称 `feishu_*` / `write_feishu_results` 但实际使用 Postgres 的命名或文档，避免误导。
-6. 将 `3-search` 商品页抓取原型是否接入主流程作为单独产品决策处理。
-7. 补充 Portal 结果页、详情页、报告导出的视觉和数据一致性测试。
-8. 为行业路由和关键词确认流程增加测试样例。
+1. 跑通本地 PM2 联调：5101-5106 后端模块 `/health` 与 `/graph_parameter` 均通过；Portal `/login` 可响应。
+2. 清理 5103/5104 旧 Python 监听进程，恢复 PM2 对模块2 fitness/electra 子服务的端口管理。
+3. 为模块3异步检索、partial 结果、终轮模块4补跑新增 `IP-protral/scripts/test-async-module3-module4.ts`。
+4. 为模块4 token/review/rules/scoring 一致性新增 `4-claim-chat/scripts/test_module4_scoring_pipeline.py`。
+5. 确认真实 Postgres `claim_compare_results` 已存在评分/token 新字段，类型与模块4自动迁移一致。
+6. 清理 Portal 与模块4入口文档中“飞书为主链路”的误导表述；当前主线明确为 Postgres + `analysis_session_id`。
+7. 决定 `3-search` 商品页抓取原型不接入默认主流程，保留为独立实验/人工取证工具，并在 `3-search/AGENTS.md` 写明进入主流程前置条件。
+8. 为 Portal 结果列表、详情页、导出前数据口径新增 `IP-protral/src/lib/results-consistency.ts` 和 `scripts/test-results-consistency.ts`。
+9. 为行业路由和关键词确认流程新增 `IP-protral/src/lib/industry-keyword-flow.ts` 和 `scripts/test-industry-keyword-flow.ts`。
+
+## 后续建议
+
+1. 用一份小型真实专利样本跑完整 `/api/analyze`，验证 LLM/搜索外部服务在当前凭证下的端到端耗时和结果质量。
+2. 若要把商品页抓取纳入主流程，先按 `3-search/AGENTS.md` 中的开关、超时、失败隔离、字段映射、回归测试要求做产品化设计。
 
 ## 会话决策日志
 
@@ -465,3 +473,10 @@ analyze_features
 - 记录运维决策：正式本地化部署优先使用根目录 `ecosystem.config.cjs` 和 `IP-protral/.env.local`，不要混用手工正式端口启动。
 - 记录安全协作决策：当前工作树已有大量用户改动，后续不得擅自回滚或清理。
 - 提交决策：`1-patent-analysis/.data/` 和 `3-search/tmp/` 是运行产物/浏览器缓存/临时截图，不纳入 Git；已加入根 `.gitignore`。
+- 评分口径修正：商品相似度不取最高权利要求分；应为所有特征得分相加，且任一特征明确不相同则商品总分为 0。
+- 本轮按 loop 完成 9 个任务：评分语义修正 + 用户列出的 8 个待完成事项。
+- 本地集成验证：PM2 启动 6 个后端模块和 Portal；`/health`、`/graph_parameter`、Portal `/login` 均通过。发现并清理 5103/5104 旧进程端口占用。
+- 接口事实修正：各 Python 模块真实 schema 路径是 `/graph_parameter`，不是旧文档中的 `/graph/inout_parameter`。
+- 新增测试脚本：`IP-protral/scripts/test-async-module3-module4.ts`、`scripts/test-results-consistency.ts`、`scripts/test-industry-keyword-flow.ts`、`4-claim-chat/scripts/test_module4_scoring_pipeline.py`。
+- 模块3商品页抓取产品决策：暂不接入默认主流程；原型测试需宿主权限运行 Playwright，提权后 `tests/test_product_page_capture.py` 8/8 通过。
+- 数据库验证：真实 `claim_compare_results` 已有 `similarity_score`、`score_band`、`feature_full_score`、`feature_awarded_score`、`feature_effective_length`、`matched_effective_length`、`claim_total_effective_length`、`zeroed_by_mismatch`、`token_units`。

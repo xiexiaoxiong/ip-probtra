@@ -50,11 +50,11 @@
 │   │   └── use-analysis.ts              # 轮询分析流 Hook
 │   └── lib/
 │       ├── types.ts                     # 核心类型定义 + 行业路由协议 (6步骤)
-│       ├── workflow-client.ts           # 扣子编程项目 /run 端点调用 + 行业路由
+│       ├── workflow-client.ts           # 本地 510x /run 端点调用 + 行业路由
 │       ├── feishu-client.ts             # 飞书多维表格 API 客户端 (备选数据源)
-│       ├── analysis-store.ts            # 分析会话存储 (内存+Supabase双写)
+│       ├── analysis-store.ts            # 分析会话存储 (Postgres 主链路)
 │       └── utils.ts                     # 通用工具函数
-├── .env.local                           # 环境变量 (模块 tokens + 飞书凭证)
+├── .env.local                           # 环境变量 (Postgres + LLM + 搜索 + 可选飞书凭证)
 ├── next.config.ts
 ├── package.json
 └── tsconfig.json
@@ -69,20 +69,20 @@
        ↓
 步骤0: 预热所有工作流（并发唤醒6个模块，防止冷启动超时）
        ↓
-步骤1: 专利文本解析 → https://zzctsm7xqm.coze.site/run 提取权利要求/说明书/附图
-       ↓ (feishu_url - 飞书多维表格)
+步骤1: 专利文本解析 → 本地模块1 5101/run，写入 Postgres
+       ↓ (patent_record_id + analysis_session_id)
 步骤2: 行业识别与路由 → LLM判断专利所属行业(fitness_equipment/home_appliances/general)
        ↓
 步骤3: 技术关键词生成 → 根据行业路由:
-       通用: https://h8qmyd62sq.coze.site/run
-       健身器材: https://5rwr6pmzk3.coze.site/run
-       家用电器: https://9bq6x5jqkb.coze.site/run
-       ↓ (写入同一飞书表格)
-步骤4: 商品信息检索 → https://sk2jw6vshq.coze.site/run 搜索并结构化商品信息
-       ↓ (写入同一飞书表格)
-步骤5: 技术特征比对 → https://36yvrn7jt4.coze.site/run 逐商品比对，返回 all_comparison_results
+       通用: 本地模块2 5102/run
+       健身器材: 本地模块2-fitness 5103/run
+       家用电器: 本地模块2-electra 5104/run
+       ↓ (keyword_runs / keyword_records)
+步骤4: 商品信息检索 → 本地模块3 5105/run，写入 search_runs / search_products
+       ↓ (search_run_id + search_products)
+步骤5: 技术特征比对 → 本地模块4 5106/run，写入 claim_compare_runs / claim_compare_results
        ↓
-步骤6: 结果提取 → 优先从模块4响应提取; 备选从飞书表格读取(需飞书API凭证)
+步骤6: 结果提取 → 优先从 Postgres 与模块4响应提取; 飞书读取仅为历史兼容备选
        ↓
 [结果展示: 商品列表 + Claim Chart 比对表]
 ```
@@ -90,7 +90,7 @@
 ### 数据提取策略（步骤6）
 
 1. **方案1（优先）**: 从模块4 API 响应的 `all_comparison_results` 字段直接提取比对数据
-2. **方案2（备选）**: 如果方案1无数据，通过飞书开放平台 API 读取多维表格（需配置 FEISHU_APP_ID + FEISHU_APP_SECRET）
+2. **方案2（备选）**: 如果本地结构化数据缺失且存在历史 `feishuUrl`，通过飞书开放平台 API 读取多维表格（需配置 FEISHU_APP_ID + FEISHU_APP_SECRET）
 
 ### 行业路由机制
 
@@ -101,14 +101,14 @@
 
 ### 技术实现
 
-- **调用方式**: 通过扣子编程项目部署后的自定义域名 `/run` 端点，传入 JSON 参数
-- **数据传递**: 4个模块共享同一个飞书多维表格，通过 `feishu_url` 参数传递
+- **调用方式**: 默认通过 PM2 启动的本地 `127.0.0.1:510x/run` 端点，传入 JSON 参数
+- **数据传递**: 当前主链路使用 Postgres + `patent_record_id` + `analysis_session_id`，`feishu_url` 仅保留历史兼容
 - **模块1**: 接收 `patent_file.url` + `patent_file.file_type` + `task_id`，file_type 只接受 `image` 或 `video`
-- **模块2(通用)**: 接收 `feishu_url`，从飞书表格读取模块1的输出
-- **模块2(健身器材)**: 接收 `feishu_url`，健身器材专用关键词生成
-- **模块2(家用电器)**: 接收 `feishu_url`，家用电器专用关键词生成
-- **模块3**: 接收 `feishu_url` + `input_keywords`(数组)，从飞书表格读取关键词并搜索商品
-- **模块4**: 接收 `feishu_url`，返回 `all_comparison_results` + `result_summary` + `table_urls`
+- **模块2(通用)**: 接收 `patent_record_id` + `analysis_session_id`，从 Postgres 读取模块1输出
+- **模块2(健身器材)**: 接收同样主键，健身器材专用关键词生成
+- **模块2(家用电器)**: 接收同样主键，家用电器专用关键词生成
+- **模块3**: 接收 `patent_record_id` + `analysis_session_id` + `input_keywords`，写入商品检索表
+- **模块4**: 接收 `patent_record_id` + `analysis_session_id`，返回并落库比对结果
 
 ### 环境变量
 
@@ -131,7 +131,7 @@
 | `FEISHU_APP_ID` | (可选) 飞书开放平台 App ID，用于读取多维表格 |
 | `FEISHU_APP_SECRET` | (可选) 飞书开放平台 App Secret，用于读取多维表格 |
 
-> 前提条件：所有扣子编程项目必须已部署并发布 API。模块 URL/Token 已硬编码为 fallback 默认值，部署时无需配置环境变量。步骤6优先从模块4响应提取数据，飞书 API 为备选方案。
+> 前提条件：推荐从仓库根目录用 `pm2 start ecosystem.config.cjs` 启动 6 个本地模块和 Portal。步骤6优先从本地结构化数据提取，飞书 API 仅为历史兼容备选。
 
 ## 构建与开发命令
 

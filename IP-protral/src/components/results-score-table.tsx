@@ -10,6 +10,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { scoreBgClass, scoreColorClass } from '@/lib/claim-score';
+import { buildComparisonMap, sortProductsByComparisonScore } from '@/lib/results-consistency';
 import type { ProductComparison, ProductInfo } from '@/lib/types';
 
 interface ResultsScoreTableProps {
@@ -19,12 +20,8 @@ interface ResultsScoreTableProps {
 }
 
 export function ResultsScoreTable({ products, comparisons, sessionId }: ResultsScoreTableProps) {
-  const comparisonMap = new Map(comparisons.map((item) => [item.productId, item]));
-  const sortedProducts = [...products].sort((a, b) => {
-    const scoreA = comparisonMap.get(a.id)?.productSimilarityScore ?? -1;
-    const scoreB = comparisonMap.get(b.id)?.productSimilarityScore ?? -1;
-    return scoreB - scoreA;
-  });
+  const comparisonMap = buildComparisonMap(comparisons);
+  const sortedProducts = sortProductsByComparisonScore(products, comparisons);
 
   return (
     <div className="rounded-lg border overflow-hidden bg-background">

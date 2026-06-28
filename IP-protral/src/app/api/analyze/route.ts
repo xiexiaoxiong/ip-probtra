@@ -4,8 +4,9 @@
 //
 // 严格遵循单向依赖：模块1 → 模块2 → 模块3 → 模块4 → 提取结果
 // 每个模块仅使用上游输出，不反向依赖
-// 模块间通过飞书多维表格 (feishu_url) 传递数据
-// 通过扣子编程项目的自定义域名 /run 端点调用
+// 当前主链路通过 Postgres + patent_record_id + analysis_session_id 传递数据
+// 飞书字段仅作为历史兼容/备选读取路径保留
+// 本地优先调用 127.0.0.1:510x 的 /run 端点
 // ============================================================
 
 import { mkdir, writeFile } from 'fs/promises';
@@ -52,6 +53,8 @@ import { normalizeKeywordList } from '@/lib/keyword-utils';
 import { getUploadsDir } from '@/lib/runtime-paths';
 import { pgQuery } from '@/lib/postgres';
 import { createErrorReport } from '@/lib/error-reports-store';
+import { isModule3Terminal, shouldTriggerInitialModule4 } from '@/lib/async-analysis-state';
+import { buildAutoConfirmedKeywordState } from '@/lib/industry-keyword-flow';
 
 // ============================================================
 // 数据映射工具函数
@@ -132,11 +135,12 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
         const reason = getStringField(f, 'reason', '推理过程', '比对分析', '分析', 'reasoning');
         const reasoningType = getStringField(f, 'reasoning_type', '推理类型');
         const featureId = getStringField(f, 'feature_id', '特征编号');
+        const legacyStatus = getStringField(f, 'comparison_result', 'status', '匹配状态', '比对结果', 'matchStatus', 'result');
         const similarityScore = getScoreField(f, 'similarity_score', 'similarityScore')
-          ?? legacyStatusToScore(getStringField(f, 'comparison_result', 'status', '匹配状态', '比对结果', 'matchStatus', 'result'));
+          ?? legacyStatusToScore(legacyStatus);
         const featMatchedLength = getScoreField(f, 'matched_effective_length') ?? 0;
         const featTotalLength = getScoreField(f, 'feature_effective_length') ?? 0;
-        const featZeroed = getBooleanField(f, 'zeroed_by_mismatch');
+        const featZeroed = getBooleanField(f, 'zeroed_by_mismatch') || legacyStatusIsMismatch(legacyStatus);
         const scoreBand = normalizeScoreBand(getStringField(f, 'score_band', 'scoreBand'))
           || scoreToBand(similarityScore, {
             zeroedByMismatch: featZeroed,
@@ -197,10 +201,10 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
       productMap.set(id, { productId: id, productName: productName || id, elements: [], claimScores: [] });
     }
     const similarityScore = getScoreField(record, 'similarity_score', 'similarityScore')
-      ?? legacyStatusToScore(getStringField(record, 'status', '匹配状态', '比对结果', 'matchStatus', 'comparison_result'));
+      ?? legacyStatusToScore(status);
     const flatMatched = getScoreField(record, 'matched_effective_length') ?? 0;
     const flatTotal = getScoreField(record, 'feature_effective_length') ?? 0;
-    const flatZeroed = getBooleanField(record, 'zeroed_by_mismatch');
+    const flatZeroed = getBooleanField(record, 'zeroed_by_mismatch') || legacyStatusIsMismatch(status);
 
     productMap.get(id)!.elements.push({
       claimElement: claimElement || '',
@@ -230,8 +234,8 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
   return Array.from(productMap.values()).map(group => {
     const claimScores = group.claimScores.length > 0 ? group.claimScores : computeClaimScores(group.elements);
     const weighted = computeWeightedProductScore(claimScores);
-    const productScore = group.productSimilarityScore ?? weighted.productSimilarityScore;
-    const productScoreBand = group.productScoreBand ?? weighted.productScoreBand;
+    const productScore = weighted.productSimilarityScore;
+    const productScoreBand = weighted.productScoreBand;
     // 通过 scoreBand 反推 zeroed / matched / total，使 scoreToRiskLevel 也能正确区分"待确认"和"明确不相同"
     const productZeroed = claimScores.some((c) => c.zeroedByMismatch);
     const productMatched = claimScores.reduce((s, c) => s + (c.claimMatchedEffectiveLength ?? 0), 0);
@@ -334,6 +338,27 @@ function legacyStatusToScore(status: string): number {
     return 100;
   }
   return 50;
+}
+
+function legacyStatusIsMismatch(status: string): boolean {
+  if (!status) return false;
+  const lower = status.trim().toLowerCase();
+  const compact = lower.replace(/[\s_-]+/g, '');
+  return (
+    lower.includes('不匹配')
+    || lower.includes('不相同')
+    || lower.includes('不同')
+    || lower.includes('不一致')
+    || lower.includes('区别')
+    || lower.includes('no_match')
+    || lower.includes('no-match')
+    || lower.includes('no match')
+    || lower.includes('not_match')
+    || lower.includes('not-match')
+    || lower.includes('not match')
+    || compact.includes('nomatch')
+    || compact.includes('notmatch')
+  );
 }
 
 function normalizeScoreBand(band: string): ProductComparison['claimElements'][0]['scoreBand'] | undefined {
@@ -1017,13 +1042,7 @@ async function waitForKeywordConfirmation(
     const state = session?.results?.keywordConfirmation;
 
     if (!state) {
-      const fallbackState: KeywordConfirmationState = {
-        status: 'auto_confirmed',
-        autoKeywords: normalizedAutoKeywords,
-        userKeywords: [],
-        finalKeywords: normalizedAutoKeywords,
-        confirmedAt: Date.now(),
-      };
+      const fallbackState = buildAutoConfirmedKeywordState(normalizedAutoKeywords);
       await updateResults(sessionId, {
         keywords: fallbackState.finalKeywords,
         keywordConfirmation: fallbackState,
@@ -1052,15 +1071,10 @@ async function waitForKeywordConfirmation(
     if (state.status === 'timed_wait') {
       const deadlineAt = state.deadlineAt ?? Date.now() + KEYWORD_CONFIRMATION_TIMEOUT_MS;
       if (Date.now() >= deadlineAt) {
-        const autoConfirmedState: KeywordConfirmationState = {
-          status: 'auto_confirmed',
-          autoKeywords: normalizeKeywordList(state.autoKeywords),
-          userKeywords: [],
-          finalKeywords: normalizeKeywordList(state.autoKeywords),
+        const autoConfirmedState = buildAutoConfirmedKeywordState(state.autoKeywords, {
           promptedAt: state.promptedAt,
           deadlineAt,
-          confirmedAt: Date.now(),
-        };
+        });
         await updateResults(sessionId, {
           keywords: autoConfirmedState.finalKeywords,
           keywordConfirmation: autoConfirmedState,
@@ -1503,7 +1517,7 @@ async function executePipeline(
         lastPersistedModule3Error = module3Error;
       }
 
-      if (!initialStep5Triggered && module3ProductsCount > 0 && !module3IsComplete) {
+      if (shouldTriggerInitialModule4({ initialStep5Triggered, module3ProductsCount, module3IsComplete })) {
         initialStep5Triggered = true;
         await updateStepStatus(sessionId, 4, 'partial', '已检索到部分商品，后台继续检索中');
         break;
@@ -1521,11 +1535,7 @@ async function executePipeline(
         console.log(`[Pipeline ${sessionId}] 步骤4仍未检索到商品，后台继续轮询中...`);
       }
 
-      const module3ReachedTerminal =
-        module3TaskStatus === 'completed'
-        || module3TaskStatus === 'error'
-        || module3TaskStatus === 'cancelled'
-        || module3TaskStatus === 'timeout';
+      const module3ReachedTerminal = isModule3Terminal(module3TaskStatus);
 
       if (module3ReachedTerminal || module3IsComplete) {
         module3TaskFinishedAt = module3TaskFinishedAt || new Date().toISOString();
@@ -1612,7 +1622,7 @@ async function executePipeline(
       }
     }
 
-    while (!module3IsComplete && module3TaskStatus !== 'completed' && module3TaskStatus !== 'error' && module3TaskStatus !== 'cancelled' && module3TaskStatus !== 'timeout') {
+    while (!module3IsComplete && !isModule3Terminal(module3TaskStatus)) {
       let runStatus: Module3RunStatusResult | null = null;
       try {
         runStatus = await getModule3RunStatus(module3Result.runId);
@@ -1661,7 +1671,7 @@ async function executePipeline(
         module3TaskError: module3Error,
         module3Exception: module3Error,
       });
-      if (module3IsComplete || module3TaskStatus === 'completed' || module3TaskStatus === 'error' || module3TaskStatus === 'cancelled' || module3TaskStatus === 'timeout') {
+      if (module3IsComplete || isModule3Terminal(module3TaskStatus)) {
         break;
       }
       await sleep(MODULE3_POLL_INTERVAL_MS);

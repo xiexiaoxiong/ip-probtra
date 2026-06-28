@@ -24,6 +24,7 @@ import {
   FileText,
 } from 'lucide-react';
 import Link from 'next/link';
+import { findComparison, findProduct, sortProductsByComparisonScore } from '@/lib/results-consistency';
 
 export default function ProductDetailPage() {
   return (
@@ -150,11 +151,7 @@ function ProductDetailContent() {
   });
 
   const independentClaims = session.results?.patent?.independentClaims || [];
-  const sortedProducts = [...products].sort((a, b) => {
-    const scoreA = findComparison(comparisons, a.id, a)?.productSimilarityScore ?? -1;
-    const scoreB = findComparison(comparisons, b.id, b)?.productSimilarityScore ?? -1;
-    return scoreB - scoreA;
-  });
+  const sortedProducts = sortProductsByComparisonScore(products, comparisons);
 
   return (
     <div className="min-h-screen bg-background">
@@ -234,9 +231,9 @@ function ProductDetailContent() {
                     <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                       <span>商品总分: {productScore.toFixed(2)}</span>
                       <span>分段: {SCORE_BAND_CONFIG[productScoreBand].label}</span>
-                      {comparison.highestScoringClaimId && (
-                        <span>最高分权利要求: {comparison.highestScoringClaimId}</span>
-                      )}
+                      <span>
+                        特征得分小计: {claimScores.reduce((sum, item) => sum + item.similarityScore, 0).toFixed(2)}
+                      </span>
                       {comparison.isLegacyScore && (
                         <span>旧版评分</span>
                       )}
@@ -331,19 +328,6 @@ function ProductDetailContent() {
       </main>
     </div>
   );
-}
-
-function findProduct(products: ProductInfo[], productId: string): ProductInfo | undefined {
-  return products.find((p) => String(p.id) === productId);
-}
-
-function findComparison(
-  comparisons: ProductComparison[],
-  productId: string,
-  product?: ProductInfo,
-): ProductComparison | undefined {
-  return comparisons.find((c) => String(c.productId) === productId)
-    || (product ? comparisons.find((c) => c.productName === product.name) : undefined);
 }
 
 function normalizeScoreBand(

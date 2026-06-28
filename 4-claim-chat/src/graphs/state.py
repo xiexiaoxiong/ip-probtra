@@ -82,8 +82,8 @@ class ProductComparisonResult(BaseModel):
     """单个商品的比对结果（包含多个独立权利要求的比对）"""
     product_name: str = Field(..., description="商品名称")
     features: List[FeatureComparisonItem] = Field(default=[], description="所有独立权利要求的特征比对结果列表")
-    claim_scores: List[ClaimScoreItem] = Field(default=[], description="按独立权利要求聚合的最小特征分")
-    product_similarity_score: float = Field(default=0.0, description="商品总分，取各独立权利要求总分最大值")
+    claim_scores: List[ClaimScoreItem] = Field(default=[], description="按独立权利要求分组的特征得分小计")
+    product_similarity_score: float = Field(default=0.0, description="商品总分，所有特征得分相加；任一特征明确不相同则归零")
     product_score_band: str = Field(default="明确不相同", description="商品总分的分段标签")
 
 

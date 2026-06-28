@@ -389,6 +389,7 @@ def apply_rules_node(
             }
 
     claim_total_lengths = build_claim_totals(list(feature_meta_map.values()))
+    product_total_effective_length = sum(int(length or 0) for length in claim_total_lengths.values())
 
     comparison_features: List[Dict[str, Any]] = []
     for item in reviewed_analysis:
@@ -396,7 +397,7 @@ def apply_rules_node(
         feature_meta = feature_meta_map.get(fid, {})
         claim_id: str = str(feature_meta.get("claim_id", "")).strip() or str(item.get("claim_id", "")).strip() or "unknown"
         claim_total_effective_length = int(claim_total_lengths.get(claim_id, 0) or 0)
-        feature_result = _compute_feature_result(item, feature_meta, claim_total_effective_length)
+        feature_result = _compute_feature_result(item, feature_meta, product_total_effective_length)
 
         reasoning_type: str = str(item.get("reasoning_type", "相关信息缺失"))
         reason: str = str(item.get("reason", ""))

@@ -67,23 +67,52 @@ function normalizeScore(status: string): number {
   return 50;
 }
 
+function legacyStatusIsMismatch(status: string): boolean {
+  const lower = status.trim().toLowerCase();
+  const compact = lower.replace(/[\s_-]+/g, '');
+  return (
+    lower.includes('不匹配')
+    || lower.includes('不相同')
+    || lower.includes('不同')
+    || lower.includes('不一致')
+    || lower.includes('区别')
+    || lower.includes('no_match')
+    || lower.includes('no-match')
+    || lower.includes('no match')
+    || lower.includes('not_match')
+    || lower.includes('not-match')
+    || lower.includes('not match')
+    || compact.includes('nomatch')
+    || compact.includes('notmatch')
+  );
+}
+
 function computeProductScore(elements: ProductComparison['claimElements']): Pick<ProductComparison, 'claimScores' | 'productSimilarityScore' | 'productScoreBand' | 'riskLevel'> {
-  const claimMap = new Map<string, number[]>();
+  const claimMap = new Map<string, ProductComparison['claimElements']>();
   for (const element of elements) {
     const claimId = element.patentReference || 'unknown';
     if (!claimMap.has(claimId)) claimMap.set(claimId, []);
-    claimMap.get(claimId)!.push(element.similarityScore);
+    claimMap.get(claimId)!.push(element);
   }
-  const claimScores = Array.from(claimMap.entries()).map(([claimId, scores]) => {
-    const similarityScore = Math.min(...scores);
-    return { claimId, similarityScore, scoreBand: scoreToBand(similarityScore) };
+  const claimScores = Array.from(claimMap.entries()).map(([claimId, claimElements]) => {
+    const zeroedByMismatch = claimElements.some((element) => element.scoreDetail?.zeroedByMismatch || element.scoreBand === 'exact_mismatch');
+    const similarityScore = zeroedByMismatch
+      ? 0
+      : Math.min(
+          claimElements.reduce((sum, element) => sum + (element.scoreDetail?.awardedScore ?? element.similarityScore), 0),
+          100,
+        );
+    return { claimId, similarityScore, scoreBand: scoreToBand(similarityScore, { zeroedByMismatch }), zeroedByMismatch };
   });
-  const productSimilarityScore = Math.max(...claimScores.map((item) => item.similarityScore), 0);
+  const zeroedByMismatch = claimScores.some((item) => item.zeroedByMismatch);
+  const productSimilarityScore = zeroedByMismatch
+    ? 0
+    : Math.min(claimScores.reduce((sum, item) => sum + item.similarityScore, 0), 100);
   return {
     claimScores,
     productSimilarityScore,
-    productScoreBand: scoreToBand(productSimilarityScore),
-    riskLevel: scoreToRiskLevel(productSimilarityScore),
+    productScoreBand: scoreToBand(productSimilarityScore, { zeroedByMismatch }),
+    riskLevel: scoreToRiskLevel(productSimilarityScore, { zeroedByMismatch }),
   };
 }
 
@@ -121,15 +150,23 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
         const reason = getStringField(f, 'reason', '推理过程', '比对分析', '分析', 'reasoning');
         const reasoningType = getStringField(f, 'reasoning_type', '推理类型');
         const similarityScore = typeof f.similarity_score === 'number' ? f.similarity_score : normalizeScore(statusRaw);
+        const zeroedByMismatch = legacyStatusIsMismatch(statusRaw);
 
         productMap.get(id)!.elements.push({
           featureId: getStringField(f, 'feature_id') || undefined,
           claimElement: featureText || '',
           productFeature: evidence || '',
           similarityScore,
-          scoreBand: scoreToBand(similarityScore),
+          scoreBand: scoreToBand(similarityScore, { zeroedByMismatch }),
           reasoning: [reason, reasoningType].filter(Boolean).join(' | ') || '',
           patentReference: getStringField(f, 'claim_id') || undefined,
+          scoreDetail: {
+            fullScore: similarityScore,
+            awardedScore: similarityScore,
+            effectiveLength: 0,
+            matchedEffectiveLength: 0,
+            zeroedByMismatch,
+          },
         });
       }
       continue;
@@ -155,12 +192,20 @@ function mapComparisonsFromApi(rawResults: unknown[]): ProductComparison[] {
       productMap.set(id, { productId: id, productName: productName || id, elements: [] });
     }
 
+    const zeroedByMismatch = legacyStatusIsMismatch(status);
     productMap.get(id)!.elements.push({
       claimElement: claimElement || '',
       productFeature: productFeature || '',
       similarityScore: normalizeScore(status),
-      scoreBand: scoreToBand(normalizeScore(status)),
+      scoreBand: scoreToBand(normalizeScore(status), { zeroedByMismatch }),
       reasoning: reasoning || '',
+      scoreDetail: {
+        fullScore: normalizeScore(status),
+        awardedScore: normalizeScore(status),
+        effectiveLength: 0,
+        matchedEffectiveLength: 0,
+        zeroedByMismatch,
+      },
     });
   }
 
@@ -422,9 +467,9 @@ function runTests() {
     console.log(`  - 商品5的特征数: ${result[0]?.claimElements.length} (期望: 2)`);
     console.log(`  - 商品6的特征数: ${result[1]?.claimElements.length} (期望: 2)`);
     console.log(`  - 商品5 总分: ${result[0]?.productSimilarityScore} (期望: 100)`);
-    console.log(`  - 商品6 总分: ${result[1]?.productSimilarityScore} (期望: 100)`);
+    console.log(`  - 商品6 总分: ${result[1]?.productSimilarityScore} (期望: 0，因存在明确不相同特征)`);
     
-    if (result.length === 2 && result[0]?.claimElements.length === 2) {
+    if (result.length === 2 && result[0]?.claimElements.length === 2 && result[1]?.productSimilarityScore === 0) {
       console.log('  ✅ 通过');
       passed++;
     } else {
@@ -579,13 +624,29 @@ function runTests() {
       expected: 0,
     },
     { 
-      name: '两组权利要求取最高最小分',
+      name: '多特征分数相加并封顶 100',
       elements: [
         { claimElement: 'a', productFeature: 'a', similarityScore: 80, scoreBand: scoreToBand(80), reasoning: '', patentReference: '1' },
         { claimElement: 'b', productFeature: 'x', similarityScore: 60, scoreBand: scoreToBand(60), reasoning: '', patentReference: '1' },
         { claimElement: 'c', productFeature: 'y', similarityScore: 20, scoreBand: scoreToBand(20), reasoning: '', patentReference: '2' },
       ],
-      expected: 60,
+      expected: 100,
+    },
+    {
+      name: '任一特征明确不相同则商品总分归零',
+      elements: [
+        { claimElement: 'a', productFeature: 'a', similarityScore: 80, scoreBand: scoreToBand(80), reasoning: '', patentReference: '1' },
+        {
+          claimElement: 'b',
+          productFeature: 'x',
+          similarityScore: 0,
+          scoreBand: 'exact_mismatch' as const,
+          reasoning: '',
+          patentReference: '1',
+          scoreDetail: { fullScore: 20, awardedScore: 0, effectiveLength: 2, matchedEffectiveLength: 0, zeroedByMismatch: true },
+        },
+      ],
+      expected: 0,
     },
     { 
       name: '空',

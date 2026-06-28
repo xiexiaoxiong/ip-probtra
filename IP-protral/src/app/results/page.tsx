@@ -19,6 +19,7 @@ import { FeishuConfig } from '@/components/feishu-config';
 import { ResultsScoreTable } from '@/components/results-score-table';
 import type { ProductInfo } from '@/lib/types';
 import { PRODUCT_RISK_CONFIG } from '@/lib/types';
+import { findComparison, sortProductsByComparisonScore } from '@/lib/results-consistency';
 
 export default function ResultsPage() {
   return (
@@ -163,7 +164,7 @@ function ResultsContent() {
 
   // 获取商品对应的比对结果
   const getComparison = (productId: string): ProductComparison | undefined =>
-    comparisons.find((c) => c.productId === productId);
+    findComparison(comparisons, productId, products.find((product) => product.id === productId));
 
   const handleExportReport = async () => {
     if (!sessionId || exporting) {
@@ -233,11 +234,7 @@ function ResultsContent() {
     }
   }
 
-  const sortedProducts = [...products].sort((a, b) => {
-    const scoreA = getComparison(a.id)?.productSimilarityScore ?? -1;
-    const scoreB = getComparison(b.id)?.productSimilarityScore ?? -1;
-    return scoreB - scoreA;
-  });
+  const sortedProducts = sortProductsByComparisonScore(products, comparisons);
 
   return (
     <div className="min-h-screen bg-background">
@@ -385,14 +382,14 @@ function ResultsContent() {
             </CardContent>
           </Card>
         ) : feishuUrl ? (
-          /* 没有结构化商品数据，但有飞书表格链接 */
+          /* 没有结构化商品数据，但有历史兼容飞书表格链接 */
           <Card>
             <CardContent className="py-8 text-center space-y-4">
               <FileSearch className="h-10 w-10 text-primary mx-auto" />
               <div>
-                <p className="text-sm font-medium">分析结果已写入飞书多维表格</p>
+                <p className="text-sm font-medium">仅找到历史兼容飞书链接</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  工作流将分析数据直接写入飞书表格，请点击下方链接查看完整结果
+                  当前结构化结果暂不可用，可先打开飞书多维表格查看历史链路结果
                 </p>
               </div>
               <a

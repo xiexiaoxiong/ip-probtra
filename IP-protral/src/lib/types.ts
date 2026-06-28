@@ -164,7 +164,7 @@ export interface AnalysisResults {
   keywordRunId?: number;
   searchRunId?: number;
   claimCompareRunId?: number;
-  // 飞书表格链接（核心输出，4个模块共享数据）
+  // 飞书表格链接（历史兼容/备选输出；当前主链路通过 Postgres + analysis_session_id 共享数据）
   feishuUrl?: string;
   feishuAppToken?: string;
   // 各模块运行ID（可回溯）
@@ -338,7 +338,7 @@ export const WORKFLOW_MODULES = [
   {
     id: 6,
     name: '结果汇总',
-    description: '优先读取工作流响应，并按需回补飞书结果数据',
+    description: '汇总 Postgres 与工作流响应，必要时读取飞书兼容数据',
   },
 ] as const;
 

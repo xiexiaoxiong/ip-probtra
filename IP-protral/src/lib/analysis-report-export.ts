@@ -190,7 +190,7 @@ function mapComparisonRows(rows: ClaimCompareRow[]): Map<string, ProductComparis
     const similarityScore = normalizeScore(row.similarity_score, toText(row.comparison_result));
     const matchedEffectiveLength = normalizeScore(row.matched_effective_length, undefined) || 0;
     const totalEffectiveLength = normalizeScore(row.feature_effective_length, undefined) || 0;
-    const zeroedByMismatch = normalizeBoolean(row.zeroed_by_mismatch) || false;
+    const zeroedByMismatch = normalizeBoolean(row.zeroed_by_mismatch) || legacyStatusIsMismatch(toText(row.comparison_result));
     comparison.claimElements.push({
       featureId: toText(row.feature_id) || undefined,
       claimElement: toText(row.feature_text),
@@ -263,6 +263,26 @@ function normalizeUnitStatus(status: string): 'match' | 'mismatch' | 'uncertain'
   if (['match', 'matching', '相同', '明确相同'].includes(lower)) return 'match';
   if (['mismatch', 'not_match', '不同', '不相同', '明确不相同'].includes(lower)) return 'mismatch';
   return 'uncertain';
+}
+
+function legacyStatusIsMismatch(status: string): boolean {
+  const lower = status.trim().toLowerCase();
+  const compact = lower.replace(/[\s_-]+/g, '');
+  return (
+    lower.includes('不匹配')
+    || lower.includes('不相同')
+    || lower.includes('不同')
+    || lower.includes('不一致')
+    || lower.includes('区别')
+    || lower.includes('no_match')
+    || lower.includes('no-match')
+    || lower.includes('no match')
+    || lower.includes('not_match')
+    || lower.includes('not-match')
+    || lower.includes('not match')
+    || compact.includes('nomatch')
+    || compact.includes('notmatch')
+  );
 }
 
 function mapSessionComparisons(session: AnalysisSession): Map<string, ProductComparison> {
@@ -723,8 +743,8 @@ export async function buildAnalysisReportWorkbook(
 
     sheet.getCell('B4').value = '品牌';
     sheet.getCell('C4').value = product.brand || '—';
-    sheet.getCell('E4').value = '最高权利要求分';
-    sheet.getCell('F4').value = product.comparison?.claimScores.reduce((max, item) => Math.max(max, item.similarityScore), 0) ?? '—';
+    sheet.getCell('E4').value = '特征得分小计';
+    sheet.getCell('F4').value = product.comparison?.claimScores.reduce((sum, item) => sum + item.similarityScore, 0) ?? '—';
 
     sheet.getCell('B5').value = '商品链接';
     sheet.getCell('C5').value = product.url

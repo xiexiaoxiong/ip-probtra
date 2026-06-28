@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createUnauthorizedResponse, getCurrentUserFromRequest, isAdmin } from '@/lib/auth';
 import { getSessionAsync, updateResults } from '@/lib/analysis-store';
 import { normalizeKeywordList } from '@/lib/keyword-utils';
+import { buildConfirmedKeywordState } from '@/lib/industry-keyword-flow';
 import type { KeywordConfirmationState } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -72,20 +73,11 @@ export async function POST(
       return NextResponse.json({ error: '请输入至少一个关键词' }, { status: 400 });
     }
 
-    const autoKeywords = normalizeKeywordList(currentState.autoKeywords);
-    const finalKeywords = normalizeKeywordList([...autoKeywords, ...userKeywords]);
-    const nextState: KeywordConfirmationState = {
-      ...currentState,
-      status: 'confirmed',
-      autoKeywords,
-      userKeywords,
-      finalKeywords,
-      confirmedAt: Date.now(),
-    };
+    const nextState = buildConfirmedKeywordState(currentState, userKeywords);
 
     await updateResults(id, {
       keywordConfirmation: nextState,
-      keywords: finalKeywords,
+      keywords: nextState.finalKeywords,
     });
 
     return NextResponse.json({ success: true, keywordConfirmation: nextState });

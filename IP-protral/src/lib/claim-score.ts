@@ -100,9 +100,13 @@ export function computeClaimScores(elements: ClaimElementComparison[]): ClaimSco
 }
 
 export function computeProductScore(claimScores: ClaimScoreSummary[]): Pick<ProductComparison, 'claimScores' | 'productSimilarityScore' | 'productScoreBand' | 'riskLevel' | 'highestScoringClaimId'> {
-  const productSimilarityScore = Number(Math.max(...claimScores.map((item) => item.similarityScore), 0).toFixed(2));
-  const highestScoringClaimId = claimScores.find((item) => item.similarityScore === productSimilarityScore)?.claimId;
   const productZeroedByMismatch = claimScores.some((item) => item.zeroedByMismatch);
+  const productSimilarityScore = productZeroedByMismatch
+    ? 0
+    : Number(Math.min(claimScores.reduce((sum, item) => sum + (item.similarityScore || 0), 0), 100).toFixed(2));
+  const highestScoringClaimId = claimScores
+    .slice()
+    .sort((a, b) => b.similarityScore - a.similarityScore)[0]?.claimId;
   const productMatchedLength = claimScores.reduce((sum, item) => sum + (item.claimMatchedEffectiveLength ?? 0), 0);
   const productTotalLength = claimScores.reduce((sum, item) => sum + (item.claimTotalEffectiveLength ?? 0), 0);
   const bandOptions = {

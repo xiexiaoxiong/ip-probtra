@@ -123,7 +123,10 @@ def compute_claim_score(features: List[Dict[str, Any]], claim_total_effective_le
 def compute_product_score(claim_scores: List[Dict[str, Any]]) -> float:
     if not claim_scores:
         return 0.0
-    return round(max(float(item.get("similarity_score", 0.0) or 0.0) for item in claim_scores), 2)
+    if any(bool(item.get("zeroed_by_mismatch")) for item in claim_scores):
+        return 0.0
+    total_score = sum(float(item.get("similarity_score", 0.0) or 0.0) for item in claim_scores)
+    return round(min(total_score, 100.0), 2)
 
 
 def score_band(

@@ -1,14 +1,15 @@
 ## 项目概述
 - **名称**: 专利技术特征比对模块 (Patent Feature Comparison Module)
-- **功能**: 从飞书多维表格中提取独立权利要求、说明书和商品信息，基于说明书理解拆解权利要求为技术特征单元，逐特征与商品信息进行事实比对，输出结构化比对结果并回写飞书多维表格。
+- **当前主线功能**: 通过 `patent_record_id` + `analysis_session_id` 从 Postgres 读取专利解析结果和商品检索结果，基于说明书理解拆解独立权利要求技术特征，逐商品输出结构化比对结果并写入 `claim_compare_runs` / `claim_compare_results`。
+- **历史兼容功能**: 早期飞书多维表格读取/写入逻辑仍保留在 `parse_and_fetch`、`write_feishu_results` 等节点和文档章节中，但新开发优先以 Postgres 主链路为准。
 
 ### 节点清单
 | 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
 |-------|---------|------|---------|---------|---------|
-| parse_and_fetch | `nodes/parse_and_fetch_node.py` | task | 解析飞书URL，自动识别子表格角色（权利要求表/说明书表/说明书附图表/产品表），读取说明书+附图+独立权利要求+商品信息 | - | - |
+| parse_and_fetch | `nodes/parse_and_fetch_node.py` | task | 当前优先按 `patent_record_id` + `analysis_session_id` 读取 Postgres；历史兼容模式可解析飞书URL并读取子表格 | - | - |
 | decompose_claim | `nodes/decompose_claim_node.py` | agent | 基于说明书上下文理解，使用大模型将**每个独立权利要求**拆解为可编号的技术特征单元（feature_id含claim_id前缀如1A/9A） | - | `config/decompose_claim_llm_cfg.json` |
 | compare_products_loop | `nodes/compare_products_loop_node.py` | looparray | 使用线程池并行比对所有商品，每个商品独立调用子图完成所有独立权利要求的特征分析+规则判定 | - | - |
-| write_feishu_results | `nodes/write_feishu_results_node.py` | task | 为每个商品创建子表格，一个子表格包含**多个独立权利要求**的比对结果，串行写入带指数退避重试 | - | - |
+| write_feishu_results | `nodes/write_feishu_results_node.py` | task | 当前优先写入 Postgres claim compare 表；历史兼容逻辑可写飞书子表格 | - | - |
 | analyze_features | `nodes/analyze_features_node.py` | agent | 子图节点：使用大模型在商品信息中查找每个技术特征的证据（含说明书上下文辅助理解） | - | `config/analyze_features_llm_cfg.json` |
 | apply_rules | `nodes/apply_rules_node.py` | task | 子图节点：基于确定性规则判定MATCH/NO_MATCH/UNCERTAIN | - | - |
 
@@ -20,15 +21,15 @@
 | product_comparison_graph | `graphs/loop_graph.py` | 单个商品的所有独立权利要求特征比对流程：LLM分析 + 规则判定 | compare_products_loop |
 
 ## 技能使用
-- 节点 `parse_and_fetch` 和 `write_feishu_results` 使用飞书多维表格集成
+- 当前主线依赖 Postgres 表读取/写入；飞书多维表格集成仅为历史兼容路径
 - 节点 `decompose_claim` 使用大语言模型（doubao-seed-2-0-pro-260215）
 - 节点 `analyze_features` 使用大语言模型（doubao-seed-1-8-251228，支持多模态）
 
 ## 数据流程
-1. **parse_and_fetch**: 飞书URL → 自动识别4类子表格 → 提取说明书文本+附图URL+独立权利要求列表+商品列表
+1. **parse_and_fetch**: Postgres `patent_record_id` + `analysis_session_id` → 提取说明书文本+附图URL+独立权利要求列表+商品列表；历史兼容模式可从飞书URL读取
 2. **decompose_claim**: 对每个独立权利要求，结合说明书上下文 → 拆解为带claim_id前缀的技术特征（如1A,1B,...,9A,9B,...）
 3. **compare_products_loop**: 并行处理每个商品，子图内逐特征比对所有权利要求
-4. **write_feishu_results**: 每个商品一个子表格，包含所有权利要求的比对结果（claim_id列区分）
+4. **write_feishu_results**: 写入 `claim_compare_runs` / `claim_compare_results`，历史兼容模式可写飞书子表格
 
 ## 飞书子表格识别策略
 - 自动列出Base下所有表格，按名称关键词+字段特征智能识别：

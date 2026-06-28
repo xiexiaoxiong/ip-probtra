@@ -259,7 +259,7 @@ export default function HomePage() {
                 { step: 3, title: '关键词生成', desc: '基于专利内容生成检索词' },
                 { step: 4, title: '商品检索', desc: '检索市场中的相关商品' },
                 { step: 5, title: '特征比对', desc: '生成 Claim Chart 比对表' },
-                { step: 6, title: '结果汇总', desc: '整理工作流与飞书结果' },
+                { step: 6, title: '结果汇总', desc: '整理数据库与工作流结果' },
               ].map((item) => (
                 <div key={item.step} className="text-center space-y-1.5 p-3 rounded-lg bg-muted/30">
                   <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
@@ -353,12 +353,12 @@ export default function HomePage() {
               </Alert>
             )}
 
-            {/* 飞书链接（核心输出） */}
+            {/* 飞书链接（历史兼容输出） */}
             {results?.feishuUrl && isCompleted && (
               <div className="max-w-xl mx-auto rounded-lg border bg-card p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Shield className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">分析结果已写入飞书多维表格</span>
+                  <span className="text-sm font-medium">兼容的飞书多维表格链接</span>
                 </div>
                 <a
                   href={results.feishuUrl}

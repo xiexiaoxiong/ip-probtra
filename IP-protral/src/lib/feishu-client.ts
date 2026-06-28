@@ -341,11 +341,12 @@ export function mapComparisons(
     }
 
     const group = productMap.get(productId)!;
+    const statusText = getTextField(record, '匹配状态') || getTextField(record, '比对结果') || getTextField(record, 'status');
     const similarityScore = getNumberField(record, '相似度分数') ?? getNumberField(record, 'similarity_score')
-      ?? legacyStatusToScore(getTextField(record, '匹配状态') || getTextField(record, '比对结果') || getTextField(record, 'status'));
+      ?? legacyStatusToScore(statusText);
     const feishuMatched = getNumberField(record, 'matched_effective_length') ?? 0;
     const feishuTotal = getNumberField(record, 'feature_effective_length') ?? 0;
-    const feishuZeroed = getBooleanField(record, 'zeroed_by_mismatch');
+    const feishuZeroed = getBooleanField(record, 'zeroed_by_mismatch') || legacyStatusIsMismatch(statusText);
     group.elements.push({
       featureId: getTextField(record, '特征编号') || getTextField(record, 'feature_id') || undefined,
       claimElement: getTextField(record, '权利要求特征') || getTextField(record, '专利技术特征') || getTextField(record, 'claim_element'),
@@ -402,6 +403,26 @@ function legacyStatusToScore(status: string): number {
     return 100;
   }
   return 50;
+}
+
+function legacyStatusIsMismatch(status: string): boolean {
+  const lower = status.toLowerCase();
+  const compact = lower.replace(/[\s_-]+/g, '');
+  return (
+    lower.includes('不匹配')
+    || lower.includes('不相同')
+    || lower.includes('不同')
+    || lower.includes('不一致')
+    || lower.includes('区别')
+    || lower.includes('no_match')
+    || lower.includes('no-match')
+    || lower.includes('no match')
+    || lower.includes('not_match')
+    || lower.includes('not-match')
+    || lower.includes('not match')
+    || compact.includes('nomatch')
+    || compact.includes('notmatch')
+  );
 }
 
 function normalizeScoreBand(band: string): ProductComparison['claimElements'][0]['scoreBand'] | undefined {

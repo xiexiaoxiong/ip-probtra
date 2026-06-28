@@ -47,6 +47,13 @@
 - 节点`coze_search`使用 Coze 工作流 API（HTTP 调用）
 - 节点`save_results`使用 Postgres 数据库技能
 
+## 商品页抓取原型状态
+
+- `src/tools/product_page_capture.py` 是独立实验工具，不接入当前模块3主流程。
+- 决策：暂不默认纳入 `coze_search -> save_results` 链路。原因是该工具依赖 Playwright Chromium、页面登录态/人工验证、可选 OCR 和多模态模型，真实电商页面反爬和登录状态不可控；默认启用会降低模块3检索稳定性。
+- 允许用途：对具体商品 URL 做人工或离线增强取证，输出截图、可见文字和详情图候选，供后续人工核查或单独实验。
+- 若未来进入主流程，必须先满足：环境变量显式开关、单商品失败不阻断搜索、抓取超时/并发上限、输出字段与 `search_products.raw_payload` 的兼容映射、以及覆盖真实失败页面的回归测试。
+
 ## 工作流数据流
 ```
 GraphInput (patent_record_id, analysis_session_id, input_keywords?)

@@ -23,7 +23,7 @@ export function ProductCard({ product, comparison, sessionId }: ProductCardProps
   const config = PRODUCT_RISK_CONFIG[verdict];
   const exactMatchCount = comparison?.claimElements.filter((e) => e.similarityScore === 100).length || 0;
   const totalElements = comparison?.claimElements.length || 0;
-  const topClaimScore = comparison?.claimScores.reduce((max, item) => Math.max(max, item.similarityScore), 0) || 0;
+  const claimSubtotal = comparison?.claimScores.reduce((sum, item) => sum + item.similarityScore, 0) || 0;
 
   return (
     <Link href={`/results/${product.id}?session=${sessionId}`}>
@@ -64,7 +64,7 @@ export function ProductCard({ product, comparison, sessionId }: ProductCardProps
                 <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                   <span>权利要求要素: {totalElements}</span>
                   <span>商品总分: {comparison.productSimilarityScore}</span>
-                  <span>最高权利要求分: {topClaimScore}</span>
+                  <span>特征小计: {claimSubtotal}</span>
                   <span>100 分特征: {exactMatchCount}</span>
                 </div>
               )}

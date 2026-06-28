@@ -116,7 +116,10 @@ def _compare_single_product(
             claim_scores_map[claim_id]
             for claim_id in sorted(claim_scores_map)
         ]
-        product_similarity_score = max((item["similarity_score"] for item in claim_scores), default=0.0)
+        product_similarity_score = 0.0 if any(item.get("zeroed_by_mismatch") for item in claim_scores) else min(
+            sum(float(item["similarity_score"]) for item in claim_scores),
+            100.0,
+        )
         error_result: Dict[str, Any] = {
             "product_id": product.get("id"),
             "product_name": product_name,
