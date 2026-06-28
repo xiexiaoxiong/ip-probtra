@@ -11,11 +11,15 @@ from src.graphs.nodes.get_keywords_node import get_keywords_node
 from src.graphs.nodes.secondary_enrichment_node import (
     _classify_supplement_evidence,
     _extract_accepted_text,
+    _extract_html_detail_text,
     _extract_search_items,
+    _fetch_accepted_url_detail,
+    _focus_detail_text_for_product,
     _generic_search_supplement,
     _image_vision_supplement,
     _merge_product_with_enrichment,
     _normalize_picture_urls,
+    _normalize_result_url,
     _same_product,
     enrich_existing_search_products,
 )
@@ -249,6 +253,96 @@ def test_extract_accepted_text_includes_direct_web_search() -> None:
     assert "拖布支架" in text
 
 
+def test_extract_accepted_text_includes_search_result_detail_text() -> None:
+    enrichment = {
+        "sources": [
+            {
+                "source_type": "generic_search_supplement",
+                "accepted": [
+                    {
+                        "title": "同型号拆机文章",
+                        "description": "搜索摘要显示该型号具备拖布组件。",
+                        "detail_text": "文章正文进一步说明拖布支架通过升降机构收放。",
+                        "evidence_type": "article",
+                    }
+                ],
+            }
+        ]
+    }
+
+    text = _extract_accepted_text(enrichment)
+
+    assert "搜索摘要显示该型号具备拖布组件" in text
+    assert "拖布支架通过升降机构收放" in text
+
+
+def test_extract_html_detail_text_prefers_meta_and_article_body() -> None:
+    html = """
+    <html>
+      <head>
+        <title>P10 Pro 拆机</title>
+        <meta name="description" content="拆机摘要：底部有拖布支架。">
+      </head>
+      <body>
+        <script>ignored()</script>
+        <article>正文：该扫地机器人采用升降拖布组件，并保留中部吸尘口。</article>
+      </body>
+    </html>
+    """
+
+    text = _extract_html_detail_text(html)
+
+    assert "P10 Pro 拆机" in text
+    assert "拆机摘要" in text
+    assert "升降拖布组件" in text
+    assert "ignored" not in text
+
+
+def test_normalize_result_url_unwraps_duckduckgo_redirect() -> None:
+    url = (
+        "//duckduckgo.com/l/?uddg=https%3A%2F%2Fpost.example.com%2Fteardown%2Fp10"
+        "&rut=abc"
+    )
+
+    assert _normalize_result_url(url) == "https://post.example.com/teardown/p10"
+
+
+def test_fetch_accepted_url_detail_records_http_failure() -> None:
+    class FakeResponse:
+        status_code = 403
+        text = ""
+
+    class FakeClient:
+        async def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    result = asyncio.run(_fetch_accepted_url_detail(FakeClient(), "https://post.example.com/protected"))
+
+    assert result == {"detail_fetch_error": "http_status_403"}
+
+
+def test_focus_detail_text_keeps_product_relevant_segments_only() -> None:
+    product = {
+        "product_name": "批发家用扫地机吸尘扫地一体智能扫地机器人室内USB充电扫地机器",
+    }
+    item = {
+        "title": "走进未来：揭秘家用扫地机吸尘扫地一体智能扫地机器人室内USB充电黑科技_扫地机器人_淘宝数码网",
+    }
+    detail = (
+        "家用扫地机吸尘扫地一体智能扫地机器人室内USB充电扫地机器采用扫吸拖一体设计。"
+        "PapaGo扫地机器人超薄家用智能吸尘器全自动擦地拖地机清洁一体机。"
+        "家用扫地机吸尘扫地一体智能扫地机器人室内USB充电扫地机器,家用扫地机,智能扫地机器人,USB充电,吸尘功能,室内清洁,扫地机器人,走进未来：揭秘家用扫地机吸尘扫地一体智能扫地机器人室内USB充电黑科技 扫地机器人会唱歌？ 静飞AI扫地机器人突然开启唱跳全能模式。"
+        "obowAI yq8s-MAX扫地机使用dToF导航。"
+    )
+
+    focused = _focus_detail_text_for_product(product, item, detail)
+
+    assert "USB充电扫地机器" in focused
+    assert "PapaGo" not in focused
+    assert "静飞AI" not in focused
+    assert "obowAI" not in focused
+
+
 def test_classify_supplement_evidence_video_and_article() -> None:
     assert _classify_supplement_evidence("扫地机器人拆机视频", "https://www.bilibili.com/video/abc") == "video"
     assert _classify_supplement_evidence("扫地机器人深度评测文章", "https://post.example.com/1") == "article"
@@ -382,6 +476,77 @@ def test_generic_search_accepts_same_model_video_and_rejects_other_model(monkeyp
     assert result["accepted"][0]["evidence_type"] == "video"
     assert "拖布组件" in result["accepted"][0]["description"]
     assert any(item["title"] == "普森斯 X20 扫地机器人评测" for item in result["rejected"])
+
+
+def test_generic_search_fetches_detail_page_only_for_accepted_items(monkeypatch) -> None:
+    requested_urls = []
+
+    class FakeResponse:
+        def __init__(self, json_payload=None, text="", status_code=200) -> None:
+            self._json_payload = json_payload
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return
+
+        def json(self) -> dict:
+            return self._json_payload or {}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args) -> None:
+            return
+
+        async def get(self, url, *args, **kwargs):
+            requested_urls.append(str(url))
+            if str(url).startswith("http://secondary-search.test"):
+                return FakeResponse(
+                    {
+                        "data": {
+                            "videos": [
+                                {
+                                    "title": "普森斯 P10 Pro 拆机视频",
+                                    "url": "https://www.bilibili.com/video/BV123",
+                                    "description": "搜索摘要：底部有拖布支架。",
+                                }
+                            ],
+                            "articles": [
+                                {
+                                    "title": "普森斯 X20 扫地机器人评测",
+                                    "url": "https://post.example.com/x20-review",
+                                    "description": "另一型号。",
+                                }
+                            ],
+                        }
+                    }
+                )
+            if str(url) == "https://www.bilibili.com/video/BV123":
+                return FakeResponse(
+                    text="<html><head><meta name='description' content='普森斯 P10 Pro 视频页正文：升降拖布组件拆解。'></head></html>"
+                )
+            raise AssertionError(f"rejected item detail URL should not be fetched: {url}")
+
+    monkeypatch.setattr(
+        "src.graphs.nodes.secondary_enrichment_node.SECONDARY_SEARCH_API_URL",
+        "http://secondary-search.test/search",
+    )
+    monkeypatch.setattr("src.graphs.nodes.secondary_enrichment_node.httpx.AsyncClient", FakeAsyncClient)
+
+    product = {
+        "product_name": "普森斯 P10 Pro 中扫升降扫地机器人",
+        "brand": "普森斯",
+    }
+    result = asyncio.run(_generic_search_supplement(product))
+
+    assert result["accepted"][0]["detail_text"] == "普森斯 P10 Pro 视频页正文：升降拖布组件拆解。"
+    assert "https://www.bilibili.com/video/BV123" in requested_urls
+    assert "https://post.example.com/x20-review" not in requested_urls
 
 
 def test_enrich_existing_search_products_updates_only_requested_run(monkeypatch) -> None:

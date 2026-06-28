@@ -14,7 +14,7 @@ import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -42,6 +42,8 @@ ENRICHMENT_COZE_QUERY_LIMIT = int(os.getenv("SECONDARY_ENRICHMENT_COZE_QUERY_LIM
 SECONDARY_SEARCH_API_URL = os.getenv("SECONDARY_SEARCH_API_URL", "").strip()
 ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH = os.getenv("SECONDARY_ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH", "1").strip().lower() in {"1", "true", "yes", "on"}
 ENRICHMENT_DIRECT_WEB_QUERY_LIMIT = int(os.getenv("SECONDARY_ENRICHMENT_DIRECT_WEB_QUERY_LIMIT", "2") or "2")
+ENRICHMENT_ENABLE_ACCEPTED_URL_FETCH = os.getenv("SECONDARY_ENRICHMENT_ENABLE_ACCEPTED_URL_FETCH", "1").strip().lower() in {"1", "true", "yes", "on"}
+ENRICHMENT_ACCEPTED_URL_TEXT_CHARS = int(os.getenv("SECONDARY_ENRICHMENT_ACCEPTED_URL_TEXT_CHARS", "4000") or "4000")
 
 SUPPLEMENT_QUERY_SUFFIXES = [
     "拆机",
@@ -146,6 +148,20 @@ def _canonical_url(value: Any) -> str:
     host = (parsed.netloc or "").lower().removeprefix("www.")
     path = re.sub(r"/+$", "", parsed.path or "")
     return f"{host}{path}".lower()
+
+
+def _normalize_result_url(value: Any) -> str:
+    url = _normalize_space(value)
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = f"https:{url}"
+    parsed = urlparse(url)
+    if "duckduckgo.com" in (parsed.netloc or "") and parsed.path.startswith("/l/"):
+        target = parse_qs(parsed.query).get("uddg", [""])[0]
+        if target:
+            return unquote(target)
+    return url
 
 
 def _classify_supplement_evidence(title: Any, url: Any, source: Any = "") -> str:
@@ -504,7 +520,7 @@ def _coze_exact_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": reason,
                 "score": score,
                 "title": candidate.get("product_name") or candidate.get("title") or candidate.get("name"),
-                "url": candidate.get("product_url") or candidate.get("url") or candidate.get("link"),
+                "url": _normalize_result_url(candidate.get("product_url") or candidate.get("url") or candidate.get("link")),
                 "description": candidate.get("description") or candidate.get("summary") or candidate.get("product_raw_text"),
             }
             payload["evidence_type"] = _classify_supplement_evidence(payload.get("title"), payload.get("url"), "coze")
@@ -546,6 +562,128 @@ def _extract_search_items(response_data: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _extract_html_detail_text(html: str) -> str:
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
+        tag.decompose()
+
+    pieces: List[str] = []
+    title = _normalize_space(soup.title.get_text(" ")) if soup.title else ""
+    if title:
+        pieces.append(title)
+    for selector in (
+        'meta[name="description"]',
+        'meta[property="og:description"]',
+        'meta[name="keywords"]',
+    ):
+        meta = soup.select_one(selector)
+        content = _normalize_space(meta.get("content")) if meta else ""
+        if content:
+            pieces.append(content)
+
+    main_nodes = soup.select("article, main, .article, .content, .post, .entry, .detail, .description")
+    if main_nodes:
+        for node in main_nodes[:4]:
+            text = _normalize_space(node.get_text(" "))
+            if text:
+                pieces.append(text)
+    else:
+        body_text = _normalize_space(soup.get_text(" "))
+        if body_text:
+            pieces.append(body_text)
+
+    return "\n".join(dict.fromkeys(pieces))[:ENRICHMENT_ACCEPTED_URL_TEXT_CHARS]
+
+
+async def _fetch_accepted_url_detail(client: httpx.AsyncClient, url: Any) -> Dict[str, str]:
+    detail_url = _normalize_space(url)
+    if not ENRICHMENT_ENABLE_ACCEPTED_URL_FETCH or not detail_url.startswith("http"):
+        return {}
+    try:
+        response = await client.get(
+            detail_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+                )
+            },
+        )
+        if getattr(response, "status_code", 200) >= 400:
+            return {"detail_fetch_error": f"http_status_{getattr(response, 'status_code', 'unknown')}"}
+        detail_text = _extract_html_detail_text(getattr(response, "text", "") or "")
+        if not detail_text:
+            return {"detail_fetch_error": "empty_detail_text"}
+        return {"detail_text": detail_text}
+    except Exception as error:
+        logger.info("accepted URL 详情抓取失败 url=%s error=%s", detail_url, error)
+        return {"detail_fetch_error": str(error)[:300]}
+
+
+def _combine_search_item_text(item: Dict[str, Any]) -> str:
+    parts = [
+        _normalize_space(item.get("description")),
+        _normalize_space(item.get("detail_text")),
+    ]
+    return "\n".join(dict.fromkeys(part for part in parts if part))
+
+
+def _text_grams(value: Any, size: int = 4) -> List[str]:
+    text = _normalize_name(value)
+    if len(text) < size:
+        return [text] if text else []
+    grams: List[str] = []
+    for index in range(0, len(text) - size + 1):
+        gram = text[index:index + size]
+        if gram and gram not in grams:
+            grams.append(gram)
+    return grams
+
+
+def _focus_detail_text_for_product(product: Dict[str, Any], item: Dict[str, Any], detail_text: Any) -> str:
+    text = _normalize_space(detail_text)
+    if not text:
+        return ""
+    identity_text = _identity_text(product.get("product_name"), product.get("brand"), product.get("product_id"), item.get("title"))
+    grams = _text_grams(product.get("product_name")) + _text_grams(item.get("title"))
+    grams = [gram for gram in dict.fromkeys(grams) if len(gram) >= 4 and gram not in {"扫地机器人", "智能扫地", "机器人"}]
+    if not grams:
+        return text[:ENRICHMENT_ACCEPTED_URL_TEXT_CHARS]
+
+    segments = [
+        _normalize_space(segment)
+        for segment in re.split(r"(?<=[。！？!?；;])|\n+", text)
+        if _normalize_space(segment)
+    ]
+    focused: List[str] = []
+    product_marker = _normalize_space(product.get("product_name"))
+    title_marker = _normalize_space(item.get("title"))
+    title_core_marker = _normalize_space(re.split(r"[_｜|\-—–]", title_marker, maxsplit=1)[0])
+    long_markers = [
+        (title_marker, 0),
+        (title_core_marker, 0),
+        (product_marker, 80),
+    ]
+    for segment in segments:
+        foreign_tokens = re.findall(r"[a-z][a-z0-9_-]{1,}", segment.lower())
+        if any(token not in identity_text and token not in {"usb", "app", "oem", "logo"} for token in foreign_tokens):
+            continue
+        normalized = _normalize_name(segment)
+        score = sum(1 for gram in grams if gram in normalized)
+        if score >= 2:
+            for marker, context_chars in long_markers:
+                if len(marker) < 10:
+                    continue
+                marker_index = segment.find(marker)
+                if marker_index >= 0:
+                    segment = segment[: marker_index + len(marker) + context_chars]
+                    break
+            focused.append(segment)
+    if not focused:
+        return ""
+    return "\n".join(dict.fromkeys(focused))[:ENRICHMENT_ACCEPTED_URL_TEXT_CHARS]
+
+
 async def _generic_search_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
     queries = _build_secondary_queries(product)
     if not SECONDARY_SEARCH_API_URL or not queries:
@@ -568,7 +706,7 @@ async def _generic_search_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
             for item in items[:6]:
                 candidate = {
                     "product_name": item.get("product_name") or item.get("title") or item.get("name"),
-                    "product_url": item.get("product_url") or item.get("url") or item.get("link"),
+                    "product_url": _normalize_result_url(item.get("product_url") or item.get("url") or item.get("link")),
                 }
                 same, reason, score = _same_product(product, candidate)
                 payload = {
@@ -576,12 +714,20 @@ async def _generic_search_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
                     "reason": reason,
                     "score": score,
                     "title": item.get("title") or item.get("product_name") or item.get("name"),
-                    "url": item.get("url") or item.get("link") or item.get("product_url"),
+                    "url": _normalize_result_url(item.get("url") or item.get("link") or item.get("product_url")),
                     "description": item.get("description") or item.get("summary") or item.get("snippet") or item.get("content"),
                     "source": item.get("source") or item.get("site") or item.get("platform"),
                 }
                 payload["evidence_type"] = _classify_supplement_evidence(payload.get("title"), payload.get("url"), payload.get("source"))
                 if same:
+                    detail = await _fetch_accepted_url_detail(client, payload.get("url"))
+                    if detail.get("detail_text"):
+                        focused_detail = _focus_detail_text_for_product(product, payload, detail.get("detail_text"))
+                        if focused_detail:
+                            detail["detail_text"] = focused_detail
+                        else:
+                            detail = {"detail_fetch_error": "detail_text_not_relevant_to_product"}
+                    payload.update(detail)
                     accepted.append(payload)
                 else:
                     rejected.append(payload)
@@ -602,7 +748,7 @@ def _parse_bing_results(html: str) -> List[Dict[str, Any]]:
         if not link:
             continue
         title = _normalize_space(link.get_text(" "))
-        url = _normalize_space(link.get("href"))
+        url = _normalize_result_url(link.get("href"))
         snippet_node = node.select_one(".b_caption p") or node.select_one("p")
         snippet = _normalize_space(snippet_node.get_text(" ")) if snippet_node else ""
         if title and url:
@@ -618,7 +764,7 @@ def _parse_duckduckgo_results(html: str) -> List[Dict[str, Any]]:
         if not link:
             continue
         title = _normalize_space(link.get_text(" "))
-        url = _normalize_space(link.get("href"))
+        url = _normalize_result_url(link.get("href"))
         snippet_node = node.select_one(".result__snippet")
         snippet = _normalize_space(snippet_node.get_text(" ")) if snippet_node else ""
         if title and url:
@@ -661,7 +807,7 @@ async def _direct_web_search_supplement(product: Dict[str, Any]) -> Dict[str, An
             for item in items[:6]:
                 candidate = {
                     "product_name": item.get("title"),
-                    "product_url": item.get("url"),
+                    "product_url": _normalize_result_url(item.get("url")),
                 }
                 same, reason, score = _same_product(product, candidate)
                 payload = {
@@ -669,12 +815,20 @@ async def _direct_web_search_supplement(product: Dict[str, Any]) -> Dict[str, An
                     "reason": reason,
                     "score": score,
                     "title": item.get("title"),
-                    "url": item.get("url"),
+                    "url": _normalize_result_url(item.get("url")),
                     "description": item.get("description"),
                     "source": item.get("source"),
                 }
                 payload["evidence_type"] = _classify_supplement_evidence(payload.get("title"), payload.get("url"), payload.get("source"))
                 if same:
+                    detail = await _fetch_accepted_url_detail(client, payload.get("url"))
+                    if detail.get("detail_text"):
+                        focused_detail = _focus_detail_text_for_product(product, payload, detail.get("detail_text"))
+                        if focused_detail:
+                            detail["detail_text"] = focused_detail
+                        else:
+                            detail = {"detail_fetch_error": "detail_text_not_relevant_to_product"}
+                    payload.update(detail)
                     accepted.append(payload)
                 else:
                     rejected.append(payload)
@@ -701,7 +855,7 @@ def _extract_accepted_text(enrichment: Dict[str, Any]) -> str:
             for item in source.get("accepted", []):
                 if not isinstance(item, dict):
                     continue
-                text = _normalize_space(item.get("description"))
+                text = _combine_search_item_text(item)
                 title = _normalize_space(item.get("title"))
                 if text:
                     evidence_type = _normalize_space(item.get("evidence_type")) or "search_result"
@@ -710,7 +864,7 @@ def _extract_accepted_text(enrichment: Dict[str, Any]) -> str:
             for item in source.get("accepted", []):
                 if not isinstance(item, dict):
                     continue
-                text = _normalize_space(item.get("description"))
+                text = _combine_search_item_text(item)
                 title = _normalize_space(item.get("title"))
                 if text:
                     evidence_type = _normalize_space(item.get("evidence_type")) or "search_result"
@@ -719,7 +873,7 @@ def _extract_accepted_text(enrichment: Dict[str, Any]) -> str:
             for item in source.get("accepted", []):
                 if not isinstance(item, dict):
                     continue
-                text = _normalize_space(item.get("description"))
+                text = _combine_search_item_text(item)
                 title = _normalize_space(item.get("title"))
                 if text:
                     evidence_type = _normalize_space(item.get("evidence_type")) or "search_result"
@@ -742,17 +896,17 @@ def _source_has_accepted_text(source: Dict[str, Any]) -> bool:
         return bool(identity.get("accepted")) and bool(_normalize_space(source.get("text")))
     if source.get("source_type") == "coze_exact_supplement":
         return any(
-            isinstance(item, dict) and bool(_normalize_space(item.get("description")))
+            isinstance(item, dict) and bool(_combine_search_item_text(item))
             for item in source.get("accepted", [])
         )
     if source.get("source_type") == "generic_search_supplement":
         return any(
-            isinstance(item, dict) and bool(_normalize_space(item.get("description")))
+            isinstance(item, dict) and bool(_combine_search_item_text(item))
             for item in source.get("accepted", [])
         )
     if source.get("source_type") == "direct_web_search":
         return any(
-            isinstance(item, dict) and bool(_normalize_space(item.get("description")))
+            isinstance(item, dict) and bool(_combine_search_item_text(item))
             for item in source.get("accepted", [])
         )
     if source.get("source_type") == "first_search_image_vision":
