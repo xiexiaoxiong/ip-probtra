@@ -54,9 +54,18 @@
 - accepted 来源的文本会合并到 `description`，并完整记录在 `raw_payload.secondary_enrichment`；rejected 来源只留诊断，不进入模块4比对文本。
 - 默认启用第一次检索图片 OCR、第一次检索图片视觉读取、商品 URL Playwright 抓取和 HTTP 抓取；`SECONDARY_SEARCH_API_URL` 可接入搜索引擎/拆机文章/视频搜索；`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH=1` 可开启 Coze 精确二次搜索，但默认关闭以避免主流程耗时失控。
 - 图片视觉读取需要本地多模态模型环境变量；若未配置，会自动失败隔离。图片 OCR 不依赖 LLM，使用本机 `tesseract`。
+- 图片视觉读取若只返回“图片未显示/无法识别/信息不足”等无信息文本，必须 rejected，不得进入模块4描述。
 - `direct_web_search` 是无 API 兜底，默认少量查询 Bing/DuckDuckGo 并解析搜索结果；所有结果仍需同一商品校验。
 - accepted 搜索结果会标注 `evidence_type`：`video`、`article`、`product_page`、`search_result`。
 - 关键开关：`SECONDARY_ENRICHMENT_ENABLED`、`SECONDARY_ENRICHMENT_MAX_PRODUCTS`、`SECONDARY_ENRICHMENT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_PRODUCT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_ENABLE_PLAYWRIGHT`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_OCR`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_VISION`、`SECONDARY_ENRICHMENT_IMAGE_LIMIT`、`SECONDARY_SEARCH_API_URL`、`SECONDARY_ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH`、`SECONDARY_ENRICHMENT_DIRECT_WEB_QUERY_LIMIT`、`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH`、`SECONDARY_ENRICHMENT_COZE_QUERY_LIMIT`。
+
+**独立补全接口**:
+
+- `POST /api/enrich_search_run`
+- 请求体：`{"search_run_id": 78, "max_products": 1}`，或 `{"patent_record_id": 91, "analysis_session_id": "...", "max_products": 1}`。
+- 用途：对已有第一次检索结果单独重跑二次补全，便于迭代 Playwright、搜索引擎、拆机文章/视频通道，不必重新搜索商品。
+- 约束：传入 `search_run_id` 时，加载和回写均限定该 run，避免同一 session 多次检索时写错历史商品。
+- 响应：`total_products_count`、`updated_products_count`、`enriched_products_count`、前 20 个商品的 `accepted_sources_count/rejected_sources_count/supplement_text` 摘要。
 
 ## 子图清单
 | 子图名 | 文件位置 | 功能描述 | 被调用节点 |
@@ -199,3 +208,4 @@ GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complet
 - Portal 已透传模块3二次检索统计：`enriched_products_count`、`enrichment_error_message` 会进入 `analysis_sessions.results` 的 `module3EnrichedProductsCount`、`module3EnrichmentError`。
 - 入口语义修正：`input_keywords=[]` 必须直接返回空关键词，不得从数据库读取旧关键词。新增测试覆盖空数组不读库和显式关键词清理去重；`tests/test_secondary_enrichment.py` 13/13 通过。PM2 重启后 API 验证 `POST /run` with `input_keywords: []` 返回 `total_products_count=0`、`error_message="未提供搜索关键词"`。
 - 搜索结果增强：外部搜索响应会递归合并 `organic/videos/articles` 等混合列表；同一 URL/标题的 accepted/rejected 结果会去重；新增商品 ID 命中、品牌+型号命中的同一商品判定。新增测试证明同型号拆机视频 accepted、不同型号评测 rejected；`tests/test_secondary_enrichment.py` 18/18 通过。2026-06-29 已重启 `patent-3-search`，5105 `/health` 正常。
+- 新增已有 run 独立补全接口 `POST /api/enrich_search_run`。真实验证 `search_run_id=78,max_products=1` 成功回写同一商品，返回 `updated_products_count=1`、`enriched_products_count=1`、accepted 来源为 OCR + 网页搜索补充；无信息视觉输出“图片未显示”已被 rejected。模块4重新比对 run `d54aa5cf-18f5-4f1b-809f-22880de3da6f` / `claim_compare_run_id=63` 完成 19 个商品，目标商品证据引用 OCR 和网页补充资料。`tests/test_secondary_enrichment.py` 20/20 通过。

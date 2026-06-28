@@ -80,6 +80,19 @@ ARTICLE_HINT_PATTERNS = (
     "teardown",
 )
 
+NON_INFORMATIVE_IMAGE_TEXT_PATTERNS = (
+    "图片未显示",
+    "图片无法显示",
+    "无法识别",
+    "未能识别",
+    "看不清",
+    "信息不足",
+    "没有显示",
+    "未显示商品",
+    "no image",
+    "unable to identify",
+)
+
 
 def _normalize_space(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -90,6 +103,15 @@ def _normalize_name(value: Any) -> str:
     text = re.sub(r"[\s_\-—–·,，.。:：;；/\\|()（）\[\]【】{}<>《》\"'“”‘’]+", "", text)
     text = re.sub(r"(旗舰店|官方|正品|包邮|现货|新款|同款|厂家|批发|热卖|爆款)", "", text)
     return text
+
+
+def _is_informative_image_text(value: Any) -> bool:
+    text = _normalize_space(value).lower()
+    if not text:
+        return False
+    if any(pattern.lower() in text for pattern in NON_INFORMATIVE_IMAGE_TEXT_PATTERNS):
+        return False
+    return True
 
 
 def _text_similarity(a: Any, b: Any) -> float:
@@ -260,13 +282,13 @@ def _image_vision_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
             max_completion_tokens=2048,
         )
         text = _normalize_space(response_text)
-        if not text:
+        if not _is_informative_image_text(text):
             return {
                 "source_type": "first_search_image_vision",
                 "accepted": False,
-                "reason": "empty_vision_response",
+                "reason": "empty_or_non_informative_vision_response",
                 "image_urls": image_urls,
-                "text": "",
+                "text": text[:ENRICHMENT_MAX_TEXT_CHARS],
             }
         return {
             "source_type": "first_search_image_vision",
@@ -828,6 +850,7 @@ def _update_search_products(
     *,
     patent_record_id: int,
     analysis_session_id: str,
+    search_run_id: int = 0,
     enriched_products: List[Dict[str, Any]],
 ) -> Tuple[int, int]:
     from storage.database.db import get_session
@@ -845,6 +868,8 @@ def _update_search_products(
                 SearchProduct.patent_record_id == patent_record_id,
                 SearchProduct.analysis_session_id == (analysis_session_id or None),
             )
+            if search_run_id > 0:
+                query = query.filter(SearchProduct.search_run_id == search_run_id)
             row = None
             if product_url:
                 row = query.filter(SearchProduct.product_url == product_url).order_by(SearchProduct.id.asc()).first()
@@ -869,6 +894,106 @@ def _update_search_products(
     finally:
         session.close()
     return updated, accepted
+
+
+def _search_product_to_dict(row: Any) -> Dict[str, Any]:
+    return {
+        "product_id": row.product_id,
+        "product_name": row.product_name,
+        "product_url": row.product_url,
+        "product_source": row.product_source,
+        "price": row.price,
+        "brand": row.brand,
+        "manufacturer": row.manufacturer,
+        "matched_keywords": row.matched_keywords,
+        "description": row.description,
+        "picture": row.picture if isinstance(row.picture, list) else [],
+        "raw_payload": row.raw_payload if isinstance(row.raw_payload, dict) else {},
+    }
+
+
+def _load_existing_search_products(
+    *,
+    search_run_id: int = 0,
+    patent_record_id: int = 0,
+    analysis_session_id: str = "",
+    max_products: int = 0,
+) -> Tuple[int, str, List[Dict[str, Any]]]:
+    from storage.database.db import get_session
+    from storage.database.shared.model import SearchProduct, SearchRun
+
+    session = get_session()
+    try:
+        resolved_patent_record_id = patent_record_id
+        resolved_analysis_session_id = analysis_session_id
+        if search_run_id > 0:
+            run = session.get(SearchRun, search_run_id)
+            if run is None:
+                raise ValueError(f"search_run_id 不存在: {search_run_id}")
+            resolved_patent_record_id = int(run.patent_record_id)
+            resolved_analysis_session_id = run.analysis_session_id or ""
+
+        if resolved_patent_record_id <= 0:
+            raise ValueError("必须提供 search_run_id 或 patent_record_id")
+
+        query = session.query(SearchProduct).filter(SearchProduct.patent_record_id == resolved_patent_record_id)
+        if resolved_analysis_session_id:
+            query = query.filter(SearchProduct.analysis_session_id == resolved_analysis_session_id)
+        if search_run_id > 0:
+            query = query.filter(SearchProduct.search_run_id == search_run_id)
+        query = query.order_by(SearchProduct.id.asc())
+        if max_products > 0:
+            query = query.limit(max_products)
+        rows = query.all()
+        return resolved_patent_record_id, resolved_analysis_session_id, [_search_product_to_dict(row) for row in rows]
+    finally:
+        session.close()
+
+
+async def enrich_existing_search_products(
+    *,
+    search_run_id: int = 0,
+    patent_record_id: int = 0,
+    analysis_session_id: str = "",
+    max_products: int = 0,
+) -> Dict[str, Any]:
+    resolved_patent_record_id, resolved_analysis_session_id, products = _load_existing_search_products(
+        search_run_id=search_run_id,
+        patent_record_id=patent_record_id,
+        analysis_session_id=analysis_session_id,
+        max_products=max_products or ENRICHMENT_MAX_PRODUCTS,
+    )
+    if not products:
+        return {
+            "search_run_id": search_run_id,
+            "patent_record_id": resolved_patent_record_id,
+            "analysis_session_id": resolved_analysis_session_id,
+            "total_products_count": 0,
+            "updated_products_count": 0,
+            "enriched_products_count": 0,
+            "products": [],
+        }
+
+    enriched = await _enrich_many(products)
+    merged_products = [
+        _merge_product_with_enrichment(product, enrichment)
+        for product, enrichment in zip(products, enriched)
+    ]
+    updated_count, accepted_count = _update_search_products(
+        patent_record_id=resolved_patent_record_id,
+        analysis_session_id=resolved_analysis_session_id,
+        search_run_id=search_run_id,
+        enriched_products=merged_products,
+    )
+    return {
+        "search_run_id": search_run_id,
+        "patent_record_id": resolved_patent_record_id,
+        "analysis_session_id": resolved_analysis_session_id,
+        "total_products_count": len(products),
+        "updated_products_count": updated_count,
+        "enriched_products_count": accepted_count,
+        "products": merged_products,
+    }
 
 
 def secondary_enrichment_node(
@@ -906,6 +1031,7 @@ def secondary_enrichment_node(
         updated_count, accepted_count = _update_search_products(
             patent_record_id=state.patent_record_id,
             analysis_session_id=state.analysis_session_id,
+            search_run_id=state.search_run_id,
             enriched_products=merged_products,
         )
         logger.info(

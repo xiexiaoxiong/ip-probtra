@@ -260,6 +260,8 @@ entry
 - `input_keywords` 运行语义：`None` 表示从数据库读取 `keyword_records`；显式传入空数组 `[]` 表示调用方要求不搜索，必须直接返回空关键词并由 `coze_search` 给出“未提供搜索关键词”，不能回退读取数据库旧关键词。
 - 二次检索输出统计已透传到模块3和 Portal：`enriched_products_count` 表示本轮获得 accepted 补充资料的商品数，`enrichment_error_message` 表示二次检索阶段错误；Portal `/api/analyze` 会写入 `analysis_sessions.results.module3EnrichedProductsCount` 和 `module3EnrichmentError`。
 - 二次检索来源会标注证据类型：`video`、`article`、`product_page`、`search_result`；该类型用于诊断和展示来源质量，不改变模块4现有比对规则。
+- 模块3提供独立补全接口 `POST /api/enrich_search_run`，可对已有 `search_run_id` 或 `patent_record_id + analysis_session_id` 重新执行二次检索补全；回写必须限定当前 `search_run_id`，避免同一 session 多次搜索时写错历史商品。
+- 图片视觉读取若只返回“图片未显示/无法识别/信息不足”等无信息文本，不计入 accepted，也不进入模块4描述。
 - `3-search/README.md` 的独立商品页抓取原型 `src/tools/product_page_capture.py` 仍保留；当前主流程以 headless/失败隔离方式复用其文本和截图抓取能力，不启用人工登录。
 - 抓取原型使用 Playwright，可人工登录/复用浏览器 profile，输出截图、可见文字、OCR、多模态筛选后的商品详情图。
 - 抓取原型测试：`uv run pytest tests/test_product_page_capture.py`。
@@ -526,3 +528,4 @@ analyze_features
 - 无 API 网页搜索兜底：新增 `direct_web_search`，默认最多少量查询 Bing/DuckDuckGo 搜索页，解析标题/摘要/链接后仍按同一商品校验；当前真实关键词测试没有得到可接受结果。合并策略已修正：若新一轮二次检索没有 accepted 来源，不能覆盖已有成功的 `secondary_enrichment`。
 - 模块3入口语义修正：`input_keywords=[]` 不再触发数据库关键词回退，避免轻量验证或手动空搜索误跑完整检索链。新增测试覆盖空数组不读库、显式关键词清理去重、证据类型、图片 OCR/视觉读取、合并保留等共 13 项；`tests/test_secondary_enrichment.py` 13/13 通过，相关 `py_compile` 通过。PM2 已重启 `patent-3-search`，API 验证 `POST /run` with `input_keywords: []` 返回 `total_products_count=0`、`error_message="未提供搜索关键词"`、`enriched_products_count=0`。
 - 二次检索搜索结果接受率增强：新增商品 ID 出现在拆机文章/视频链接、品牌+型号出现在标题时的同一商品校验；外部搜索 JSON 递归读取 `organic/videos/articles` 混合结果；同一 URL/标题的 accepted/rejected 结果去重，避免多个查询后缀重复喂给模块4。新增测试覆盖同 ID 文章、同品牌同型号视频接受、同品牌不同型号拒绝、混合搜索结果解析、外部搜索接受视频并拒绝其他型号；`tests/test_secondary_enrichment.py` 18/18 通过，模块3已重启，5105 `/health` 和空关键词 API 验证通过。
+- 已有 search_run 二次补全接口：新增 `POST /api/enrich_search_run`，支持对已有 `search_run_id` 单独重跑补全，不必重新搜索商品；新增测试确认 helper 会按 `search_run_id` 回写。真实验证 `POST /api/enrich_search_run {"search_run_id":78,"max_products":1}` 返回 `updated_products_count=1`、`enriched_products_count=1`，同一商品获得 OCR + 网页搜索补充资料。视觉模型返回“图片未显示”时已被过滤，accepted 来源从 3 降为 2。模块4随后以 run `d54aa5cf-18f5-4f1b-809f-22880de3da6f` / `claim_compare_run_id=63` 重新比对完成 19 个商品；目标商品 6 条特征证据均引用 OCR，部分证据引用“网页补充资料”，证明补充资料已进入再次判断链路。`tests/test_secondary_enrichment.py` 20/20 通过，相关 `py_compile` 和模块3图导入通过。

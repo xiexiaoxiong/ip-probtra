@@ -17,6 +17,7 @@ from src.graphs.nodes.secondary_enrichment_node import (
     _merge_product_with_enrichment,
     _normalize_picture_urls,
     _same_product,
+    enrich_existing_search_products,
 )
 from src.graphs.state import GetKeywordsInput
 
@@ -383,6 +384,59 @@ def test_generic_search_accepts_same_model_video_and_rejects_other_model(monkeyp
     assert any(item["title"] == "普森斯 X20 扫地机器人评测" for item in result["rejected"])
 
 
+def test_enrich_existing_search_products_updates_only_requested_run(monkeypatch) -> None:
+    product = {
+        "product_name": "普森斯 P10 Pro 中扫升降扫地机器人",
+        "product_url": "https://detail.example.com/item/1",
+        "description": "首次检索描述。",
+        "raw_payload": {},
+    }
+    captured_update = {}
+
+    def fake_load(**kwargs):
+        assert kwargs["search_run_id"] == 78
+        return 91, "analysis_test", [product]
+
+    async def fake_enrich_many(products):
+        assert products == [product]
+        return [
+            {
+                "version": 1,
+                "sources": [
+                    {
+                        "source_type": "generic_search_supplement",
+                        "accepted": [
+                            {
+                                "title": "普森斯 P10 Pro 拆机文章",
+                                "description": "文章展示拖布组件和升降机构。",
+                                "evidence_type": "article",
+                            }
+                        ],
+                    }
+                ],
+                "supplement_text": "文章展示拖布组件和升降机构。",
+                "accepted_sources_count": 1,
+                "rejected_sources_count": 0,
+            }
+        ]
+
+    def fake_update(**kwargs):
+        captured_update.update(kwargs)
+        return 1, 1
+
+    monkeypatch.setattr("src.graphs.nodes.secondary_enrichment_node._load_existing_search_products", fake_load)
+    monkeypatch.setattr("src.graphs.nodes.secondary_enrichment_node._enrich_many", fake_enrich_many)
+    monkeypatch.setattr("src.graphs.nodes.secondary_enrichment_node._update_search_products", fake_update)
+
+    result = asyncio.run(enrich_existing_search_products(search_run_id=78, max_products=1))
+
+    assert result["search_run_id"] == 78
+    assert result["updated_products_count"] == 1
+    assert result["enriched_products_count"] == 1
+    assert captured_update["search_run_id"] == 78
+    assert "文章展示拖布组件" in captured_update["enriched_products"][0]["description"]
+
+
 def test_image_vision_supplement_uses_first_search_images(monkeypatch) -> None:
     monkeypatch.setattr("tools.product_page_capture.invoke_local_llm", lambda **_: "图片显示扫拖吸三合一。")
     product = {
@@ -395,3 +449,17 @@ def test_image_vision_supplement_uses_first_search_images(monkeypatch) -> None:
     assert result["source_type"] == "first_search_image_vision"
     assert result["accepted"] is True
     assert "扫拖吸三合一" in result["text"]
+
+
+def test_image_vision_supplement_rejects_non_informative_response(monkeypatch) -> None:
+    monkeypatch.setattr("tools.product_page_capture.invoke_local_llm", lambda **_: "图片未显示。")
+    product = {
+        "product_name": "智能扫地机器人",
+        "picture": ["https://example.com/a.jpg"],
+    }
+
+    result = _image_vision_supplement(product)
+
+    assert result["source_type"] == "first_search_image_vision"
+    assert result["accepted"] is False
+    assert result["reason"] == "empty_or_non_informative_vision_response"

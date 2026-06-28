@@ -1149,6 +1149,60 @@ async def api_direct_search(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/enrich_search_run")
+async def api_enrich_search_run(request: Request):
+    """对已有 search_run/search_products 单独执行二次检索补全。"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    search_run_id = int(body.get("search_run_id") or 0)
+    patent_record_id = int(body.get("patent_record_id") or 0)
+    analysis_session_id = str(body.get("analysis_session_id") or "")
+    max_products = int(body.get("max_products") or 0)
+    if search_run_id <= 0 and patent_record_id <= 0:
+        raise HTTPException(status_code=400, detail="必须提供 search_run_id 或 patent_record_id")
+
+    try:
+        from graphs.nodes.secondary_enrichment_node import enrich_existing_search_products
+
+        result = await enrich_existing_search_products(
+            search_run_id=search_run_id,
+            patent_record_id=patent_record_id,
+            analysis_session_id=analysis_session_id,
+            max_products=max_products,
+        )
+        compact_products = []
+        for product in result.get("products", [])[:20]:
+            enrichment = {}
+            if isinstance(product.get("raw_payload"), dict):
+                enrichment = product["raw_payload"].get("secondary_enrichment") or {}
+            compact_products.append(
+                {
+                    "product_name": product.get("product_name"),
+                    "product_url": product.get("product_url"),
+                    "accepted_sources_count": enrichment.get("accepted_sources_count", 0),
+                    "rejected_sources_count": enrichment.get("rejected_sources_count", 0),
+                    "supplement_text": enrichment.get("supplement_text", ""),
+                }
+            )
+        return {
+            "search_run_id": result.get("search_run_id"),
+            "patent_record_id": result.get("patent_record_id"),
+            "analysis_session_id": result.get("analysis_session_id"),
+            "total_products_count": result.get("total_products_count", 0),
+            "updated_products_count": result.get("updated_products_count", 0),
+            "enriched_products_count": result.get("enriched_products_count", 0),
+            "products": compact_products,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Existing search run enrichment failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get(path="/graph_parameter")
 async def http_graph_inout_parameter(request: Request):
     return service.graph_inout_schema()
