@@ -16,6 +16,7 @@ from src.graphs.nodes.secondary_enrichment_node import (
     _fetch_accepted_url_detail,
     _focus_detail_text_for_product,
     _generic_search_supplement,
+    _identity_strength,
     _image_vision_supplement,
     _merge_product_with_enrichment,
     _normalize_picture_urls,
@@ -249,8 +250,16 @@ def test_extract_accepted_text_includes_direct_web_search() -> None:
 
     text = _extract_accepted_text(enrichment)
 
-    assert "网页搜索/video" in text
+    assert "网页搜索/video/weak" in text
     assert "拖布支架" in text
+    assert "低置信同品线索" in text
+
+
+def test_identity_strength_marks_strong_and_weak_matches() -> None:
+    assert _identity_strength("url_exact", 1.0) == "strong"
+    assert _identity_strength("brand_model_match", 0.92) == "strong"
+    assert _identity_strength("name_similarity", 0.9) == "strong"
+    assert _identity_strength("name_similarity", 0.79) == "weak"
 
 
 def test_extract_accepted_text_includes_search_result_detail_text() -> None:
@@ -264,6 +273,7 @@ def test_extract_accepted_text_includes_search_result_detail_text() -> None:
                         "description": "搜索摘要显示该型号具备拖布组件。",
                         "detail_text": "文章正文进一步说明拖布支架通过升降机构收放。",
                         "evidence_type": "article",
+                        "identity_strength": "strong",
                     }
                 ],
             }
@@ -272,6 +282,8 @@ def test_extract_accepted_text_includes_search_result_detail_text() -> None:
 
     text = _extract_accepted_text(enrichment)
 
+    assert "外部搜索/article/strong" in text
+    assert "低置信同品线索" not in text
     assert "搜索摘要显示该型号具备拖布组件" in text
     assert "拖布支架通过升降机构收放" in text
 
@@ -474,6 +486,7 @@ def test_generic_search_accepts_same_model_video_and_rejects_other_model(monkeyp
     assert result["enabled"] is True
     assert len(result["accepted"]) == 1
     assert result["accepted"][0]["evidence_type"] == "video"
+    assert result["accepted"][0]["identity_strength"] == "strong"
     assert "拖布组件" in result["accepted"][0]["description"]
     assert any(item["title"] == "普森斯 X20 扫地机器人评测" for item in result["rejected"])
 

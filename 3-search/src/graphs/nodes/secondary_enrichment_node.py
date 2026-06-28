@@ -218,6 +218,21 @@ def _same_product(original: Dict[str, Any], candidate: Dict[str, Any]) -> Tuple[
     return False, "identity_mismatch", similarity
 
 
+def _identity_strength(reason: Any, score: Any) -> str:
+    reason_text = _normalize_space(reason)
+    try:
+        numeric_score = float(score or 0)
+    except Exception:
+        numeric_score = 0.0
+    if reason_text in {"url_exact", "product_id_exact", "product_id_in_candidate", "brand_model_match"}:
+        return "strong"
+    if reason_text == "name_similarity" and numeric_score >= 0.86:
+        return "strong"
+    if reason_text == "name_similarity" and numeric_score >= 0.72:
+        return "weak"
+    return "weak"
+
+
 def _collect_text_from_capture(capture: Dict[str, Any]) -> str:
     blocks = ((capture.get("text") or {}).get("blocks") or [])
     texts = []
@@ -524,6 +539,7 @@ def _coze_exact_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
                 "description": candidate.get("description") or candidate.get("summary") or candidate.get("product_raw_text"),
             }
             payload["evidence_type"] = _classify_supplement_evidence(payload.get("title"), payload.get("url"), "coze")
+            payload["identity_strength"] = _identity_strength(reason, score)
             if same:
                 accepted.append(payload)
             else:
@@ -719,6 +735,7 @@ async def _generic_search_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
                     "source": item.get("source") or item.get("site") or item.get("platform"),
                 }
                 payload["evidence_type"] = _classify_supplement_evidence(payload.get("title"), payload.get("url"), payload.get("source"))
+                payload["identity_strength"] = _identity_strength(reason, score)
                 if same:
                     detail = await _fetch_accepted_url_detail(client, payload.get("url"))
                     if detail.get("detail_text"):
@@ -820,6 +837,7 @@ async def _direct_web_search_supplement(product: Dict[str, Any]) -> Dict[str, An
                     "source": item.get("source"),
                 }
                 payload["evidence_type"] = _classify_supplement_evidence(payload.get("title"), payload.get("url"), payload.get("source"))
+                payload["identity_strength"] = _identity_strength(reason, score)
                 if same:
                     detail = await _fetch_accepted_url_detail(client, payload.get("url"))
                     if detail.get("detail_text"):
@@ -859,7 +877,9 @@ def _extract_accepted_text(enrichment: Dict[str, Any]) -> str:
                 title = _normalize_space(item.get("title"))
                 if text:
                     evidence_type = _normalize_space(item.get("evidence_type")) or "search_result"
-                    pieces.append(f"[二次搜索/{evidence_type}:{title}] {text}")
+                    strength = _normalize_space(item.get("identity_strength")) or "weak"
+                    warning = "；低置信同品线索，不得单独作为结构确认依据" if strength == "weak" else ""
+                    pieces.append(f"[二次搜索/{evidence_type}/{strength}{warning}:{title}] {text}")
         if source.get("source_type") == "generic_search_supplement":
             for item in source.get("accepted", []):
                 if not isinstance(item, dict):
@@ -868,7 +888,9 @@ def _extract_accepted_text(enrichment: Dict[str, Any]) -> str:
                 title = _normalize_space(item.get("title"))
                 if text:
                     evidence_type = _normalize_space(item.get("evidence_type")) or "search_result"
-                    pieces.append(f"[外部搜索/{evidence_type}:{title}] {text}")
+                    strength = _normalize_space(item.get("identity_strength")) or "weak"
+                    warning = "；低置信同品线索，不得单独作为结构确认依据" if strength == "weak" else ""
+                    pieces.append(f"[外部搜索/{evidence_type}/{strength}{warning}:{title}] {text}")
         if source.get("source_type") == "direct_web_search":
             for item in source.get("accepted", []):
                 if not isinstance(item, dict):
@@ -877,7 +899,9 @@ def _extract_accepted_text(enrichment: Dict[str, Any]) -> str:
                 title = _normalize_space(item.get("title"))
                 if text:
                     evidence_type = _normalize_space(item.get("evidence_type")) or "search_result"
-                    pieces.append(f"[网页搜索/{evidence_type}:{title}] {text}")
+                    strength = _normalize_space(item.get("identity_strength")) or "weak"
+                    warning = "；低置信同品线索，不得单独作为结构确认依据" if strength == "weak" else ""
+                    pieces.append(f"[网页搜索/{evidence_type}/{strength}{warning}:{title}] {text}")
         if source.get("source_type") == "first_search_image_vision" and source.get("accepted"):
             text = _normalize_space(source.get("text"))
             if text:

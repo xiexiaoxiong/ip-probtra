@@ -58,6 +58,7 @@
 - `direct_web_search` 是无 API 兜底，默认少量查询 Bing/DuckDuckGo 并解析搜索结果；所有结果仍需同一商品校验。
 - accepted 搜索结果会标注 `evidence_type`：`video`、`article`、`product_page`、`search_result`。
 - accepted 搜索结果会进一步尝试抓取目标 URL 正文/Meta 作为 `detail_text`；DuckDuckGo 跳转链接会解出真实 `uddg` URL。详情正文必须经过相关性过滤：只保留命中原商品标题或搜索结果标题主干的片段，含原商品/标题未出现的英文型号或品牌词的段落丢弃，防止相关文章/推荐列表污染模块4。
+- accepted 搜索结果会标注 `identity_strength`。`strong` 包括 URL 精确、商品 ID 精确、商品 ID 出现在结果中、品牌+型号命中、高相似名称；`weak` 主要是中等名称相似。弱证据写入 `supplement_text` 时必须明确标注“低置信同品线索，不得单独作为结构确认依据”。
 - 关键开关：`SECONDARY_ENRICHMENT_ENABLED`、`SECONDARY_ENRICHMENT_MAX_PRODUCTS`、`SECONDARY_ENRICHMENT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_PRODUCT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_ENABLE_PLAYWRIGHT`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_OCR`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_VISION`、`SECONDARY_ENRICHMENT_IMAGE_LIMIT`、`SECONDARY_SEARCH_API_URL`、`SECONDARY_ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH`、`SECONDARY_ENRICHMENT_DIRECT_WEB_QUERY_LIMIT`、`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH`、`SECONDARY_ENRICHMENT_COZE_QUERY_LIMIT`。
 
 **独立补全接口**:
@@ -211,3 +212,4 @@ GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complet
 - 搜索结果增强：外部搜索响应会递归合并 `organic/videos/articles` 等混合列表；同一 URL/标题的 accepted/rejected 结果会去重；新增商品 ID 命中、品牌+型号命中的同一商品判定。新增测试证明同型号拆机视频 accepted、不同型号评测 rejected；`tests/test_secondary_enrichment.py` 18/18 通过。2026-06-29 已重启 `patent-3-search`，5105 `/health` 正常。
 - 新增已有 run 独立补全接口 `POST /api/enrich_search_run`。真实验证 `search_run_id=78,max_products=1` 成功回写同一商品，返回 `updated_products_count=1`、`enriched_products_count=1`、accepted 来源为 OCR + 网页搜索补充；无信息视觉输出“图片未显示”已被 rejected。模块4重新比对 run `d54aa5cf-18f5-4f1b-809f-22880de3da6f` / `claim_compare_run_id=63` 完成 19 个商品，目标商品证据引用 OCR 和网页补充资料。`tests/test_secondary_enrichment.py` 20/20 通过。
 - accepted URL 详情正文增强：搜索结果 accepted 后会二次抓取目标页面正文/Meta；DuckDuckGo redirect URL 已解包。真实验证中曾发现目标网页正文夹带站内推荐文章，导致模块4 run 64 过度推理；已新增相关性过滤、英文型号/品牌污染过滤、标题主干截断。最终真实验证 `search_run_id=78,max_products=1` 的 supplement_text 保留目标商品 OCR + 目标网页正文，去除了 PapaGo/静飞/obowAI/“会唱歌”等推荐内容；模块4 run 65 完成后目标商品证据污染检测为 false。`tests/test_secondary_enrichment.py` 26/26 通过。
+- 外部搜索同品强弱标注：真实 `search_run_id=78,max_products=1` 中网页搜索结果仅因名称相似被接受，因此标记 `identity_strength=weak`，补充文本前缀显示“低置信同品线索，不得单独作为结构确认依据”。`tests/test_secondary_enrichment.py` 27/27 通过。
