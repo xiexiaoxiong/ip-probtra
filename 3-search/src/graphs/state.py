@@ -22,6 +22,8 @@ class GraphOutput(BaseModel):
     total_products_count: int = Field(default=0, description="检索到的商品总数")
     is_complete: bool = Field(default=True, description="检索是否完整")
     error_message: str = Field(default="", description="错误信息")
+    enriched_products_count: int = Field(default=0, description="二次检索成功补全的商品数量")
+    enrichment_error_message: str = Field(default="", description="二次检索错误信息")
 
 
 # ==================== 全局状态定义 ====================
@@ -51,6 +53,10 @@ class GlobalState(BaseModel):
     # 结果存储
     search_run_id: int = Field(default=0, description="商品检索运行记录ID")
     error_message: str = Field(default="", description="错误信息")
+
+    # 二次检索补全
+    enriched_products_count: int = Field(default=0, description="二次检索成功补全的商品数量")
+    enrichment_error_message: str = Field(default="", description="二次检索错误信息")
 
 
 # ==================== 节点输入输出定义 ====================
@@ -101,6 +107,21 @@ class SaveResultsInput(BaseModel):
     failed_keywords_count: int = Field(default=0, description="失败的关键词数量")
     is_complete: bool = Field(default=True, description="检索是否完整")
     error_message: str = Field(default="", description="错误信息")
+
+
+class SecondaryEnrichmentInput(BaseModel):
+    """二次商品信息补全节点的输入"""
+    patent_record_id: int = Field(..., description="专利解析主记录ID")
+    analysis_session_id: str = Field(default="", description="分析会话ID")
+    products: List[Dict[str, Any]] = Field(default=[], description="第一次检索得到的商品列表")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
+
+
+class SecondaryEnrichmentOutput(BaseModel):
+    """二次商品信息补全节点的输出"""
+    products: List[Dict[str, Any]] = Field(default=[], description="补全后的商品列表")
+    enriched_products_count: int = Field(default=0, description="二次检索成功补全的商品数量")
+    enrichment_error_message: str = Field(default="", description="二次检索错误信息")
 
 
 class SaveResultsOutput(BaseModel):
@@ -178,6 +199,21 @@ class SaveResultsWrapperInput(BaseModel):
     error_message: str = Field(default="", description="错误信息")
 
 
+class SecondaryEnrichmentWrapperInput(BaseModel):
+    """二次商品信息补全包装节点的输入"""
+    patent_record_id: int = Field(..., description="专利解析主记录ID")
+    analysis_session_id: str = Field(default="", description="分析会话ID")
+    products: List[Dict[str, Any]] = Field(default=[], description="第一次检索得到的商品列表")
+    search_run_id: int = Field(default=0, description="商品检索运行记录ID")
+
+
+class SecondaryEnrichmentWrapperOutput(BaseModel):
+    """二次商品信息补全包装节点的输出"""
+    products: List[Dict[str, Any]] = Field(default=[], description="补全后的商品列表")
+    enriched_products_count: int = Field(default=0, description="二次检索成功补全的商品数量")
+    enrichment_error_message: str = Field(default="", description="二次检索错误信息")
+
+
 class SaveResultsWrapperOutput(BaseModel):
     """保存结果包装节点的输出"""
     search_run_id: int = Field(default=0, description="商品检索运行记录ID")
@@ -194,6 +230,8 @@ class ExitInput(BaseModel):
     total_products_count: int = Field(default=0, description="商品总数")
     is_complete: bool = Field(default=True, description="检索是否完整")
     error_message: str = Field(default="", description="错误信息")
+    enriched_products_count: int = Field(default=0, description="二次检索成功补全的商品数量")
+    enrichment_error_message: str = Field(default="", description="二次检索错误信息")
 
 
 class ExitOutput(BaseModel):
@@ -203,3 +241,5 @@ class ExitOutput(BaseModel):
     total_products_count: int = Field(default=0, description="检索到的商品总数")
     is_complete: bool = Field(default=True, description="检索是否完整")
     error_message: str = Field(default="", description="错误信息")
+    enriched_products_count: int = Field(default=0, description="二次检索成功补全的商品数量")
+    enrichment_error_message: str = Field(default="", description="二次检索错误信息")

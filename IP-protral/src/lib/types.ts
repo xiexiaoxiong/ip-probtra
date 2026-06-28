@@ -177,6 +177,8 @@ export interface AnalysisResults {
   module3TaskStartedAt?: string;
   module3TaskFinishedAt?: string;
   module3TaskError?: string;
+  module3EnrichedProductsCount?: number;
+  module3EnrichmentError?: string;
   module4TaskStatus?: 'queued' | 'running' | 'completed' | 'error' | 'cancelled' | 'timeout';
   module4TaskStartedAt?: string;
   module4TaskFinishedAt?: string;

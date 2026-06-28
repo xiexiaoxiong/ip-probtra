@@ -25,7 +25,7 @@ def get_keywords_node(
     integrations: Postgres数据库
     """
     try:
-        if state.input_keywords:
+        if state.input_keywords is not None:
             keywords = [keyword.strip() for keyword in state.input_keywords if keyword and keyword.strip()]
             return GetKeywordsOutput(
                 keywords=list(dict.fromkeys(keywords)),

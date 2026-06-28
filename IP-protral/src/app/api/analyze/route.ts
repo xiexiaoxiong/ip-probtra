@@ -1500,6 +1500,8 @@ async function executePipeline(
     let module3TaskFinishedAt: string | undefined;
     let module3Error: string | undefined;
     let module3ProductsCount = 0;
+    let module3EnrichedProductsCount = 0;
+    let module3EnrichmentError: string | undefined;
     let module3IsComplete = false;
     let initialWaitExceeded = false;
     let lastExtendedWaitLogAt = Date.now();
@@ -1521,6 +1523,7 @@ async function executePipeline(
       searchRunId: module3Task.searchRunId,
       totalProductsCount: 0,
       isComplete: false,
+      enrichedProductsCount: 0,
       exceptionMessage: undefined,
       runId: module3Task.runId,
     };
@@ -1532,6 +1535,8 @@ async function executePipeline(
       module3TaskFinishedAt,
       module3TaskError: undefined,
       module3Exception: undefined,
+      module3EnrichedProductsCount,
+      module3EnrichmentError,
     });
 
     let initialStep5Triggered = false;
@@ -1540,6 +1545,8 @@ async function executePipeline(
     let lastPersistedModule3ProductsCount = -1;
     let lastPersistedModule3RunId = module3Result.searchRunId;
     let lastPersistedModule3Error: string | undefined;
+    let lastPersistedModule3EnrichedProductsCount = -1;
+    let lastPersistedModule3EnrichmentError: string | undefined;
 
     while (true) {
       let runStatus: Module3RunStatusResult | null = null;
@@ -1570,6 +1577,12 @@ async function executePipeline(
         if (runStatus.totalProductsCount > module3ProductsCount) {
           module3ProductsCount = runStatus.totalProductsCount;
         }
+        if (typeof runStatus.enrichedProductsCount === 'number' && runStatus.enrichedProductsCount > module3EnrichedProductsCount) {
+          module3EnrichedProductsCount = runStatus.enrichedProductsCount;
+        }
+        if (runStatus.enrichmentErrorMessage) {
+          module3EnrichmentError = runStatus.enrichmentErrorMessage;
+        }
         if (typeof runStatus.isComplete === 'boolean') {
           module3IsComplete = runStatus.isComplete;
         } else if (runStatus.status === 'completed') {
@@ -1585,6 +1598,8 @@ async function executePipeline(
 
       module3Result.totalProductsCount = module3ProductsCount;
       module3Result.isComplete = module3IsComplete;
+      module3Result.enrichedProductsCount = module3EnrichedProductsCount;
+      module3Result.enrichmentErrorMessage = module3EnrichmentError;
       module3Result.exceptionMessage = module3Error;
 
       const shouldPersistModule3State = (
@@ -1592,6 +1607,8 @@ async function executePipeline(
         || lastPersistedModule3ProductsCount !== module3ProductsCount
         || lastPersistedModule3RunId !== module3Result.searchRunId
         || lastPersistedModule3Error !== module3Error
+        || lastPersistedModule3EnrichedProductsCount !== module3EnrichedProductsCount
+        || lastPersistedModule3EnrichmentError !== module3EnrichmentError
       );
       if (shouldPersistModule3State) {
         await updateResults(sessionId, {
@@ -1602,11 +1619,15 @@ async function executePipeline(
           module3TaskFinishedAt,
           module3TaskError: module3Error,
           module3Exception: module3Error,
+          module3EnrichedProductsCount,
+          module3EnrichmentError,
         });
         lastPersistedModule3Status = module3TaskStatus;
         lastPersistedModule3ProductsCount = module3ProductsCount;
         lastPersistedModule3RunId = module3Result.searchRunId;
         lastPersistedModule3Error = module3Error;
+        lastPersistedModule3EnrichedProductsCount = module3EnrichedProductsCount;
+        lastPersistedModule3EnrichmentError = module3EnrichmentError;
       }
 
       if (shouldTriggerInitialModule4({ initialStep5Triggered, module3ProductsCount, module3IsComplete })) {
@@ -1739,6 +1760,12 @@ async function executePipeline(
         if (runStatus.totalProductsCount > module3ProductsCount) {
           module3ProductsCount = runStatus.totalProductsCount;
         }
+        if (typeof runStatus.enrichedProductsCount === 'number' && runStatus.enrichedProductsCount > module3EnrichedProductsCount) {
+          module3EnrichedProductsCount = runStatus.enrichedProductsCount;
+        }
+        if (runStatus.enrichmentErrorMessage) {
+          module3EnrichmentError = runStatus.enrichmentErrorMessage;
+        }
         if (typeof runStatus.isComplete === 'boolean') {
           module3IsComplete = runStatus.isComplete;
         } else if (runStatus.status === 'completed') {
@@ -1762,6 +1789,8 @@ async function executePipeline(
         module3TaskFinishedAt,
         module3TaskError: module3Error,
         module3Exception: module3Error,
+        module3EnrichedProductsCount,
+        module3EnrichmentError,
       });
       if (module3IsComplete || isModule3Terminal(module3TaskStatus)) {
         break;
@@ -1794,10 +1823,12 @@ async function executePipeline(
       module3TaskFinishedAt,
       module3TaskError: module3Error,
       module3Exception: module3Error,
+      module3EnrichedProductsCount,
+      module3EnrichmentError,
     });
     console.log(
       `[Pipeline ${sessionId}] 步骤4完成 `
-      + `(products=${module3ProductsCount}, complete=${module3IsComplete}, status=${module3TaskStatus || 'unknown'}, 耗时 ${stepTimings['step4']}ms)`,
+      + `(products=${module3ProductsCount}, enriched=${module3EnrichedProductsCount}, complete=${module3IsComplete}, status=${module3TaskStatus || 'unknown'}, 耗时 ${stepTimings['step4']}ms)`,
     );
 
     // ========== 模块4（步骤5）：技术特征比对终轮补跑 ==========

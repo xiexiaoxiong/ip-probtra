@@ -105,7 +105,8 @@ SKIP_ENV_VALIDATION=1 bash scripts/http_run.sh -p 5116
   -> Portal 做行业识别，选择模块2通用/健身器材/家电
   -> 模块2读取 patent_record_id + analysis_session_id，写 keyword_runs / keyword_records
   -> 模块3读取 keyword_records 或 input_keywords，调用 Coze 搜索，写 search_runs / search_products
-  -> 模块4读取专利、商品，拆独立权利要求，逐商品比对，写 claim_compare_runs / claim_compare_results
+  -> 模块3二次检索补全既有商品详情，写回 search_products.description/raw_payload.secondary_enrichment
+  -> 模块4读取专利、补全后的商品，拆独立权利要求，逐商品比对，写 claim_compare_runs / claim_compare_results
   -> Portal 从模块4响应或 Postgres 恢复结果，展示列表、详情和报告
 ```
 
@@ -231,6 +232,7 @@ record_dispatch
 entry
   -> get_keywords
   -> coze_search
+  -> secondary_enrichment
   -> save_results
   -> exit
 ```
@@ -238,7 +240,7 @@ entry
 输入输出：
 
 - `GraphInput(patent_record_id, analysis_session_id, input_keywords?)`
-- `GraphOutput(product_dataset_id, search_run_id, total_products_count, is_complete, error_message)`
+- `GraphOutput(product_dataset_id, search_run_id, total_products_count, is_complete, error_message, enriched_products_count, enrichment_error_message)`
 
 关键环境：
 
@@ -250,7 +252,14 @@ entry
 重要现状：
 
 - `coze_search_node` 支持批量请求，批量无结果时退回逐关键词并发。
-- `3-search/README.md` 新增了独立商品页抓取原型 `src/tools/product_page_capture.py`，该原型不接入模块3主流程。
+- `secondary_enrichment_node` 已接入模块3主流程，位于第一次 Coze 检索之后、最终保存完成之前；它只补全第一次检索已经确认的商品，不创建新商品。
+- 二次检索合并规则：外部资料必须通过 URL 精确一致、商品 ID 精确一致或商品名称相似度校验，才会写入 `search_products.raw_payload.secondary_enrichment`；未通过的来源记录为 rejected，不进入模块4比对文本。
+- 二次检索默认通道：第一次检索图片 OCR、第一次检索图片视觉读取、商品 URL Playwright 抓取、HTTP 文本抓取。外部搜索引擎通过 `SECONDARY_SEARCH_API_URL` 配置，接口默认按 `GET <url>?q=<query>` 读取 `results/items/data/organic/videos/articles` 列表；Coze 精确补充由 `SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH=1` 显式开启，默认关闭，避免单商品多查询拖慢主流程。
+- 关键二次检索环境变量：`SECONDARY_ENRICHMENT_ENABLED`、`SECONDARY_ENRICHMENT_MAX_PRODUCTS`、`SECONDARY_ENRICHMENT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_PRODUCT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_ENABLE_PLAYWRIGHT`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_OCR`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_VISION`、`SECONDARY_ENRICHMENT_IMAGE_LIMIT`、`SECONDARY_SEARCH_API_URL`、`SECONDARY_ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH`、`SECONDARY_ENRICHMENT_DIRECT_WEB_QUERY_LIMIT`、`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH`、`SECONDARY_ENRICHMENT_COZE_QUERY_LIMIT`。
+- `input_keywords` 运行语义：`None` 表示从数据库读取 `keyword_records`；显式传入空数组 `[]` 表示调用方要求不搜索，必须直接返回空关键词并由 `coze_search` 给出“未提供搜索关键词”，不能回退读取数据库旧关键词。
+- 二次检索输出统计已透传到模块3和 Portal：`enriched_products_count` 表示本轮获得 accepted 补充资料的商品数，`enrichment_error_message` 表示二次检索阶段错误；Portal `/api/analyze` 会写入 `analysis_sessions.results.module3EnrichedProductsCount` 和 `module3EnrichmentError`。
+- 二次检索来源会标注证据类型：`video`、`article`、`product_page`、`search_result`；该类型用于诊断和展示来源质量，不改变模块4现有比对规则。
+- `3-search/README.md` 的独立商品页抓取原型 `src/tools/product_page_capture.py` 仍保留；当前主流程以 headless/失败隔离方式复用其文本和截图抓取能力，不启用人工登录。
 - 抓取原型使用 Playwright，可人工登录/复用浏览器 profile，输出截图、可见文字、OCR、多模态筛选后的商品详情图。
 - 抓取原型测试：`uv run pytest tests/test_product_page_capture.py`。
 
@@ -260,7 +269,7 @@ entry
 
 职责：
 
-- 读取专利独立权利要求、说明书、附图和模块3商品。
+- 读取专利独立权利要求、说明书、附图和模块3补全后的商品。
 - 只处理独立权利要求。
 - LLM 输出证据和最小单元状态，确定性规则负责分数和风险标签。
 - 写 `claim_compare_runs`、`claim_compare_results`，并返回 `all_comparison_results`。
@@ -317,6 +326,7 @@ analyze_features
 
 - 文件名 `write_feishu_results_node.py` 已不完全准确，当前还承担写 Postgres 和结果摘要职责。
 - 飞书子表格写入相关逻辑仍存在，但主线应优先看 Postgres 和 Portal 结果映射。
+- `parse_and_fetch_node` 会把 `search_products.raw_payload.secondary_enrichment.supplement_text` 拼入商品描述，确保模块4沿用现有比对规则重新判断补全后的商品资料。
 
 ## Portal：IP-protral
 
@@ -500,3 +510,17 @@ analyze_features
 - 模块2改造规划：以 `analysis_1782651371368_9qeyd5` 为例，现有关键词包含“拖地扫地机器人”“中扫升降扫地机器人”等局部命中，但没有把“扫地机器人 + 拖地 + 升降”识别为必须共同覆盖的检索骨架，且生成了“懒人/养宠/有娃家庭”等无必要特征约束的发散词。后续应新增必要特征识别/覆盖校验层，在保留现有产品客体、发明点、术语精炼、组合流程的基础上，强制输出主客体词、必要特征词和必要组合词，并降低或剔除仅场景/人群/泛部件关键词。
 - 模块2必要特征框架落地：三套模块2均新增必要检索特征识别节点、摘要/完整说明书/从属权利要求输入、必要特征关键词护栏和回归脚本 `scripts/test_required_keyword_strategy.py`。`analysis_1782651371368_9qeyd5` 实际路由为 `home_appliances`，已重跑 5104 生成 `keyword_run_id=127` 并回填 `analysis_sessions.results.keywords`；新关键词包含“扫地机器人”“拖地”“升降”“拖地扫地机器人”“升降扫地机器人”“拖地升降扫地机器人”“中扫升降扫地机器人”，且不再包含“懒人/养宠/有娃家庭”等无必要特征约束的人群噪声词。2026-06-28 21:48 已重启 `patent-2-keyword`、`patent-2-keyword-fitness`、`patent-2-keyword-electra`，三套 py_compile 和回归脚本通过，5104 `/health` 返回 ok。
 - 模块2去特例化修正：按用户要求移除针对“拖地/升降”的专利特例兜底，改为通用必要特征短词化规则；保留场景词作为有依据的扩展关键词，但以低优先级输出，不能污染必要特征。`analysis_1782651371368_9qeyd5` 已用 5104 最终重跑生成 `keyword_run_id=130` 并回填，结果包含“扫地机器人”“拖地”“升降”“拖地扫地机器人”“升降扫地机器人”“拖地升降扫地机器人”“中扫升降扫地机器人”，并保留“拖地模式扫地机器人”“刷地扫地机器人”等扩展词。三套 `scripts/test_required_keyword_strategy.py` 均通过，三个模块2 PM2 服务已重启。
+
+### 2026-06-29
+
+- 二次检索架构决策：在模块3和模块4之间插入 `secondary_enrichment`，实现方式为模块3图内节点 `coze_search -> secondary_enrichment -> save_results`；这样首轮 partial 模块4仍可基于已检索商品先跑，终轮模块4会读取补全后的商品资料。
+- 二次检索边界：默认只补全既有 `search_products` 行，不新增商品，避免第一次检索商品和第二次检索商品不一致。所有补充来源写入 `raw_payload.secondary_enrichment.sources`，包含 accepted/rejected 和 identity_check。
+- 二次检索来源策略：默认尝试商品 URL Playwright 抓取和 HTTP 文本抓取；新增通用搜索接口 `SECONDARY_SEARCH_API_URL` 支持搜索引擎、拆机文章、视频/评测来源；Coze 精确补充保留但默认关闭，需要显式设置 `SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH=1`。
+- 二次检索性能决策：真实验证中单商品多轮 Coze 查询超过可接受耗时，故默认关闭 Coze 精确补充，并增加 `SECONDARY_ENRICHMENT_PRODUCT_TIMEOUT_SECONDS` 单商品预算、`SECONDARY_ENRICHMENT_COZE_QUERY_LIMIT` 查询上限。
+- 模块4接入决策：不新增模块4规则，仍使用现有判断比对规则；`parse_and_fetch_node` 在读取商品时把 `secondary_enrichment.supplement_text` 拼入商品描述，让终轮模块4基于补全资料重新判断。
+- 验证记录：`tests/test_secondary_enrichment.py` 4/4 通过，`tests/test_product_page_capture.py` 8/8 需宿主权限运行且通过，模块3/模块4图导入通过，`4-claim-chat/scripts/test_module4_scoring_pipeline.py` 通过。
+- 真实数据验证：对 `analysis_1782651371368_9qeyd5` 前 2 个 1688 商品运行二次检索，确认补充来源能写回同一 `search_products` 行；但 1688 Playwright 页面进入验证码拦截，HTTP 正文为空，未获得可用于判断的额外文本。Coze 精确补充单查询在 25 秒内超时。本机未配置 `LOCAL_SEARCH_BASE_URL`/Bright Data/`SECONDARY_SEARCH_API_URL`，因此真实外部搜索补充仍未完成。
+- 模拟搜索验证：本地临时搜索 API 返回 1 条同一商品拆机资料和 1 条无关商品资料；二次检索接受同一商品资料、拒绝无关资料，并生成 `supplement_text`“拆机图文显示该扫地机器人具有拖布组件，拖布支架可升降。”，证明一致性过滤和补充文本合并路径有效。
+- 图片 OCR 通道：因当前环境未配置本地多模态模型，图片视觉读取不能运行；已新增不依赖 LLM 的 `first_search_image_ocr`。真实商品 `analysis_1782651371368_9qeyd5` 的第一条 1688 商品 OCR 成功写回同一商品，`supplement_text` 增加 `[商品图片OCR] ... 三 合 一 品质 更 出 众 ...`。随后模块4用 run_id `analysis_1782651371368_9qeyd5-module4-secondary-enrichment-test` 重新比对完成，`claim_compare_run_id=62`，18 个商品全部重新判断；第一条商品结果已在数据库中引用“OCR图片文字‘三合一’”，证明补充资料进入再次判断。
+- 无 API 网页搜索兜底：新增 `direct_web_search`，默认最多少量查询 Bing/DuckDuckGo 搜索页，解析标题/摘要/链接后仍按同一商品校验；当前真实关键词测试没有得到可接受结果。合并策略已修正：若新一轮二次检索没有 accepted 来源，不能覆盖已有成功的 `secondary_enrichment`。
+- 模块3入口语义修正：`input_keywords=[]` 不再触发数据库关键词回退，避免轻量验证或手动空搜索误跑完整检索链。新增测试覆盖空数组不读库、显式关键词清理去重、证据类型、图片 OCR/视觉读取、合并保留等共 13 项；`tests/test_secondary_enrichment.py` 13/13 通过，相关 `py_compile` 通过。PM2 已重启 `patent-3-search`，API 验证 `POST /run` with `input_keywords: []` 返回 `total_products_count=0`、`error_message="未提供搜索关键词"`、`enriched_products_count=0`。

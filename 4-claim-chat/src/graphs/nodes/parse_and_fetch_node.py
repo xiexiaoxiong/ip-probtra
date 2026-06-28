@@ -10,6 +10,18 @@ from graphs.state import ParseAndFetchInput, ParseAndFetchOutput
 logger = logging.getLogger(__name__)
 
 
+def _build_product_description(row) -> str:
+    description = str(row.description or "").strip()
+    raw_payload = row.raw_payload if isinstance(row.raw_payload, dict) else {}
+    enrichment = raw_payload.get("secondary_enrichment") if isinstance(raw_payload, dict) else {}
+    supplement_text = ""
+    if isinstance(enrichment, dict):
+        supplement_text = str(enrichment.get("supplement_text") or "").strip()
+    if supplement_text and supplement_text not in description:
+        return f"{description}\n\n【二次检索补充资料】\n{supplement_text}".strip()
+    return description
+
+
 def parse_and_fetch_node(
     state: ParseAndFetchInput,
     config: RunnableConfig,
@@ -110,7 +122,7 @@ def parse_and_fetch_node(
                 {
                     "id": stable_product_id,
                     "name": row.product_name or "",
-                    "description": row.description or "",
+                    "description": _build_product_description(row),
                     "images": product_images,
                     "raw_data": {
                         **(row.raw_payload or {}),

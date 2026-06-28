@@ -9,6 +9,14 @@
 | `COZE_SEARCH_API_TOKEN` | Coze 工作流认证 Token | (必填) |
 | `COZE_SEARCH_TIMEOUT` | 单次 API 调用超时（秒） | `120` |
 | `COZE_MAX_CONCURRENT` | 并发调用最大数 | `5` |
+| `SECONDARY_ENRICHMENT_ENABLED` | 是否启用二次检索补全 | `true` |
+| `SECONDARY_ENRICHMENT_MAX_PRODUCTS` | 单次二次检索最多补全商品数 | `10` |
+| `SECONDARY_ENRICHMENT_PRODUCT_TIMEOUT_SECONDS` | 单商品二次检索预算 | `45` |
+| `SECONDARY_ENRICHMENT_ENABLE_IMAGE_OCR` | 是否对第一次检索图片做 OCR | `true` |
+| `SECONDARY_ENRICHMENT_ENABLE_IMAGE_VISION` | 是否用本地多模态模型读取第一次检索图片 | `true` |
+| `SECONDARY_SEARCH_API_URL` | 外部搜索/拆机文章/视频搜索接口 | 空 |
+| `SECONDARY_ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH` | 是否启用 Bing/DuckDuckGo HTML 兜底搜索 | `true` |
+| `SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH` | 是否启用 Coze 精确二次补充 | `false` |
 
 ### 节点清单
 | 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
@@ -16,6 +24,7 @@
 | entry | `graphs/graph.py` | task | 初始化全局状态，生成数据集ID | - | - |
 | get_keywords | `graphs/graph.py` (wrapper) + `graphs/nodes/get_keywords_node.py` | task | 从 Postgres 的 keyword_records 表读取关键词 | - | - |
 | coze_search | `graphs/graph.py` (wrapper) + `graphs/nodes/coze_search_node.py` | task | 调用 Coze 工作流 API，传入关键词搜索商品 | - | - |
+| secondary_enrichment | `graphs/graph.py` (wrapper) + `graphs/nodes/secondary_enrichment_node.py` | task | 对第一次检索到的同一商品进行二次资料补全，不新增商品 | - | - |
 | save_results | `graphs/graph.py` (wrapper) + `graphs/nodes/save_results_node.py` | task | 将商品数据写入 Postgres 数据库 | - | - |
 | exit | `graphs/graph.py` | task | 输出最终结果 | - | - |
 
@@ -36,6 +45,17 @@
 - search_runs 表记录检索运行的元信息（数据集ID、关键词统计等）
 - search_products 表记录每个商品的详细信息（名称、URL、价格、品牌、制造商、图片等）
 - platforms_queried 固定为 `["Coze工作流"]`
+
+**二次检索补全节点说明**:
+- 节点位于 `coze_search` 之后、`save_results` 之前；`coze_search` 已经会增量写入部分商品，因此 Portal 的首轮 partial 模块4仍可先跑，终轮模块4读取补全后的商品。
+- 默认只更新第一次检索已经存在的 `search_products`，不新增商品。
+- 可接受的同一商品依据：URL 精确一致、商品 ID 精确一致或商品名称相似度达到阈值。
+- accepted 来源的文本会合并到 `description`，并完整记录在 `raw_payload.secondary_enrichment`；rejected 来源只留诊断，不进入模块4比对文本。
+- 默认启用第一次检索图片 OCR、第一次检索图片视觉读取、商品 URL Playwright 抓取和 HTTP 抓取；`SECONDARY_SEARCH_API_URL` 可接入搜索引擎/拆机文章/视频搜索；`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH=1` 可开启 Coze 精确二次搜索，但默认关闭以避免主流程耗时失控。
+- 图片视觉读取需要本地多模态模型环境变量；若未配置，会自动失败隔离。图片 OCR 不依赖 LLM，使用本机 `tesseract`。
+- `direct_web_search` 是无 API 兜底，默认少量查询 Bing/DuckDuckGo 并解析搜索结果；所有结果仍需同一商品校验。
+- accepted 搜索结果会标注 `evidence_type`：`video`、`article`、`product_page`、`search_result`。
+- 关键开关：`SECONDARY_ENRICHMENT_ENABLED`、`SECONDARY_ENRICHMENT_MAX_PRODUCTS`、`SECONDARY_ENRICHMENT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_PRODUCT_TIMEOUT_SECONDS`、`SECONDARY_ENRICHMENT_ENABLE_PLAYWRIGHT`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_OCR`、`SECONDARY_ENRICHMENT_ENABLE_IMAGE_VISION`、`SECONDARY_ENRICHMENT_IMAGE_LIMIT`、`SECONDARY_SEARCH_API_URL`、`SECONDARY_ENRICHMENT_ENABLE_DIRECT_WEB_SEARCH`、`SECONDARY_ENRICHMENT_DIRECT_WEB_QUERY_LIMIT`、`SECONDARY_ENRICHMENT_ENABLE_COZE_EXACT_SEARCH`、`SECONDARY_ENRICHMENT_COZE_QUERY_LIMIT`。
 
 ## 子图清单
 | 子图名 | 文件位置 | 功能描述 | 被调用节点 |
@@ -64,11 +84,13 @@ get_keywords (从Postgres的keyword_records表读取关键词)
     ↓
 coze_search (调用Coze工作流API搜索商品，批量或并发调用)
     ↓
+secondary_enrichment (对已检索商品做二次资料补全并写回同一 search_products 行)
+    ↓
 save_results (写入Postgres数据库：search_runs + search_products表)
     ↓
 exit (输出结果)
     ↓
-GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complete, ...)
+GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complete, error_message, enriched_products_count, enrichment_error_message)
 ```
 
 ## 数据库表结构
@@ -108,12 +130,23 @@ GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complet
 | picture | json | 图片URL列表 |
 | raw_payload | json | 原始数据 |
 
+`raw_payload.secondary_enrichment` 结构：
+
+| 字段名 | 说明 |
+|-------|------|
+| version | 二次检索结构版本 |
+| enriched_at | 补全时间 |
+| sources | 来源列表，包含 source_type、identity_check、accepted/rejected/error 等 |
+| supplement_text | 已通过同一商品校验且可用于模块4比对的补充文本 |
+| accepted_sources_count | 有效补充来源数量 |
+| rejected_sources_count | 被拒绝或失败来源数量 |
+
 ## 输入输出定义
 
 ### 工作流输入
 - `patent_record_id`: 专利解析主记录ID（必填，从模块2传入）
 - `analysis_session_id`: 分析会话ID（可选，用于限定范围）
-- `input_keywords`: 搜索关键词列表（可选，如不提供则从数据库读取）
+- `input_keywords`: 搜索关键词列表（可选；`null`/不提供表示从数据库读取，显式空数组 `[]` 表示不搜索且不得回退数据库）
 
 ### 工作流输出
 - `product_dataset_id`: 本次检索数据集唯一标识
@@ -121,6 +154,8 @@ GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complet
 - `total_products_count`: 检索到的商品总数
 - `is_complete`: 检索是否完整
 - `error_message`: 错误信息
+- `enriched_products_count`: 二次检索成功补全的商品数量
+- `enrichment_error_message`: 二次检索错误信息
 
 ## 使用示例
 
@@ -149,3 +184,16 @@ GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complet
 ### 下游（模块4 - 权利要求比对）
 - 输出：写入 `search_products` 表，模块4通过 `patent_record_id` 读取
 - 模块4期望的字段：`product_id`、`product_name`、`description`、`picture`、`raw_payload` 等
+- 模块4会把 `raw_payload.secondary_enrichment.supplement_text` 拼入商品描述后再用现有规则比对。
+
+## 2026-06-29 二次检索验证记录
+
+- 新增 `tests/test_secondary_enrichment.py`，覆盖同一商品 URL 接受、无关商品拒绝、补充资料合并、通用搜索 accepted/rejected 文本过滤。
+- `tests/test_product_page_capture.py` 与新增测试在宿主权限下 11/11 通过。
+- 对 `analysis_1782651371368_9qeyd5` 前 2 个 1688 商品做真实小样本：能写回同一商品行并记录来源；但 Playwright 进入 1688 验证码拦截，HTTP 正文为空，未获得有效补充文本。
+- Coze 精确二次搜索单查询在 25 秒内超时，因此默认关闭；如需启用，必须配合更严格的查询上限和超时。
+- 本地临时搜索 API 模拟验证通过：同一商品拆机文章被 accepted，无关商品 rejected，生成可供模块4使用的 `supplement_text`。
+- 新增图片 OCR 通道后，`analysis_1782651371368_9qeyd5` 第一条真实商品在不访问 1688 正文的情况下获得新增 OCR 文本并写回同一商品；模块4重新比对 run_id `analysis_1782651371368_9qeyd5-module4-secondary-enrichment-test` 已完成，`claim_compare_run_id=62`，数据库结果显示第一条商品证据引用“OCR图片文字‘三合一’”。
+- 新增 `direct_web_search` 无 API 搜索兜底，默认尝试 Bing/DuckDuckGo 的少量查询并解析搜索结果；当前真实关键词未返回可接受结果。合并策略要求无 accepted 来源的新一轮二次检索不得覆盖已有成功补充。
+- Portal 已透传模块3二次检索统计：`enriched_products_count`、`enrichment_error_message` 会进入 `analysis_sessions.results` 的 `module3EnrichedProductsCount`、`module3EnrichmentError`。
+- 入口语义修正：`input_keywords=[]` 必须直接返回空关键词，不得从数据库读取旧关键词。新增测试覆盖空数组不读库和显式关键词清理去重；`tests/test_secondary_enrichment.py` 13/13 通过。PM2 重启后 API 验证 `POST /run` with `input_keywords: []` 返回 `total_products_count=0`、`error_message="未提供搜索关键词"`。

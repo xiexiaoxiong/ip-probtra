@@ -21,6 +21,9 @@ from graphs.state import (
     GetKeywordsWrapperOutput,
     CozeSearchWrapperInput,
     CozeSearchWrapperOutput,
+    SecondaryEnrichmentInput,
+    SecondaryEnrichmentWrapperInput,
+    SecondaryEnrichmentWrapperOutput,
     SaveResultsWrapperInput,
     SaveResultsWrapperOutput,
     ExitInput,
@@ -29,6 +32,7 @@ from graphs.state import (
 
 from graphs.nodes.get_keywords_node import get_keywords_node
 from graphs.nodes.coze_search_node import coze_search_node
+from graphs.nodes.secondary_enrichment_node import secondary_enrichment_node
 from graphs.nodes.save_results_node import save_results_node
 
 
@@ -143,6 +147,32 @@ def save_results_wrapper(
     )
 
 
+def secondary_enrichment_wrapper(
+    state: SecondaryEnrichmentWrapperInput,
+    config: RunnableConfig,
+    runtime: Runtime[Context]
+) -> SecondaryEnrichmentWrapperOutput:
+    """
+    title: 二次商品信息补全
+    desc: 在第一次商品检索后，用商品页抓取和精确二次搜索补充同一商品的信息
+    integrations: Playwright / 搜索工作流 / Postgres数据库
+    """
+    input_data = SecondaryEnrichmentInput(
+        patent_record_id=state.patent_record_id,
+        analysis_session_id=state.analysis_session_id,
+        products=state.products,
+        search_run_id=state.search_run_id,
+    )
+
+    result = secondary_enrichment_node(input_data, config, runtime)
+
+    return SecondaryEnrichmentWrapperOutput(
+        products=result.products,
+        enriched_products_count=result.enriched_products_count,
+        enrichment_error_message=result.enrichment_error_message,
+    )
+
+
 def exit_node(
     state: ExitInput,
     config: RunnableConfig,
@@ -157,7 +187,9 @@ def exit_node(
         product_dataset_id=state.product_dataset_id,
         total_products_count=state.total_products_count,
         is_complete=state.is_complete,
-        error_message=state.error_message
+        error_message=state.error_message,
+        enriched_products_count=state.enriched_products_count,
+        enrichment_error_message=state.enrichment_error_message,
     )
 
 
@@ -168,6 +200,7 @@ builder = StateGraph(GlobalState, input_schema=GraphInput, output_schema=GraphOu
 builder.add_node("entry", entry_node)
 builder.add_node("get_keywords", get_keywords_wrapper)
 builder.add_node("coze_search", coze_search_wrapper)
+builder.add_node("secondary_enrichment", secondary_enrichment_wrapper)
 builder.add_node("save_results", save_results_wrapper)
 builder.add_node("exit", exit_node)
 
@@ -177,7 +210,8 @@ builder.set_entry_point("entry")
 # 添加边
 builder.add_edge("entry", "get_keywords")
 builder.add_edge("get_keywords", "coze_search")
-builder.add_edge("coze_search", "save_results")
+builder.add_edge("coze_search", "secondary_enrichment")
+builder.add_edge("secondary_enrichment", "save_results")
 builder.add_edge("save_results", "exit")
 builder.add_edge("exit", END)
 

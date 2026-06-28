@@ -19,6 +19,8 @@ interface ModuleResponse {
   app_token?: string;
   keywords_table_id?: string;
   keywords_count?: number;
+  enriched_products_count?: number;
+  enrichment_error_message?: string;
   exception_type?: string;
   exception_message?: string;
   error_message?: string;
@@ -343,6 +345,8 @@ export interface Module3Result {
   searchRunId?: number;
   totalProductsCount?: number;
   isComplete?: boolean;
+  enrichedProductsCount?: number;
+  enrichmentErrorMessage?: string;
   exceptionType?: string;
   exceptionMessage?: string;
   runId: string;
@@ -361,6 +365,8 @@ export interface Module3RunStatusResult {
   searchRunId?: number;
   status: Module3TaskStatus;
   totalProductsCount: number;
+  enrichedProductsCount?: number;
+  enrichmentErrorMessage?: string;
   isComplete?: boolean;
   errorMessage?: string;
   isFinished: boolean;
@@ -389,6 +395,8 @@ export async function runModule3(
     searchRunId: typeof data.search_run_id === 'number' ? data.search_run_id : undefined,
     totalProductsCount: typeof data.total_products_count === 'number' ? data.total_products_count : undefined,
     isComplete: typeof data.is_complete === 'boolean' ? data.is_complete : undefined,
+    enrichedProductsCount: typeof data.enriched_products_count === 'number' ? data.enriched_products_count : undefined,
+    enrichmentErrorMessage: typeof data.enrichment_error_message === 'string' ? data.enrichment_error_message : undefined,
     exceptionType: typeof data.exception_type === 'string' ? data.exception_type : undefined,
     exceptionMessage:
       typeof data.exception_message === 'string'
@@ -457,6 +465,8 @@ export async function getModule3RunStatus(runId: string): Promise<Module3RunStat
       searchRunId: typeof data?.search_run_id === 'number' ? data.search_run_id : undefined,
       status: 'timeout',
       totalProductsCount: typeof data?.total_products_count === 'number' ? data.total_products_count : 0,
+      enrichedProductsCount: typeof data?.enriched_products_count === 'number' ? data.enriched_products_count : undefined,
+      enrichmentErrorMessage: typeof data?.enrichment_error_message === 'string' ? data.enrichment_error_message : undefined,
       isComplete: typeof data?.is_complete === 'boolean' ? data.is_complete : undefined,
       errorMessage:
         typeof data?.message === 'string'
@@ -486,6 +496,8 @@ export async function getModule3RunStatus(runId: string): Promise<Module3RunStat
     searchRunId: typeof data?.search_run_id === 'number' ? data.search_run_id : undefined,
     status: mappedStatus,
     totalProductsCount: typeof data?.total_products_count === 'number' ? data.total_products_count : 0,
+    enrichedProductsCount: typeof data?.enriched_products_count === 'number' ? data.enriched_products_count : undefined,
+    enrichmentErrorMessage: typeof data?.enrichment_error_message === 'string' ? data.enrichment_error_message : undefined,
     isComplete: typeof data?.is_complete === 'boolean' ? data.is_complete : undefined,
     errorMessage:
       typeof data?.error_message === 'string'
