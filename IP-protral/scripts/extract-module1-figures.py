@@ -3,10 +3,20 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Dict, List, Set, Tuple
 
 import fitz
 import requests
+
+MODULE1_SRC = Path(__file__).resolve().parents[2] / "1-patent-analysis" / "src"
+if MODULE1_SRC.exists():
+    sys.path.insert(0, str(MODULE1_SRC))
+
+from graphs.nodes.figure_extract_node import (  # noqa: E402
+    _extract_figure_clips_from_pdf,
+    _find_candidate_figure_pages as module1_find_candidate_figure_pages,
+)
 
 MIN_EMBEDDED_IMAGE_BYTES = 5000
 RENDER_FALLBACK_DPI_SCALE = 2.0
@@ -171,48 +181,35 @@ def main() -> None:
     doc = fitz.open(pdf_local_path)
 
     try:
-        rendered_hashes: Set[str] = set()
-        candidate_pages = find_candidate_figure_pages(doc, figure_descriptions)
-        existing_ids: Set[str] = set()
-        remaining_ids = list(figure_descriptions.keys())
-        next_index = 1
+        candidate_pages = module1_find_candidate_figure_pages(doc, figure_descriptions)
+        module_errors: List[object] = []
+        clips = _extract_figure_clips_from_pdf(
+            doc=doc,
+            figure_descriptions=figure_descriptions,
+            candidate_pages=candidate_pages,
+            errors=module_errors,  # type: ignore[arg-type]
+        )
 
-        for page_num in candidate_pages:
-            page = doc[page_num]
-            page_text = page.get_text("text") or ""
-            figure_labels = extract_figure_labels(page_text)
-            pix = page.get_pixmap(
-                matrix=fitz.Matrix(RENDER_FALLBACK_DPI_SCALE, RENDER_FALLBACK_DPI_SCALE),
-                alpha=False,
-            )
-            image_bytes = pix.tobytes("png")
-            image_hash = hashlib.md5(image_bytes).hexdigest()
-            if image_hash in rendered_hashes:
-                continue
-            rendered_hashes.add(image_hash)
-
-            figure_id, description = resolve_rendered_figure_identity(
-                figure_labels=figure_labels,
-                figure_descriptions=figure_descriptions,
-                remaining_ids=remaining_ids,
-                existing_figure_ids=existing_ids,
-                next_index=next_index,
-            )
-            existing_ids.add(figure_id)
-            if figure_id in remaining_ids:
-                remaining_ids.remove(figure_id)
-            next_index += 1
-
-            file_name = f"rendered-{page_num + 1}-{figure_id}.png"
+        for clip in clips:
+            file_name = clip.file_name
             file_path = output_dir / file_name
-            file_path.write_bytes(image_bytes)
+            file_path.write_bytes(clip.image_bytes)
             figures.append({
-                "figure_id": figure_id,
+                "figure_id": clip.figure_id,
                 "figure_url": f"{args.url_prefix}/{file_name}",
-                "figure_description": description,
+                "figure_description": clip.description,
                 "storage_key": None,
                 "local_path": str(file_path),
             })
+        for error in module_errors:
+            if hasattr(error, "model_dump"):
+                errors.append(error.model_dump())
+            else:
+                errors.append({
+                    "error_type": "LOCAL_FIGURE_EXTRACT_ERROR",
+                    "error_message": str(error),
+                    "is_recoverable": True,
+                })
     except Exception as exc:
         errors.append({
             "error_type": "LOCAL_FIGURE_EXTRACT_ERROR",

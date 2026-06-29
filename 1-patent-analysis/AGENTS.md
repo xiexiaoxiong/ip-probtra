@@ -69,6 +69,19 @@ file_ext = os.path.splitext(clean_url)[1].lower()
 3. 新增 `scripts/test_example_patent_abstracts.py`，默认扫描 `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 中全部 PDF，按模块1读取路径提取文本并校验摘要长度。
 4. 2026-06-29 完整调用模块1 `/run` 顺序跑该目录 13 个 PDF，全部生成 `abstract_text`；旧任务 `analysis_1782744737252_xsrjtj` 及 CN103025390B 相关记录已回填摘要。
 
+**问题5**：摘要附图/说明书附图经常抓取不到，或一页多图时被整页截图。
+
+**根因**：
+1. 正式模块1旧逻辑用 PyMuPDF 文本定位候选页，再整页渲染候选页；同页多个图会被合成一张整页图。
+2. `analysis_1782744737252_xsrjtj` 使用的 `CN103025390B.pdf` 是扫描版，所有页面 `page.get_text()` 为空，旧候选页规则完全找不到“说明书附图/图N”，因此 `patent_figures` 为 0。
+
+**修复**：
+1. PDF 首页单独提取 `摘要附图`，可解析 PDF 用首页右下/摘要区大图块 bbox，扫描版用右下区域黑色像素 bbox。
+2. 说明书附图页不再整页截图。可解析 PDF 按页面内大图块 bbox 裁剪，并按图号文本块匹配 `图1`、`图2A` 等图号；扫描 PDF 从尾页向前 OCR 定位“说明书附图”连续页，再用二值行密度和空白带把同页多图拆成单图。
+3. Portal 测试页脚本 `IP-protral/scripts/extract-module1-figures.py` 已改为复用模块1正式 helper，避免测试页和正式服务行为不一致。
+4. 新增 `scripts/test_example_patent_figures.py`，默认扫描 `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 全部 PDF，校验：有摘要附图和说明书附图；可解析图号无缺失；输出图片不接近整页截图。
+5. 2026-06-30 验证结果：实例专利 13 个 PDF 全部通过，输出目录 `/tmp/patent-module1-figure-test`。已重启 `patent-1-patent-analysis`，并用旧 task_id `analysis_1782744737288` 重跑 `CN103025390B.pdf`，数据库 `patent_parse_records.id=92` 现有 22 张图，`analysis_1782744737252_xsrjtj` 的 `results.patent.drawings` 已回填 22 条 URL。
+
 ### 为什么TXT文件返回空列表？
 
 **原因**：TXT是纯文本格式，不包含图片文件或图片URL。
@@ -88,8 +101,8 @@ file_ext = os.path.splitext(clean_url)[1].lower()
 ┌───────┬───────┬───────┬───────┐
 │ PDF   │ 图片   │ HTML  │ TXT   │
 ↓       ↓       ↓       ↓
-PyMuPDF  直接   提取URL  提取URL
-提取图片  上传   并转存   并转存
+图块裁剪  直接   提取URL  提取URL
+扫描分割  上传   并转存   并转存
     ↓       ↓       ↓       ↓
     上传到对象存储 → 返回URL列表
 ```
