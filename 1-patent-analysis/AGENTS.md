@@ -59,6 +59,16 @@ file_ext = os.path.splitext(clean_url)[1].lower()
 1. `file_read_node`：PDF文件改用PyMuPDF直接提取文本；URL扩展名解析增加从查询参数(`file_path`)提取的逻辑
 2. `structure_identify_node`：新增 `_extract_cn_patent_metadata` 函数，基于CN专利括号编号规则((21)申请号、(22)申请日、(30)优先权、(54)发明名称、(73)专利权人)用正则提取元数据，LLM结果为空时自动补充
 
+**问题4**：扫描版 PDF 首页摘要无法提取，导致分析概要“专利摘要”为空。
+
+**根因**：扫描版首页 PyMuPDF 可能提取不到文本，tesseract OCR 会把首页标签识别为带空格的 `(57) 摘 要`、`(54) 发 明 名 称`、`(54) 实用 新 型 名 称`，旧正则只兼容连续“摘要/名称”。
+
+**修复**：
+1. `_extract_cn_patent_metadata` 的 CN 首页标签匹配允许 OCR 空格，覆盖 `(21)申 请 号`、`(22)申 请 日`、`(54)发 明 名 称`、`(57)摘 要` 等形态。
+2. 摘要截止位置兼容 `CN ... 权 利 要 求 书` / `CN ... 说 明 书` 页眉，避免把权利要求页拼进摘要。
+3. 新增 `scripts/test_example_patent_abstracts.py`，默认扫描 `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 中全部 PDF，按模块1读取路径提取文本并校验摘要长度。
+4. 2026-06-29 完整调用模块1 `/run` 顺序跑该目录 13 个 PDF，全部生成 `abstract_text`；旧任务 `analysis_1782744737252_xsrjtj` 及 CN103025390B 相关记录已回填摘要。
+
 ### 为什么TXT文件返回空列表？
 
 **原因**：TXT是纯文本格式，不包含图片文件或图片URL。

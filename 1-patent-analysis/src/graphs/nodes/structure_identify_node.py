@@ -211,19 +211,20 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
     - (73) 专利权人
     """
     metadata = PatentMetadata()
+    label_pat = lambda text: r'\s*'.join(re.escape(char) for char in text)
     
     # (21)申请号
-    m21 = re.search(r'\(21\)\s*申请号\s+([A-Z0-9\.\-\/\,]+)', raw_text)
+    m21 = re.search(rf'\(21\)\s*{label_pat("申请号")}\s+([A-Z0-9\.\-\/\,]+)', raw_text)
     if m21:
         metadata.patent_number = m21.group(1).strip()
     
     # (22)申请日
-    m22 = re.search(r'\(22\)\s*申请日\s+(\d{4}[\.\/\-]\d{2}[\.\/\-]\d{2})', raw_text)
+    m22 = re.search(rf'\(22\)\s*{label_pat("申请日")}\s+(\d{{4}}[\.\/\-]\d{{2}}[\.\/\-]\d{{2}})', raw_text)
     if m22:
         metadata.application_date = m22.group(1).strip().replace('.', '-').replace('/', '-')
     
     # (30)优先权数据 - 格式: 优先权号 日期 国家代码
-    m30 = re.search(r'\(30\)\s*优先权数据\s*\n?\s*([^\n]+)', raw_text)
+    m30 = re.search(rf'\(30\)\s*{label_pat("优先权数据")}\s*\n?\s*([^\n]+)', raw_text)
     if m30:
         priority_line = m30.group(1).strip()
         # 优先权行格式: "10-2016-0109359 2016.08.26 KR" 或 "62/057,001 2014.09.29 US"
@@ -232,7 +233,10 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
             metadata.priority_date = pdate_match.group(1).strip().replace('.', '-').replace('/', '-')
     
     # (54)名称 - 兼容“发明名称 / 实用新型名称 / 外观设计名称”等首页标记
-    m54 = re.search(r'\(54\)\s*(?:发明|实用新型|外观设计)?名称\s*\n?\s*([\s\S]*?)(?=\n\s*\(57\)|\n\s*摘要)', raw_text)
+    m54 = re.search(
+        rf'\(54\)\s*(?:(?:{label_pat("发明")}|{label_pat("实用新型")}|{label_pat("外观设计")}))?\s*{label_pat("名称")}\s*\n?\s*([\s\S]*?)(?=\n\s*\(57\)|\n\s*{label_pat("摘要")})',
+        raw_text,
+    )
     if m54:
         title_text = m54.group(1).strip()
         # 合并跨行：移除换行符和多余空格
@@ -240,7 +244,7 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
         metadata.title = title_text
     
     # (73)专利权人 - 可能有多行（多个专利权人）
-    m73 = re.search(r'\(73\)\s*专利权人\s+([\s\S]*?)(?=\n\s*地址|\n\s*\(72\)|\n\s*\(74\))', raw_text)
+    m73 = re.search(rf'\(73\)\s*{label_pat("专利权人")}\s+([\s\S]*?)(?=\n\s*{label_pat("地址")}|\n\s*\(72\)|\n\s*\(74\))', raw_text)
     if m73:
         holder_text = m73.group(1).strip()
         # 合并跨行
@@ -249,11 +253,12 @@ def _extract_cn_patent_metadata(raw_text: str) -> PatentMetadata:
 
     # (57)摘要 - 首页摘要通常位于(57)标记后，到权利要求书/说明书或下一编号字段前结束
     m57 = re.search(
-        r'\(57\)\s*摘要\s*([\s\S]*?)(?=\n\s*(?:权\s*利\s*要\s*求\s*书|说\s*明\s*书|\(\d{2}\))|$)',
+        rf'\(57\)\s*{label_pat("摘要")}\s*([\s\S]*?)(?=\n\s*(?:CN\s*\d{{6,}}\s*[A-Z]?\s*(?:{label_pat("权利要求书")}|{label_pat("说明书")})|{label_pat("权利要求书")}|{label_pat("说明书")}|\(\d{{2}}\))|$)',
         raw_text,
     )
     if m57:
         abstract_text = re.sub(r'\s*\n\s*', '', m57.group(1)).strip()
+        abstract_text = re.sub(r'\s+', ' ', abstract_text).strip()
         if abstract_text:
             metadata.abstract = abstract_text
     
