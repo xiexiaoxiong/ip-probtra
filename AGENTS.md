@@ -318,12 +318,16 @@ keyword_records/input_keywords
 - Bright Data API key 可单独配置；若未配置 `BRIGHTDATA_SERP_ZONE` / `BRIGHTDATA_UNLOCKER_ZONE`，模块会调用 `GET https://api.brightdata.com/zone/get_active_zones` 自动发现 `serp` 与 `unblocker` zone。
 - 电商详情页动态渲染不稳定时，模块会用 Bright Data Unlocker 的 `render=true` 重试；空响应必须视为抓取失败，不得作为空详情页通过。
 - 关键词读取优先使用 `OBJECT_BASE` 主商品词和必要特征组合词，短的单个必要特征低优先级；长关键词命中的商品还要做通用字符覆盖度过滤，避免只含宽词的无关商品进入结果。
+- 查询失败必须可诊断：搜索阶段 0 候选、SERP 返回非详情页、详情抓取错误、质量过滤 rejected 都写入 `product_detail_search_candidates`。
+- 除 JD/1688/淘宝/天猫等平台详情页外，可保留保守识别的外部真实商品详情页（例如 `/product/detail/...`、`/products/...`、`/SalePage/Index/...`），但搜索/列表/下载/专利/聚合页仍 rejected。
+- 关键词扩展只影响检索 query，不改变模块2结果；允许从长关键词回退到核心商品名（例如“免爬坡扫地机器人” -> “扫地机器人”），由后续质量层和配件过滤把附件/耗材排除。
 
 测试入口：
 
 - 单元测试：`PYTHONDONTWRITEBYTECODE=1 ../3-search/.venv/bin/python -m pytest -p no:cacheprovider tests/test_quality.py -q`
 - 实例专利来源检查：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src ../3-search/.venv/bin/python scripts/run_example_patents.py --list-only`
 - 实例专利小样本：设置 `BRIGHTDATA_API_KEY` 后运行 `scripts/run_example_patents.py --limit 1 ...`
+- 调用已配置 Bright Data 的 PM2 服务测试：`scripts/run_example_patents.py --service-url http://127.0.0.1:5107 --record-id <id> ...`
 
 当前限制：
 
@@ -618,3 +622,10 @@ analyze_features
 - 平行模块三本轮新增透明电商词汇扩展：只影响搜索 query，不修改模块2原始关键词。当前包含“音响/音箱/佩戴式耳机”“脚踏车/健身车/动感单车”“计时器/定时器”“灯具装置/灯具”等通用电商表达差异；不是针对某个专利写死必要特征。
 - 平行模块三本轮修复相关性过滤：单字覆盖过宽，会把“移动式充电站”误匹配到“便携式蓝牙音箱”；现增加中文二字连续片段覆盖度 `matched_keyword_bigram_ratio`，连续片段不足时 rejected。真实复测 `record=96` 原先误召回的京东音响商品已变为 rejected。
 - 平行模块三真实进度：`record=94 / CN103025390B` 使用“健身脚踏车”通过京东聚合页/详情页链路 accepted 真实商品 `item.jd.com/30147313701.html`，文字和图片同源，标题清理后为“超士老人家用功能健身车...”；`record=95 / CN107786922B` 通过佩戴式音频同义扩展 accepted 真实商品 `item.jd.com/100005207111.html`；`record=96` 未找到合格商品，误召回已被过滤。
+- 平行模块三后续迭代：Bright Data zone 自动发现失败不再导致 `/run` 500；`/run` 新增 `request_timeout_seconds`、`serp_url_limit` 单次覆盖参数；实例脚本新增 `--service-url`，可通过本地 5107 服务复用 PM2 中的 Bright Data 环境。
+- 平行模块三搜索诊断增强：SERP 为空会写 `search_empty`；SERP 返回聚合/列表/非详情候选也会写 rejected 诊断，便于判断是关键词过窄、平台规则不足还是反爬失败。
+- 平行模块三外部商品页规则：新增 `external_product` 识别，保守接受 `medicalexpo` 风格 `/prod/.../product-...html`、厂商 `/product/detail/...`、`/products/...`、台湾电商 `/SalePage/Index/...` 等真实商品详情页；继续拒绝 `taobao.com/chanpin`、下载文件、列表页和专利页。
+- 平行模块三图片/相关性修复：外部电商无文件后缀图片 URL（如 `img.91app.com/webapi/images...`）可被提取；关键词相关性会做常用简繁归一化，避免“立方体计时器”误拒“立方翻轉計時器”。
+- 平行模块三配件误收录修复：关键词包含明确核心商品本体时，标题显示为配件/耗材/垫板/支架/滤芯/刷/电池/充电器等的页面会 rejected。真实复测 `record=100` 原先误收录“扫地机器人爬坡垫”已 rejected，随后通过核心商品名回退 accepted 石头扫地机器人本体 `https://item.jd.com/100135145003.html`。
+- 平行模块三新增真实进度：`record=97 / CN111249616B` 通过外部厂商商品页规则 accepted `https://www.andemed.com/product/detail/286`（输液接头消毒帽，图片/文本同源）；`record=99 / CN210244097U` 通过“多边形/立方体/六面/翻转 + 计时器/定时器”形态词扩展 accepted `https://www.johnhouse.tw/SalePage/Index/6594769`；`record=100 / CN212879151U` accepted `https://item.jd.com/100135145003.html`。
+- 平行模块三当前测试：`3-product-search/tests/test_quality.py` 已扩展到 12 个用例并通过，覆盖外部详情页、搜索降级、外部无后缀图片、简繁相关性和配件过滤。仍未完成 13 个实例专利全量足够商品验证，特别是 `record=96`、`record=98`、`record=105` 以及后续 `101-106` 还需继续逐个 loop。

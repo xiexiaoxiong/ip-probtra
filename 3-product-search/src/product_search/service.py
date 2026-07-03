@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import re
 import uuid
+from dataclasses import replace
 
 from product_search.brightdata import BrightDataClient
 from product_search.config import Settings
@@ -21,12 +22,94 @@ from product_search.platforms import build_search_query_plans, dedupe_candidate_
 from product_search.quality import evaluate_product_detail
 
 
+def _error_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return message[:1000]
+    return f"{type(exc).__name__}: {exc!r}"[:1000]
+
+
+TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
+    {
+        "體": "体",
+        "計": "计",
+        "時": "时",
+        "轉": "转",
+        "學": "学",
+        "習": "习",
+        "電": "电",
+        "價": "价",
+        "醫": "医",
+        "藥": "药",
+        "療": "疗",
+        "機": "机",
+        "馬": "马",
+        "達": "达",
+        "聲": "声",
+        "顯": "显",
+        "掃": "扫",
+        "拖": "拖",
+        "昇": "升",
+        "級": "级",
+        "線": "线",
+        "護": "护",
+        "測": "测",
+        "應": "应",
+        "專": "专",
+        "賣": "卖",
+        "購": "购",
+    }
+)
+
+CORE_PRODUCT_TERMS = (
+    "扫地机器人",
+    "健身车",
+    "动感单车",
+    "脚踏车",
+    "计时器",
+    "定时器",
+    "音箱",
+    "音响",
+    "耳机",
+    "灯具",
+    "水枪",
+)
+
+ACCESSORY_TERMS = (
+    "配件",
+    "耗材",
+    "爬坡垫",
+    "三角垫",
+    "垫板",
+    "坡道",
+    "支架",
+    "保护套",
+    "收纳袋",
+    "滤芯",
+    "滤网",
+    "边刷",
+    "主刷",
+    "拖布",
+    "抹布",
+    "尘袋",
+    "水箱",
+    "电池",
+    "充电器",
+    "遥控器",
+)
+
+
+def _normalize_relevance_text(value: str) -> str:
+    return re.sub(r"\s+", "", (value or "").translate(TRADITIONAL_TO_SIMPLIFIED))
+
+
 class ProductSearchService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = BrightDataClient(settings)
 
     async def run(self, payload: ProductSearchInput) -> ProductSearchOutput:
+        self._apply_payload_overrides(payload)
         product_dataset_id = f"product_detail_{int(dt.datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:6]}"
         keywords = fetch_keywords(
             payload.patent_record_id,
@@ -72,9 +155,11 @@ class ProductSearchService:
             )
 
         try:
-            candidates = await self._collect_candidate_links(payload, keywords)
+            candidates, search_diagnostics = await self._collect_candidate_links(payload, keywords)
             detail_candidates = self._select_detail_candidates(candidates, payload.max_detail_candidates)
-            products, diagnostics = await self._fetch_and_filter_candidates(payload, detail_candidates)
+            candidate_filter_diagnostics = self._diagnose_filtered_candidates(candidates, detail_candidates)
+            products, detail_diagnostics = await self._fetch_and_filter_candidates(payload, detail_candidates)
+            diagnostics = search_diagnostics + candidate_filter_diagnostics + detail_diagnostics
             accepted = products[: payload.max_products]
             rejected_count = sum(1 for item in diagnostics if item.status != "accepted")
 
@@ -122,23 +207,53 @@ class ProductSearchService:
                     candidate_link_count=0,
                     accepted_products_count=0,
                     rejected_candidates_count=0,
-                    error_message=str(exc)[:1000],
+                    error_message=_error_message(exc),
                 )
             raise
 
-    async def _collect_candidate_links(self, payload: ProductSearchInput, keywords: list[str]) -> list[CandidateLink]:
+    async def _collect_candidate_links(
+        self,
+        payload: ProductSearchInput,
+        keywords: list[str],
+    ) -> tuple[list[CandidateLink], list[CandidateDiagnostic]]:
         plans = build_search_query_plans(keywords, payload.platforms, payload.max_keywords)
         semaphore = asyncio.Semaphore(self.settings.max_concurrency)
 
-        async def search_one(plan):
+        async def search_one(plan) -> tuple[list[CandidateLink], CandidateDiagnostic | None]:
             async with semaphore:
-                links, meta = await self.client.search(plan, payload.max_candidates_per_keyword)
-                return [link.model_copy(update={"source": meta.get("provider", link.source)}) for link in links]
+                try:
+                    links, meta = await self.client.search(plan, payload.max_candidates_per_keyword)
+                except Exception as exc:
+                    return [], CandidateDiagnostic(
+                        keyword=plan.keyword,
+                        platform=plan.platform,
+                        candidate_url=plan.serp_url,
+                        title=plan.query,
+                        status="error",
+                        rejection_reason=f"搜索计划执行异常: {_error_message(exc)}",
+                        raw_payload={"plan": plan.model_dump()},
+                    )
+                provider = str(meta.get("provider") or "")
+                if not links:
+                    reason = "搜索未返回商品候选"
+                    if meta.get("error"):
+                        reason = f"{reason}: {meta.get('error')}"
+                    return [], CandidateDiagnostic(
+                        keyword=plan.keyword,
+                        platform=plan.platform,
+                        candidate_url=plan.serp_url,
+                        title=plan.query,
+                        status="search_empty",
+                        rejection_reason=reason,
+                        raw_payload={"plan": plan.model_dump(), "search_meta": meta},
+                    )
+                return [link.model_copy(update={"source": provider or link.source}) for link in links], None
 
         results = await asyncio.gather(*(search_one(plan) for plan in plans))
-        candidates = dedupe_candidate_links([candidate for group in results for candidate in group])
+        diagnostics = [diagnostic for _links, diagnostic in results if diagnostic is not None]
+        candidates = dedupe_candidate_links([candidate for links, _diagnostic in results for candidate in links])
         expanded = await self._expand_discovery_candidates(candidates, payload.max_candidates_per_keyword)
-        return dedupe_candidate_links(candidates + expanded)
+        return dedupe_candidate_links(candidates + expanded), diagnostics
 
     async def _expand_discovery_candidates(self, candidates: list[CandidateLink], per_page_limit: int) -> list[CandidateLink]:
         discovery_pages: list[CandidateLink] = []
@@ -187,6 +302,37 @@ class ProductSearchService:
         }
         detail_candidates.sort(key=lambda item: (source_priority.get(item.source, 9), item.rank))
         return detail_candidates[: max(1, limit)]
+
+    def _diagnose_filtered_candidates(
+        self,
+        candidates: list[CandidateLink],
+        detail_candidates: list[CandidateLink],
+    ) -> list[CandidateDiagnostic]:
+        selected_urls = {candidate.candidate_url for candidate in detail_candidates}
+        diagnostics: list[CandidateDiagnostic] = []
+        for candidate in candidates:
+            if candidate.candidate_url in selected_urls:
+                continue
+            if is_detail_url(candidate.candidate_url, candidate.platform):
+                reason = "商品详情候选超过 max_detail_candidates 限制，未抓取详情"
+            elif is_aggregate_url(candidate.candidate_url):
+                reason = "候选链接是综合/搜索/列表页，不作为商品详情页保留"
+            else:
+                reason = "候选链接不是当前支持的平台商品详情页"
+            diagnostics.append(
+                CandidateDiagnostic(
+                    keyword=candidate.keyword,
+                    platform=candidate.platform,
+                    candidate_url=candidate.candidate_url,
+                    title=candidate.title,
+                    status="rejected",
+                    rejection_reason=reason,
+                    raw_payload={"candidate": candidate.model_dump()},
+                )
+            )
+            if len(diagnostics) >= 50:
+                break
+        return diagnostics
 
     async def _fetch_and_filter_candidates(
         self,
@@ -308,6 +454,17 @@ class ProductSearchService:
         await asyncio.gather(*(process(candidate) for candidate in candidates))
         return list(accepted_by_url.values()), diagnostics
 
+    def _apply_payload_overrides(self, payload: ProductSearchInput) -> None:
+        overrides = {}
+        if payload.request_timeout_seconds is not None:
+            overrides["request_timeout_seconds"] = payload.request_timeout_seconds
+        if payload.serp_url_limit is not None:
+            overrides["serp_url_limit"] = payload.serp_url_limit
+        if not overrides:
+            return
+        self.settings = replace(self.settings, **overrides)
+        self.client = BrightDataClient(self.settings)
+
     def _should_retry_render(self, fetch, decision) -> bool:
         if not self.settings.brightdata_api_key or not self.settings.render_fallback_enabled:
             return False
@@ -327,10 +484,10 @@ class ProductSearchService:
         return provider.startswith("brightdata_unlocker")
 
     def _apply_keyword_relevance(self, keyword: str, parsed, decision):
-        cleaned_keyword = re.sub(r"\s+", "", keyword or "")
+        cleaned_keyword = _normalize_relevance_text(keyword)
         if not decision.accepted or len(cleaned_keyword) < 5:
             return decision
-        haystack = re.sub(r"\s+", "", f"{parsed.product_name} {parsed.description}")
+        haystack = _normalize_relevance_text(f"{parsed.product_name} {parsed.description}")
         if not haystack:
             return decision
         chars = [char for char in dict.fromkeys(cleaned_keyword) if "\u4e00" <= char <= "\u9fff"]
@@ -346,6 +503,10 @@ class ProductSearchService:
             decision.accepted = False
             decision.status = "rejected"
             decision.reasons.append(f"商品详情与检索关键词连续片段覆盖度不足: 字符={ratio:.2f}, 片段={bigram_ratio:.2f}")
+        elif self._is_accessory_mismatch(cleaned_keyword, parsed.product_name):
+            decision.accepted = False
+            decision.status = "rejected"
+            decision.reasons.append("商品标题显示为核心商品的配件/耗材，不是商品本体")
         return decision
 
     def _keyword_bigrams(self, keyword: str) -> list[str]:
@@ -358,3 +519,14 @@ class ProductSearchService:
                 seen.add(token)
                 tokens.append(token)
         return tokens
+
+    def _is_accessory_mismatch(self, cleaned_keyword: str, product_name: str) -> bool:
+        title = _normalize_relevance_text(product_name)
+        if not title:
+            return False
+        core_terms = [term for term in CORE_PRODUCT_TERMS if term in cleaned_keyword]
+        if not core_terms:
+            return False
+        if any(term in cleaned_keyword for term in ACCESSORY_TERMS):
+            return False
+        return any(core in title for core in core_terms) and any(term in title for term in ACCESSORY_TERMS)

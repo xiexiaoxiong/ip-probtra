@@ -1,3 +1,6 @@
+import asyncio
+
+from product_search.brightdata import BrightDataClient
 from product_search.models import FetchResult
 from product_search.discovery import extract_detail_candidates_from_discovery_page
 from product_search.parser import parse_product_page
@@ -5,6 +8,7 @@ from product_search.platforms import expand_ecommerce_keyword_variants, is_aggre
 from product_search.quality import evaluate_product_detail
 from product_search.service import ProductSearchService
 from product_search.config import Settings
+from product_search.models import SearchQueryPlan
 
 
 def test_platform_url_filters_reject_listing_pages():
@@ -17,6 +21,17 @@ def test_platform_url_filters_reject_listing_pages():
     assert is_aggregate_url("https://s.taobao.com/search?q=拖地升降扫地机器人")
     assert normalize_url("#") == ""
     assert normalize_url("/") == ""
+
+
+def test_external_product_detail_url_filters_are_conservative():
+    assert is_detail_url("https://www.medicalexpo.com.cn/prod/euronda/product-68436-949858.html")
+    assert is_detail_url("https://www.andemed.com/product/detail/286")
+    assert is_detail_url("https://www.linhwa.com/products/142.html")
+    assert is_detail_url("http://zfcg.szggzy.com:8081/mall/productdetail.html")
+    assert is_detail_url("https://www.johnhouse.tw/SalePage/Index/6594769")
+    assert not is_detail_url("https://www.taobao.com/chanpin/0d21bd8275d83b3dadc18ea81b799ad19.html")
+    assert not is_detail_url("https://ylbzj.yancheng.gov.cn/module/download/downfile.jsp")
+    assert not is_detail_url("https://www.baihewuhan.com/list-xiaodumao.html")
     assert normalize_url("https://") == ""
 
 
@@ -44,6 +59,21 @@ def test_quality_accepts_same_detail_page_with_text_and_images():
     assert decision.flags["same_url_assets"] is True
     assert parsed.product_name == "智能升降拖地扫地机器人"
     assert parsed.picture
+
+
+def test_parser_accepts_external_product_image_urls_without_file_extension():
+    html = """
+    <html><head>
+      <title>立方翻转计时器</title>
+      <meta property="og:image" content="//img.91app.com/webapi/imagesV3/Original/SalePage/6594769/0/639064217944970000?v=1" />
+      <meta name="description" content="立方翻转计时器，重力感应，倒数计时器，桌面时间管理工具。" />
+    </head><body>
+      <h1>立方翻转计时器</h1>
+      <div class="product-detail">商品特色包括重力感应、LED屏幕、倒数计时、音量调节，适合学习办公和厨房烘焙使用。</div>
+    </body></html>
+    """
+    parsed = parse_product_page(html, "https://www.johnhouse.tw/SalePage/Index/6594769", "https://www.johnhouse.tw/SalePage/Index/6594769")
+    assert parsed.picture == ["https://img.91app.com/webapi/imagesV3/Original/SalePage/6594769/0/639064217944970000?v=1"]
 
 
 def test_quality_rejects_captcha_page():
@@ -108,6 +138,11 @@ def test_ecommerce_keyword_variants_are_transparent_query_expansion():
     variants = expand_ecommerce_keyword_variants("健身脚踏车")
     assert "健身车" in variants
     assert "动感单车" in variants
+    timer_variants = expand_ecommerce_keyword_variants("多边形计时器")
+    assert "立方体计时器" in timer_variants
+    assert "六面计时器" in timer_variants
+    assert "翻转计时器" in timer_variants
+    assert "扫地机器人" in expand_ecommerce_keyword_variants("免爬坡扫地机器人")
 
 
 def test_keyword_relevance_rejects_sparse_character_overlap():
@@ -146,3 +181,111 @@ def test_keyword_relevance_rejects_sparse_character_overlap():
     filtered = service._apply_keyword_relevance("移动式充电站", parsed, decision)
     assert not filtered.accepted
     assert filtered.flags["matched_keyword_bigram_ratio"] < 0.35
+
+
+def test_keyword_relevance_normalizes_common_traditional_chinese():
+    html = """
+    <html><head><title>立方翻轉計時器</title>
+      <meta property="og:image" content="https://img.91app.com/webapi/imagesV3/Original/SalePage/6594769/0/639064217944970000?v=1" />
+    </head><body>
+      <h1>立方翻轉計時器</h1>
+      <div class="product-detail">
+        重力感應翻轉計時器，倒數計時器，LED電子計時器，適合學習、辦公、烘焙和時間管理。
+        商品特色包括音量調節、小巧便攜、續航力佳和清脆響鈴。
+        這款立方翻轉計時器具有多段預設時間，翻到指定面即可開始倒數，桌面擺放穩定。
+        外殼小巧，螢幕清楚，操作簡單，適合學生自習、工作番茄鐘、廚房料理和運動休息。
+        產品頁提供商品特色、商品編號、價格、付款方式、配送方式和售後服務資訊。
+      </div>
+    </body></html>
+    """
+    url = "https://www.johnhouse.tw/SalePage/Index/6594769"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    service = ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    filtered = service._apply_keyword_relevance("立方体计时器", parsed, decision)
+    assert filtered.accepted
+    assert filtered.flags["matched_keyword_bigram_ratio"] >= 0.35
+
+
+def test_keyword_relevance_rejects_core_product_accessories():
+    html = """
+    <html><head><title>室内扫地机器人爬坡垫上坡道三角垫塑料小台阶垫板</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/demo.jpg" />
+    </head><body>
+      <h1>室内扫地机器人爬坡垫上坡道三角垫塑料小台阶垫板家用</h1>
+      <div class="detail-content">
+        这是一款适用于扫地机器人的爬坡垫、三角垫和门槛坡道配件，用于帮助设备越过门槛。
+        商品详情包含垫板材质、防滑纹理、不同高度规格、使用场景、安装方式和售后说明。
+        页面销售的是配件耗材，不是扫地机器人本体。
+        该配件可放置在厨房、卫生间、阳台和客厅门槛位置，帮助已有扫地机器人通过小台阶。
+        详情页介绍了灰色、白色、不同高度和长度规格，可裁剪使用，适合多种地面材质。
+        包装内仅包含坡道垫板，不包含主机、充电座、拖地模块、导航系统和清扫系统。
+      </div>
+      <img src="//img11.360buyimg.com/n1/demo2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10108481976279.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    service = ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    filtered = service._apply_keyword_relevance("免爬坡扫地机器人", parsed, decision)
+    assert not filtered.accepted
+    assert "配件" in " ".join(filtered.reasons)
+
+
+def test_brightdata_zone_failure_does_not_escape(monkeypatch):
+    async def fail_discovery(_self):
+        raise TimeoutError()
+
+    monkeypatch.setattr(BrightDataClient, "_discover_zones", fail_discovery)
+    client = BrightDataClient(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="configured",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    plan = SearchQueryPlan(keyword="医用消毒帽", platform="jd", query="医用消毒帽 site:jd.com", serp_url="")
+    candidates, meta = asyncio.run(client.search(plan, 1))
+    assert candidates == []
+    assert meta["ok"] is False
+    assert "TimeoutError" in meta["error"]

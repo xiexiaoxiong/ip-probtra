@@ -111,9 +111,24 @@ def _extract_images(soup: BeautifulSoup, final_url: str, limit: int = 18) -> lis
             return
         lower = normalized.lower()
         parsed = urlparse(lower)
-        image_like = bool(re.search(r"\.(?:jpg|jpeg|png|webp|gif)(?:$|\?)", parsed.path)) or any(
-            host in parsed.netloc for host in ("alicdn.com", "360buyimg.com", "jd.com", "yangkeduo.com", "suning.cn")
+        image_hosts = (
+            "alicdn.com",
+            "360buyimg.com",
+            "jd.com",
+            "yangkeduo.com",
+            "suning.cn",
+            "91app.com",
+            "books.com.tw",
+            "momoshop.com.tw",
+            "shoplineimg.com",
+            "cloudfront.net",
+            "ssl-images-amazon.com",
+            "media-amazon.com",
         )
+        image_path_tokens = ("/webapi/images", "/images/", "/image/", "/upload/", "/uploads/", "/product/")
+        image_like = bool(re.search(r"\.(?:jpg|jpeg|png|webp|gif)(?:$|\?)", parsed.path)) or any(
+            host in parsed.netloc for host in image_hosts
+        ) or any(token in parsed.path for token in image_path_tokens)
         if (
             lower.startswith("data:")
             or any(token in lower for token in ("sprite", "icon", "logo", "avatar", "jcm.jd.com/pre"))

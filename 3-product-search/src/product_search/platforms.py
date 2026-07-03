@@ -79,6 +79,47 @@ PLATFORM_RULES: dict[str, PlatformRule] = {
     ),
 }
 
+EXTERNAL_PRODUCT_DETAIL_PATTERNS = _compile_many(
+    [
+        r"/prod/.+/product-\d+-\d+\.html",
+        r"/product/detail/\d+",
+        r"/products/\d+\.html",
+        r"/product/[^/?#]+/?$",
+        r"/products/[^/?#]+/?$",
+        r"/salepage/index/\d+",
+        r"/mall/productdetail\.html",
+        r"/[^/?#]*productdetail[^/?#]*\.html",
+    ]
+)
+
+EXTERNAL_PRODUCT_REJECT_PATTERNS = _compile_many(
+    [
+        r"patents\.google\.",
+        r"(?:^|/)(?:search|list|category|categories|chanpin|brand|tag|wiki)(?:/|[-_?])",
+        r"/download/",
+        r"/downfile\.",
+        r"\.(?:pdf|xlsx?|docx?|pptx?|zip)(?:$|\?)",
+        r"s\.1688\.com/",
+        r"taobao\.com/chanpin/",
+        r"jd\.com/(?:brand|hprm|phb|chanpin|hotitem|jiage)/",
+    ]
+)
+
+OBJECT_BASE_TERMS = (
+    "扫地机器人",
+    "健身车",
+    "动感单车",
+    "脚踏车",
+    "计时器",
+    "定时器",
+    "蓝牙耳机",
+    "蓝牙音箱",
+    "音箱",
+    "音响",
+    "灯具",
+    "水枪",
+)
+
 
 def unwrap_search_redirect(url: str) -> str:
     parsed = urlparse(url)
@@ -144,11 +185,15 @@ def detect_platform(url: str) -> str:
     for key, rule in PLATFORM_RULES.items():
         if any(domain in host for domain in rule.domains):
             return key
+    if is_external_product_url(url):
+        return "external_product"
     return ""
 
 
 def is_aggregate_url(url: str) -> bool:
     normalized = normalize_url(url)
+    if is_external_product_url(normalized):
+        return False
     platform = detect_platform(normalized)
     rule = PLATFORM_RULES.get(platform)
     if not rule:
@@ -158,11 +203,32 @@ def is_aggregate_url(url: str) -> bool:
 
 def is_detail_url(url: str, platform: str = "") -> bool:
     normalized = normalize_url(url)
-    platform = platform or detect_platform(normalized)
+    detected_platform = detect_platform(normalized)
+    platform = platform or detected_platform
     rule = PLATFORM_RULES.get(platform)
+    if rule and not is_aggregate_url(normalized) and any(pattern.search(normalized) for pattern in rule.detail_patterns):
+        return True
+    if detected_platform and detected_platform != platform:
+        detected_rule = PLATFORM_RULES.get(detected_platform)
+        if detected_rule and not is_aggregate_url(normalized):
+            return any(pattern.search(normalized) for pattern in detected_rule.detail_patterns)
+    if is_external_product_url(normalized):
+        return True
     if not rule or is_aggregate_url(normalized):
         return False
-    return any(pattern.search(normalized) for pattern in rule.detail_patterns)
+    return False
+
+
+def is_external_product_url(url: str) -> bool:
+    normalized = normalize_url(url)
+    if not normalized:
+        return False
+    parsed = urlparse(normalized)
+    if any(domain in parsed.netloc.lower() for rule in PLATFORM_RULES.values() for domain in rule.domains):
+        return False
+    if any(pattern.search(normalized) for pattern in EXTERNAL_PRODUCT_REJECT_PATTERNS):
+        return False
+    return any(pattern.search(normalized) for pattern in EXTERNAL_PRODUCT_DETAIL_PATTERNS)
 
 
 def extract_product_id(url: str, platform: str = "") -> str:
@@ -214,6 +280,12 @@ def build_search_query_plans(keywords: list[str], platforms: list[str], max_keyw
 def expand_ecommerce_keyword_variants(keyword: str) -> list[str]:
     keyword = " ".join(str(keyword or "").split())
     variants = [keyword] if keyword else []
+    if any(token in keyword for token in ("多边形", "多面体")) and any(token in keyword for token in ("计时器", "定时器")):
+        for shape in ("立方体", "六面", "翻转", "多面体"):
+            variants.append(re.sub(r"多边形|多面体", shape, keyword))
+    for object_term in OBJECT_BASE_TERMS:
+        if object_term in keyword and object_term != keyword:
+            variants.append(object_term)
     replacements = [
         ("蓝牙音响", "蓝牙音箱"),
         ("音响", "音箱"),
@@ -238,7 +310,7 @@ def expand_ecommerce_keyword_variants(keyword: str) -> list[str]:
         if cleaned and cleaned not in seen:
             seen.add(cleaned)
             result.append(cleaned)
-    return result[:3]
+    return result[:5]
 
 
 def dedupe_candidate_links(candidates: list[CandidateLink]) -> list[CandidateLink]:

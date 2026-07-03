@@ -14,6 +14,13 @@ from product_search.models import CandidateLink, FetchResult, SearchQueryPlan
 from product_search.platforms import normalize_url
 
 
+def _error_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return message[:500]
+    return f"{type(exc).__name__}: {exc!r}"[:500]
+
+
 def _json_or_text(response: httpx.Response) -> Any:
     content_type = response.headers.get("content-type", "")
     text = response.text
@@ -101,6 +108,7 @@ class BrightDataClient:
         self.settings = settings
         self._zone_lock = asyncio.Lock()
         self._discovered_zones: dict[str, str] | None = None
+        self._last_zone_error = ""
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -127,14 +135,19 @@ class BrightDataClient:
         async with self._zone_lock:
             if self._discovered_zones is not None:
                 return self._discovered_zones
-            timeout = httpx.Timeout(self.settings.request_timeout_seconds)
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                response = await client.get(
-                    "https://api.brightdata.com/zone/get_active_zones",
-                    headers={"Authorization": f"Bearer {self.settings.brightdata_api_key}"},
-                )
-                response.raise_for_status()
-                payload = response.json()
+            try:
+                timeout = httpx.Timeout(self.settings.request_timeout_seconds)
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                    response = await client.get(
+                        "https://api.brightdata.com/zone/get_active_zones",
+                        headers={"Authorization": f"Bearer {self.settings.brightdata_api_key}"},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+            except Exception as exc:
+                self._last_zone_error = _error_message(exc)
+                self._discovered_zones = {}
+                return {}
             zones: dict[str, str] = {}
             if isinstance(payload, list):
                 for item in payload:
@@ -150,13 +163,21 @@ class BrightDataClient:
     async def _resolve_serp_zone(self) -> str:
         if self.settings.brightdata_serp_zone:
             return self.settings.brightdata_serp_zone
-        zones = await self._discover_zones()
+        try:
+            zones = await self._discover_zones()
+        except Exception as exc:
+            self._last_zone_error = _error_message(exc)
+            return ""
         return zones.get("serp", "")
 
     async def _resolve_unlocker_zone(self) -> str:
         if self.settings.brightdata_unlocker_zone:
             return self.settings.brightdata_unlocker_zone
-        zones = await self._discover_zones()
+        try:
+            zones = await self._discover_zones()
+        except Exception as exc:
+            self._last_zone_error = _error_message(exc)
+            return ""
         for zone_type in ("unblocker", "web_unlocker", "unlocker"):
             if zones.get(zone_type):
                 return zones[zone_type]
@@ -164,7 +185,7 @@ class BrightDataClient:
 
     async def search(self, plan: SearchQueryPlan, limit: int) -> tuple[list[CandidateLink], dict[str, Any]]:
         serp_zone = await self._resolve_serp_zone()
-        brightdata_error = ""
+        brightdata_error = self._last_zone_error
         if self.settings.brightdata_api_key and serp_zone:
             brightdata_candidates: list[CandidateLink] = []
             serp_urls = _build_serp_urls(plan)[: self.settings.serp_url_limit]
@@ -184,7 +205,7 @@ class BrightDataClient:
                     if len(brightdata_candidates) >= limit:
                         break
                 except Exception as exc:
-                    brightdata_error = str(exc)[:500]
+                    brightdata_error = _error_message(exc)
                     continue
             if brightdata_candidates:
                 return brightdata_candidates[:limit], {
@@ -196,7 +217,11 @@ class BrightDataClient:
                 return [], {"provider": "brightdata_serp", "ok": False, "error": brightdata_error or "no serp candidates"}
 
         if not self.settings.allow_direct_fetch_fallback:
-            return [], {"provider": "none", "ok": False, "error": "Bright Data SERP 未配置且禁用了直连兜底"}
+            return [], {
+                "provider": "none",
+                "ok": False,
+                "error": brightdata_error or "Bright Data SERP 未配置且禁用了直连兜底",
+            }
 
         query = quote_plus(plan.query)
         url = f"https://www.bing.com/search?q={query}&setlang=zh-CN&cc=cn"
@@ -213,11 +238,11 @@ class BrightDataClient:
                 "fallback_after_brightdata_error": brightdata_error,
             }
         except Exception as exc:
-            return [], {"provider": "direct_bing", "ok": False, "error": str(exc)[:500], "fallback_after_brightdata_error": brightdata_error}
+            return [], {"provider": "direct_bing", "ok": False, "error": _error_message(exc), "fallback_after_brightdata_error": brightdata_error}
 
     async def fetch_detail_page(self, url: str, force_render: bool = False) -> FetchResult:
         unlocker_zone = await self._resolve_unlocker_zone()
-        brightdata_error = ""
+        brightdata_error = self._last_zone_error
         if self.settings.brightdata_api_key and unlocker_zone:
             payload = {
                 "zone": unlocker_zone,
@@ -235,7 +260,7 @@ class BrightDataClient:
                 provider = "brightdata_unlocker_render" if force_render else "brightdata_unlocker"
                 return FetchResult(ok=True, url=url, final_url=normalize_url(final_url), html=html, provider=provider)
             except Exception as exc:
-                brightdata_error = str(exc)[:500]
+                brightdata_error = _error_message(exc)
                 if self.settings.render_fallback_enabled and not force_render:
                     try:
                         return await self.fetch_detail_page(url, force_render=True)
@@ -251,7 +276,7 @@ class BrightDataClient:
                         error_message=brightdata_error or "Bright Data detail fetch failed",
                     )
                 if not self.settings.allow_direct_fetch_fallback:
-                    return FetchResult(ok=False, url=url, final_url=url, provider="brightdata_unlocker", error_message=str(exc)[:500])
+                    return FetchResult(ok=False, url=url, final_url=url, provider="brightdata_unlocker", error_message=_error_message(exc))
 
         if not self.settings.allow_direct_fetch_fallback:
             return FetchResult(ok=False, url=url, final_url=url, provider="none", error_message="Bright Data Unlocker 未配置且禁用了直连兜底")
@@ -275,7 +300,7 @@ class BrightDataClient:
                 result.error_message = result.error_message or f"Bright Data fallback: {brightdata_error}"
             return result
         except Exception as exc:
-            error = str(exc)[:500]
+            error = _error_message(exc)
             if brightdata_error:
                 error = f"Bright Data fallback: {brightdata_error}; direct fetch: {error}"
             return FetchResult(ok=False, url=url, final_url=url, provider="direct_fetch", error_message=error)
@@ -289,6 +314,8 @@ def _extract_final_url_from_html(html: str) -> str:
 def _build_serp_urls(plan: SearchQueryPlan) -> list[str]:
     variants = [plan.query]
     keyword = plan.keyword.strip()
+    if keyword:
+        variants.extend([f"{keyword} 商品", f"{keyword} 价格"])
     if plan.platform == "jd":
         variants.extend(
             [

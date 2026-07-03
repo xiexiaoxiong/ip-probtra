@@ -1,4 +1,5 @@
 import argparse
+import logging
 from typing import Any
 
 import uvicorn
@@ -13,6 +14,7 @@ from product_search.service import ProductSearchService
 bootstrap_local_env()
 
 app = FastAPI(title="Patent Product Detail Search", version="0.1.0")
+logger = logging.getLogger("product_search")
 
 
 @app.on_event("startup")
@@ -40,7 +42,9 @@ async def run_product_search(payload: ProductSearchInput) -> ProductSearchOutput
         service = ProductSearchService(get_settings())
         return await service.run(payload)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        detail = str(exc).strip() or f"{type(exc).__name__}: {exc!r}"
+        logger.exception("product search run failed: %s", detail)
+        raise HTTPException(status_code=500, detail=detail) from exc
 
 
 @app.get("/runs/{run_id}")

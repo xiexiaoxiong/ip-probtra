@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from sqlalchemy import text
 
 from product_search.config import bootstrap_local_env, get_settings
@@ -94,7 +95,6 @@ async def run_one(record: ExampleRecord, source: KeywordSource, args: argparse.N
         keywords = fetch_keywords(source.patent_record_id, source.analysis_session_id, None, args.max_keywords)
     else:
         keywords = fetch_aggregated_keywords(record, args.max_keywords)
-    service = ProductSearchService(get_settings())
     payload = ProductSearchInput(
         patent_record_id=record.id,
         analysis_session_id=f"{record.task_id}_product_detail_test",
@@ -104,8 +104,30 @@ async def run_one(record: ExampleRecord, source: KeywordSource, args: argparse.N
         max_candidates_per_keyword=args.max_candidates_per_keyword,
         max_detail_candidates=args.max_detail_candidates,
         max_products=args.max_products,
+        request_timeout_seconds=args.request_timeout_seconds,
+        serp_url_limit=args.serp_url_limit,
         persist=not args.no_persist,
     )
+    if args.service_url:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(args.http_timeout_seconds)) as client:
+            response = await client.post(f"{args.service_url.rstrip('/')}/run", json=payload.model_dump())
+            response.raise_for_status()
+            data = response.json()
+        products = data.get("products") or []
+        return {
+            "record_id": record.id,
+            "patent_number": record.patent_number,
+            "title": record.title,
+            "keyword_source": source,
+            "run_id": int(data.get("product_detail_search_run_id") or 0),
+            "keywords": list(data.get("keywords") or []),
+            "candidates": int(data.get("total_candidate_links_count") or 0),
+            "accepted": int(data.get("accepted_products_count") or 0),
+            "rejected": int(data.get("rejected_candidates_count") or 0),
+            "products": products,
+        }
+
+    service = ProductSearchService(get_settings())
     result = await service.run(payload)
     return {
         "record_id": record.id,
@@ -187,7 +209,11 @@ async def main() -> int:
     parser.add_argument("--max-candidates-per-keyword", type=int, default=4)
     parser.add_argument("--max-detail-candidates", type=int, default=12)
     parser.add_argument("--max-products", type=int, default=5)
+    parser.add_argument("--request-timeout-seconds", type=int, default=None)
+    parser.add_argument("--serp-url-limit", type=int, default=None)
     parser.add_argument("--platforms", nargs="+", default=["jd", "1688"])
+    parser.add_argument("--service-url", default="", help="call a running 3-product-search HTTP service instead of direct in-process service")
+    parser.add_argument("--http-timeout-seconds", type=int, default=240)
     parser.add_argument("--no-persist", action="store_true")
     parser.add_argument("--list-only", action="store_true", help="only list keyword sources; do not search products")
     parser.add_argument("--single-source-keywords", action="store_true", help="only use the selected keyword source instead of aggregating same-patent module2 keywords")

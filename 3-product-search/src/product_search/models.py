@@ -17,6 +17,8 @@ class ProductSearchInput(BaseModel):
     max_candidates_per_keyword: int = Field(default=6, ge=1, le=30)
     max_detail_candidates: int = Field(default=12, ge=1, le=100)
     max_products: int = Field(default=30, ge=1, le=200)
+    request_timeout_seconds: int | None = Field(default=None, ge=5, le=120)
+    serp_url_limit: int | None = Field(default=None, ge=1, le=10)
     persist: bool = Field(default=True, description="是否写入 product_detail_search_* 表")
 
 

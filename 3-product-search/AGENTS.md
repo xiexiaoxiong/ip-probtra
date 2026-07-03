@@ -46,9 +46,12 @@ PM2 `ecosystem.config.cjs` 会把以下变量注入本模块：
 - URL 必须匹配真实商品详情模式，例如 `detail.1688.com/offer/...html`、`item.jd.com/...html`、`item.taobao.com/item.htm?id=...`、`detail.tmall.com/item.htm?id=...`。
 - 明确排除搜索页、列表页、店铺页、类目页、聚合推荐页。
 - 京东 `brand/hprm/phb/chanpin/hotitem` 等聚合页不能作为商品结果，但可以作为 discovery page 提取真实 `item.jd.com/<sku>.html` 详情链接。
+- 可保守接受外部真实商品详情页并标记为 `external_product`，例如 `/product/detail/...`、`/products/...`、`/SalePage/Index/...`；但 `chanpin`、下载文件、专利页、列表页仍必须 rejected。
 - 页面不能是登录/验证码/安全验证等反爬拦截页。
 - 至少提取到标题、一定长度的详情文本、图片；价格、销量、厂商为增强字段，不作为唯一通过条件。
 - 关键词相关性不能只看单字覆盖；当前还要求中文二字连续片段覆盖度，防止“移动式充电站”误召回“便携式蓝牙音箱”。
+- 常见简繁差异会在关键词相关性判断前归一化，避免繁体商品页被误拒。
+- 关键词包含明确核心商品本体时，如果商品标题显示为配件/耗材/垫板/支架/滤芯/刷/电池/充电器等，不得进入 products 表。
 
 ## HTTP 接口
 
@@ -64,6 +67,8 @@ PM2 `ecosystem.config.cjs` 会把以下变量注入本模块：
   "max_candidates_per_keyword": 6,
   "max_detail_candidates": 12,
   "max_products": 30,
+  "request_timeout_seconds": null,
+  "serp_url_limit": null,
   "persist": true
 }
 ```
@@ -82,8 +87,14 @@ PM2 统一启动后端时，本模块端口是 `5107`。
 
 ## 2026-07-04 真实测试进度
 
-- `tests/test_quality.py` 覆盖 URL 过滤、验证码拒绝、京东 discovery page 抽取、京东标题/运费 0 清理、电商关键词透明扩展、连续片段相关性过滤；当前 7/7 通过。
+- `tests/test_quality.py` 覆盖 URL 过滤、验证码拒绝、京东 discovery page 抽取、京东标题/运费 0 清理、电商关键词透明扩展、连续片段相关性过滤、外部商品页、无后缀图片 URL、简繁相关性、核心商品配件过滤；当前 12/12 通过。
 - `record=94 / CN103025390B`：通过京东聚合页发现并抓取真实商品详情 `https://item.jd.com/30147313701.html`，accepted，图片与文本同源。
 - `record=95 / CN107786922B`：通过“音响/音箱/耳机”透明 query 扩展找到 `https://item.jd.com/100005207111.html`，多次 render 后 accepted。
 - `record=96 / 201780007801.2`：此前误召回京东蓝牙音箱；连续片段相关性过滤后已 rejected，仍需继续寻找真实“移动式充电站/高尔夫球充电站”商品。
+- `record=97 / CN111249616B`：`医用消毒帽` 的 JD/1688 平台详情页不足；新增外部商品页规则后 accepted 厂商真实商品页 `https://www.andemed.com/product/detail/286`，图片/文本同源，platform=`external_product`。
+- `record=99 / CN210244097U`：模块2 原始关键词 `多边形计时器` 通过“立方体/六面/翻转 + 计时器/定时器”形态词扩展 accepted 台湾电商详情页 `https://www.johnhouse.tw/SalePage/Index/6594769`；修复外部无后缀图片 URL 和简繁相关性后通过。
+- `record=100 / CN212879151U`：原先误 accepted `扫地机器人爬坡垫`，新增核心商品配件过滤后 rejected；再通过核心商品名回退（`免爬坡扫地机器人` -> `扫地机器人`）accepted 京东石头扫地机器人本体 `https://item.jd.com/100135145003.html`。
+- `/run` 支持 `request_timeout_seconds`、`serp_url_limit` 单次覆盖；`scripts/run_example_patents.py` 支持 `--service-url http://127.0.0.1:5107`，用于通过 PM2 服务复用 Bright Data 环境。
+- SERP 0 候选、非详情候选和详情抓取失败都会写入 `product_detail_search_candidates`，便于判断关键词过窄、平台规则不足或反爬失败。
 - 批量测试必须设置预算：建议 `PRODUCT_SEARCH_MAX_CONCURRENCY=1`、`PRODUCT_SEARCH_SERP_URL_LIMIT=2-4`、`--max-detail-candidates 1-4` 逐专利运行；不要一次全量跑 13 个高预算任务。
+- 当前仍未完成 13 个实例专利全量验证；`record=96` 仍未找到合格商品，`record=98`、`record=105` 缺模块2关键词来源，`record=101-106` 仍需继续逐个真实测试。
