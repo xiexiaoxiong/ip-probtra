@@ -113,6 +113,7 @@ module.exports = {
     workflowApp('2-keyword-fitness', 5103),
     workflowApp('2-keyword-electra', 5104),
     workflowApp('3-search', 5105),
+    workflowApp('3-product-search', 5107),
     workflowApp('4-claim-chat', 5106),
     {
       name: 'patent-web',

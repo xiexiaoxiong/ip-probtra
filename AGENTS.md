@@ -24,6 +24,7 @@
 | `2-keyword-fitness/` | 模块2健身器材行业版，流程与通用版相似，Prompt/节点策略偏健身器材 |
 | `2-keyword-electra/` | 模块2家用电器行业版，流程与通用版相似，Prompt/节点策略偏家电 |
 | `3-search/` | 模块3，商品检索：读取关键词，调用 Coze 搜索工作流，保存商品；含商品页 Playwright 抓取原型 |
+| `3-product-search/` | 平行模块3实验版，商品详情检索：用模块2关键词检索电商平台并抓取真实商品详情页，独立表落库 |
 | `4-claim-chat/` | 模块4，权利要求-商品比对：拆独立权利要求特征，逐商品分析证据，规则计分，写 Postgres |
 | `IP-protral/` | Next.js Portal：上传、认证、编排、进度、结果页、详情页、报告导出 |
 | `.trae/documents/` | 既有方案文档，记录账户、异步检索、模块4评分、token 高亮等设计 |
@@ -64,6 +65,7 @@
 - `2-keyword-fitness` -> `127.0.0.1:5103`
 - `2-keyword-electra` -> `127.0.0.1:5104`
 - `3-search` -> `127.0.0.1:5105`
+- `3-product-search` -> `127.0.0.1:5107`（平行实验模块，不替代 5105）
 - `4-claim-chat` -> `127.0.0.1:5106`
 - `IP-protral` -> 默认 `3001` 或 `.env.local` 的 `PORT`
 
@@ -89,6 +91,10 @@ SKIP_ENV_VALIDATION=1 bash scripts/http_run.sh -p 5116
 | `COZE_SEARCH_API_TOKEN` | 模块3搜索工作流 Token |
 | `COZE_SEARCH_TIMEOUT` | 模块3搜索超时 |
 | `COZE_MAX_CONCURRENT` | 模块3逐关键词并发数 |
+| `BRIGHTDATA_API_KEY` | 平行模块3实验版 Bright Data API key |
+| `BRIGHTDATA_SERP_ZONE` / `BRIGHTDATA_UNLOCKER_ZONE` | 平行模块3实验版 SERP/Unlocker zone；未配置时会尝试通过 API key 自动发现 active zone |
+| `PRODUCT_SEARCH_MAX_CONCURRENCY` | 平行模块3详情检索并发，默认 2；真实电商页不稳定时建议降为 1 |
+| `PRODUCT_SEARCH_BRIGHTDATA_RENDER_FALLBACK` | 平行模块3是否在详情页信息不足时启用 Bright Data `render=true` 兜底，默认开启 |
 | `COZE_BUCKET_*` | S3 兼容对象存储，用于专利附图、上传文件、商品图片 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_TENANT_ACCESS_TOKEN` | 飞书备选链路和遗留节点 |
 | `AUTH_BOOTSTRAP_ADMIN_EMAIL` / `AUTH_BOOTSTRAP_ADMIN_PASSWORD` / `AUTH_BOOTSTRAP_ADMIN_NAME` | Portal 初始管理员 |
@@ -267,6 +273,63 @@ entry
 - `3-search/README.md` 的独立商品页抓取原型 `src/tools/product_page_capture.py` 仍保留；当前主流程以 headless/失败隔离方式复用其文本和截图抓取能力，不启用人工登录。
 - 抓取原型使用 Playwright，可人工登录/复用浏览器 profile，输出截图、可见文字、OCR、多模态筛选后的商品详情图。
 - 抓取原型测试：`uv run pytest tests/test_product_page_capture.py`。
+
+## 平行模块3：商品详情检索实验版
+
+路径：`3-product-search/`
+
+定位：
+
+- 新建的平行商品详情检索模块，不替代现有 `3-search/` 和 5105 主流程。
+- 目标是直接用模块2关键词检索电商平台，抓取真正商品详情页中的标题、详情文本、图片、价格、销量、品牌、厂商等字段。
+- 当前用于独立测试和反爬策略迭代，默认写独立表，不写旧 `search_runs` / `search_products`。
+
+数据表：
+
+- `product_detail_search_runs`
+- `product_detail_search_candidates`
+- `product_detail_search_products`
+
+链路：
+
+```text
+keyword_records/input_keywords
+  -> platform-specific SERP queries
+  -> Bright Data SERP API or direct fallback
+  -> platform detail URL filter
+  -> Bright Data Unlocker API
+  -> optional render=true retry
+  -> parse title/text/images/price/sales/manufacturer
+  -> quality gate
+  -> independent tables
+```
+
+接口：
+
+- `POST /run`
+- `GET /runs/{run_id}`
+- `GET /health`
+
+关键规则：
+
+- 只接受真实详情页 URL，排除搜索页、列表页、店铺页、类目页和聚合页。
+- 商品文字和图片必须来自同一个最终详情 URL；落库字段包含 `source_text_url`、`source_image_url` 和 `same_url_assets`。
+- 登录、验证码、安全验证、京东 `risk_handler` 等页面必须判为 blocked/rejected。
+- Bright Data API key 可单独配置；若未配置 `BRIGHTDATA_SERP_ZONE` / `BRIGHTDATA_UNLOCKER_ZONE`，模块会调用 `GET https://api.brightdata.com/zone/get_active_zones` 自动发现 `serp` 与 `unblocker` zone。
+- 电商详情页动态渲染不稳定时，模块会用 Bright Data Unlocker 的 `render=true` 重试；空响应必须视为抓取失败，不得作为空详情页通过。
+- 关键词读取优先使用 `OBJECT_BASE` 主商品词和必要特征组合词，短的单个必要特征低优先级；长关键词命中的商品还要做通用字符覆盖度过滤，避免只含宽词的无关商品进入结果。
+
+测试入口：
+
+- 单元测试：`PYTHONDONTWRITEBYTECODE=1 ../3-search/.venv/bin/python -m pytest -p no:cacheprovider tests/test_quality.py -q`
+- 实例专利来源检查：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src ../3-search/.venv/bin/python scripts/run_example_patents.py --list-only`
+- 实例专利小样本：设置 `BRIGHTDATA_API_KEY` 后运行 `scripts/run_example_patents.py --limit 1 ...`
+
+当前限制：
+
+- 真实电商页存在波动：京东详情页通过 Bright Data `render=true` 单独抓取可成功，但批量抓取中仍可能返回空响应；1688 多个页面仍出现验证码或详情信息不足。
+- 13 个实例专利中，当前数据库能为 11 个找到同专利号/同标题的历史模块2关键词；`CN204260680U` 和 `CN108181988B` 仍需补跑模块2后才能按最新模块1记录测试。
+- 当前尚未完成 `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 13 个专利的全量“足够多商品”验证，不能视为目标完成。
 
 ## 模块4：权利要求-商品比对
 
@@ -537,3 +600,21 @@ analyze_features
 - 模块4弱线索真实验证：针对 `analysis_1782651371368_9qeyd5` 中含 weak 补充的商品（search_product id 690，列表 index 7）跑 `/debug/run_product`，商品描述同时含 weak 和 OCR，LLM/规则链路没有把 weak 资料作为 token 证据；随后完整重跑模块4 `run_id=analysis_1782651371368_9qeyd5-module4-weak-guard`，生成 `claim_compare_run_id=66`，19 个商品/132 行写库完成。数据库核查 run 66 中目标商品没有 weak 引用 token，全 run `bad_weak_only_match_units=0`。
 - 模块1摘要提取修复：`analysis_1782744737252_xsrjtj` 无摘要的根因是扫描版 `CN103025390B.pdf` 首页 PyMuPDF 无文本，OCR 后首页标签为 `(57) 摘 要`、`(54) 发 明 名 称`，旧正则只匹配连续“摘要/发明名称”。已将 CN 首页元数据正则改为允许 OCR 空格标签，并新增 `1-patent-analysis/scripts/test_example_patent_abstracts.py`。验证结果：实例专利目录 13 个 PDF 的元数据提取测试全部有摘要；完整调用模块1 `/run` 顺序跑 13 个 PDF，生成 `module1_abstract_examples_1782749163_*` 测试记录，全部写入 `abstract_text`，失败列表为空。已回填旧任务 `analysis_1782744737252_xsrjtj` 的 `analysis_sessions.results.patent.abstract` 和 CN103025390B 相关 `patent_parse_records.abstract_text`。
 - 模块1附图提取重构：`analysis_1782744737252_xsrjtj` 摘要附图失败的直接原因是 `CN103025390B.pdf` 为全页扫描版，旧 `_find_candidate_figure_pages` 依赖 PyMuPDF 文本中的“附图说明/说明书附图/图N”，扫描页 `get_text()` 全为空，导致候选附图页为空并写入 0 张图。已重构 `1-patent-analysis/src/graphs/nodes/figure_extract_node.py`：首页单独提取 `摘要附图`；可解析 PDF 按页面内大图块 bbox 裁剪，支持同页多图和 `图2A/图2B`；扫描 PDF 从尾页向前 OCR 定位连续“说明书附图”页，再用二值行密度和空白带拆分同页多图，避免整页截图。Portal 模块1测试脚本 `IP-protral/scripts/extract-module1-figures.py` 已改为调用同一套模块1 helper。新增 `1-patent-analysis/scripts/test_example_patent_figures.py`，验证 `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 13 个 PDF 均提取到非整页图块，失败列表为空。已重启 `patent-1-patent-analysis` 并用旧 task_id `analysis_1782744737288` 重跑模块1，`patent_parse_records.id=92` 现有 22 张图（首张为 `摘要附图`）；已回填 `analysis_1782744737252_xsrjtj` 的 `results.patent.drawings` 22 条 URL。
+
+### 2026-07-04
+
+- 新建平行模块三 `3-product-search/`，不替代现有 `3-search/`。新增 FastAPI 入口 `src/main.py`、Bright Data 客户端、平台 URL 规则、商品页解析、详情页质量过滤、独立数据库表写入和实例专利测试脚本。
+- PM2 配置新增 `workflowApp('3-product-search', 5107)`。该服务是实验模块，默认独立运行，不接入 Portal 主流程，也不写旧 `search_products`。
+- 新模块独立表：`product_detail_search_runs`、`product_detail_search_candidates`、`product_detail_search_products`。候选页 accepted/rejected/error 均记录诊断；只有真实商品详情页进入 products 表。
+- Bright Data 接入决策：使用官方 `POST https://api.brightdata.com/request`；SERP 阶段使用 SERP zone，详情阶段使用 Unlocker zone。若环境未配置 `BRIGHTDATA_SERP_ZONE` / `BRIGHTDATA_UNLOCKER_ZONE`，代码会用 API key 调 `GET /zone/get_active_zones` 自动发现 active `serp` 与 `unblocker` zone。实际账号验证发现 zone 类型为 `serp` 和 `unblocker`，名称未写入文档中的秘密字段。
+- 详情页同源规则：落库商品必须有 `final_url`，`source_text_url` 与 `source_image_url` 默认都等于 `final_url`；搜索页、列表页、店铺页、类目页、聚合页、验证码页和京东 `risk_handler` 均 rejected。
+- 抓取稳定性修正：Bright Data Unlocker 返回空字符串时必须视为失败；商品详情信息不足时自动尝试 `render=true`；默认并发从 4 降为 2，真实测试中可用 `PRODUCT_SEARCH_MAX_CONCURRENCY=1` 进一步降低风控风险。
+- 关键词策略修正：检索层优先使用 `OBJECT_BASE` 主商品词和必要特征组合词；长关键词通过后还要做通用中文字符覆盖度校验，防止“扫地机器人柜”等只含宽词的商品进入结果。该规则不维护具体专利词表。
+- 真实验证记录：`analysis_1782651371368_9qeyd5` / `patent_record_id=91` 使用 Bright Data 小样本曾成功 accepted 京东真实详情页 `https://item.jd.com/100135145003.html`，字段包含标题、详情文本、2 张同页图片，`same_url_assets=true`；但批量运行中京东 render 仍有空响应波动，1688 部分候选仍验证码或信息不足。
+- 实例专利测试脚本：`scripts/run_example_patents.py --list-only` 识别 `/实例专利` 最新模块1记录 13 个，其中 11 个可复用同专利号/同标题历史模块2关键词；`CN204260680U` 和 `CN108181988B` 尚无关键词来源，需补跑模块2。
+- 当前未完成：尚未证明 13 个实例专利都能检索到足够多的真实商品详情；Bright Data 对京东/1688 的稳定抓取仍需继续迭代，不能将本目标标记为完成。
+- 平行模块三本轮新增候选发现策略：京东 `www.jd.com/brand`、`hprm`、`phb`、`chanpin`、`hotitem` 等聚合页必须 rejected 作为商品结果，但允许作为 discovery page 抽取 `item.jd.com/<sku>.html` 详情链接；新增 `src/product_search/discovery.py` 和测试覆盖 `data-sku` / `item.jd.com` 解析。
+- 平行模块三本轮新增搜索 query 策略：SERP 查询先跑 Google 变体再跑 Bing，默认 `PRODUCT_SEARCH_SERP_URL_LIMIT=4`；每次运行新增 `max_detail_candidates` 限制，避免聚合页扩展后对过多详情页逐个 render 导致批次无限变慢。
+- 平行模块三本轮新增透明电商词汇扩展：只影响搜索 query，不修改模块2原始关键词。当前包含“音响/音箱/佩戴式耳机”“脚踏车/健身车/动感单车”“计时器/定时器”“灯具装置/灯具”等通用电商表达差异；不是针对某个专利写死必要特征。
+- 平行模块三本轮修复相关性过滤：单字覆盖过宽，会把“移动式充电站”误匹配到“便携式蓝牙音箱”；现增加中文二字连续片段覆盖度 `matched_keyword_bigram_ratio`，连续片段不足时 rejected。真实复测 `record=96` 原先误召回的京东音响商品已变为 rejected。
+- 平行模块三真实进度：`record=94 / CN103025390B` 使用“健身脚踏车”通过京东聚合页/详情页链路 accepted 真实商品 `item.jd.com/30147313701.html`，文字和图片同源，标题清理后为“超士老人家用功能健身车...”；`record=95 / CN107786922B` 通过佩戴式音频同义扩展 accepted 真实商品 `item.jd.com/100005207111.html`；`record=96` 未找到合格商品，误召回已被过滤。
