@@ -71,6 +71,8 @@ def _is_valid_product_title(value: str) -> bool:
         return False
     if any(value.startswith(prefix) for prefix in ("京东首页", "你好，请登录", "全部分类", "我的购物车")):
         return False
+    if "京东" in value and "正品低价" in value:
+        return False
     return True
 
 
@@ -124,6 +126,8 @@ def _extract_images(soup: BeautifulSoup, final_url: str, limit: int = 18) -> lis
             "cloudfront.net",
             "ssl-images-amazon.com",
             "media-amazon.com",
+            "nosdn.127.net",
+            "mi-img.com",
         )
         image_path_tokens = ("/webapi/images", "/images/", "/image/", "/upload/", "/uploads/", "/product/")
         image_like = bool(re.search(r"\.(?:jpg|jpeg|png|webp|gif)(?:$|\?)", parsed.path)) or any(
@@ -142,11 +146,12 @@ def _extract_images(soup: BeautifulSoup, final_url: str, limit: int = 18) -> lis
         if value:
             add(value)
     for img in soup.select("img"):
-        for attr in ("src", "data-src", "data-lazyload", "data-original", "data-ks-lazyload", "data-img"):
+        for attr in ("data-original", "_src", "data-src", "data-lazyload", "data-ks-lazyload", "data-img", "ng-src", "src"):
             raw = img.get(attr)
             if raw:
                 add(str(raw))
-                break
+                if images and images[-1] == normalize_url(str(raw), final_url):
+                    break
         if len(images) >= limit:
             break
     return images[:limit]

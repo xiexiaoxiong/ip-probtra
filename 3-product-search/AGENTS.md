@@ -98,3 +98,16 @@ PM2 统一启动后端时，本模块端口是 `5107`。
 - SERP 0 候选、非详情候选和详情抓取失败都会写入 `product_detail_search_candidates`，便于判断关键词过窄、平台规则不足或反爬失败。
 - 批量测试必须设置预算：建议 `PRODUCT_SEARCH_MAX_CONCURRENCY=1`、`PRODUCT_SEARCH_SERP_URL_LIMIT=2-4`、`--max-detail-candidates 1-4` 逐专利运行；不要一次全量跑 13 个高预算任务。
 - 当前仍未完成 13 个实例专利全量验证；`record=96` 仍未找到合格商品，`record=98`、`record=105` 缺模块2关键词来源，`record=101-106` 仍需继续逐个真实测试。
+
+## 2026-07-04 后续 loop 进展
+
+- 新增小米众筹 SPA 专用数据源：`src/product_search/special_sources.py` 识别 `m.mi.com/crowdfunding/proddetail/<project_id>`，用 `POST https://m.mi.com/v1/crowd/crowd_detail` + 合法 `Referer` 抓取结构化 JSON，再渲染为现有解析器可读的详情 HTML。只处理小米众筹详情页，失败时仍回到 Bright Data / direct fetch。
+- `record=106 / 202122753392.7 / 水枪`：原失败原因是小米众筹页直连只返回 SPA 空壳，Bright Data 超时后解析不到正文/图片。新增小米众筹接口后，run=69 accepted `https://m.mi.com/crowdfunding/proddetail/1000557`，商品“米家脉冲水枪01”，18 张图片，score=85。
+- `record=96 / 201780007801.2 / 移动式充电站...`：多轮排除“高尔夫球场车充电器”“电动汽车/电动出行页”“JD 充电器盒”“送风面具”“高尔夫球车”“Ares 分类页”等误收。最终 run=75 accepted `https://www.areswatt.com/cn/product/utility/35.html`（移动式储能充电站，17 图）和 `https://www.midapower.com/zh/60kw-portable-super-ev-charger-fast-dc-charger-station-for-taxi-product/`（60KW Portable Super EV Charger，18 图）。
+- `record=98 / CN204260680U / 扫地机器人系统及扫地机器人`：原无 `keyword_records`。已调用模块2通用服务生成 `keyword_run_id=133`，18 个关键词。新增小米官方机器人产品 URL 规则 `mi.com/...robot...`，并排除“扫地机器人柜/阳台柜/洗衣机柜”和“洗地机/洗拖吸一体机/蒸汽拖把”等 SEO 误收。最终 run=79 accepted `https://www.mi.com/mjrobot`，商品“米家全能扫拖机器人”，18 张图片，score=85。
+- `record=105 / CN108181988B / LRA马达驱动芯片...`：原无 `keyword_records`。已调用模块2通用服务生成 `keyword_run_id=134`，6 个关键词；关键词质量一般，但包含 `LRA马达驱动芯片` 组合。新增电子元器件详情 URL 规则和 `马达驱动芯片/驱动芯片` 核心对象边界。最终 run=82 accepted LCSC `https://item.szlcsc.com/5725659.html`（AW8695FCR，12 图，score=90）和 AWINIC `https://www.awinic.com/cn/productDetail/AW86907FCR`（11 图，score=90）。
+- 外部详情规则新增并保持保守：小米官方机器人产品页、Ares 层级详情页、MIDA `-product/` 单品页、Alibaba `product-detail/...html`、LCSC/TI/AWINIC/DFRobot 元器件详情页；同时拒绝 Ares `residential/c-i`、SGM `motor-gate-drivers`、Richtap `product/haptic` 等分类/能力页。
+- 相关性规则新增核心本体边界：`充电站` 不能被充电器/电动汽车/基础设施/连接器/电池满足；`高尔夫球` 不能被高尔夫球车/球包车满足；`扫地机器人` 不能被柜类家具或洗地机 SEO 堆词满足；`马达驱动芯片` 不能被算法/方案/控制方法页满足。
+- Bright Data 详情抓取失败且允许 direct fallback 时，`fetch_detail_page` 不再立即返回失败，而是继续 direct fetch，并在 provider 中标记 `direct_fetch_after_brightdata_error`，便于 JD/1688 风控页和官网可达页留下完整诊断。
+- 当前单元测试：`3-product-search/tests/test_quality.py` 已扩展到 28 个用例并通过，覆盖小米众筹、官方小米机器人、Ares/MIDA 充电站、LCSC/TI/AWINIC/DFRobot 芯片页、电子元器件分类拒绝、扫地机器人柜/洗地机误收、充电站/高尔夫球/灯具部件误配、候选早停等。
+- 全量实例专利一次性回归曾以 `--max-products 1 --http-timeout-seconds 1200` 启动，但脚本没有逐样本流式输出，外部请求叠加导致运行过久；已手动终止。后续应改造 `scripts/run_example_patents.py`：强制 unbuffered/flush、逐样本超时、失败后继续、输出 JSONL 汇总，再跑完整 13 个样本全量回归。

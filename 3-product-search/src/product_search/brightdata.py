@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from product_search.config import Settings
 from product_search.models import CandidateLink, FetchResult, SearchQueryPlan
 from product_search.platforms import normalize_url
+from product_search.special_sources import fetch_special_product_page
 
 
 def _error_message(exc: Exception) -> str:
@@ -241,6 +242,10 @@ class BrightDataClient:
             return [], {"provider": "direct_bing", "ok": False, "error": _error_message(exc), "fallback_after_brightdata_error": brightdata_error}
 
     async def fetch_detail_page(self, url: str, force_render: bool = False) -> FetchResult:
+        special_result = await fetch_special_product_page(url, self.settings.request_timeout_seconds, self.settings.user_agent)
+        if special_result and special_result.ok:
+            return special_result
+
         unlocker_zone = await self._resolve_unlocker_zone()
         brightdata_error = self._last_zone_error
         if self.settings.brightdata_api_key and unlocker_zone:
@@ -263,18 +268,22 @@ class BrightDataClient:
                 brightdata_error = _error_message(exc)
                 if self.settings.render_fallback_enabled and not force_render:
                     try:
-                        return await self.fetch_detail_page(url, force_render=True)
+                        render_result = await self.fetch_detail_page(url, force_render=True)
+                        if render_result.ok or not self.settings.allow_direct_fetch_fallback:
+                            return render_result
+                        brightdata_error = render_result.error_message or brightdata_error
                     except Exception:
                         pass
                 if self.settings.brightdata_api_key and unlocker_zone:
                     provider = "brightdata_unlocker_render" if force_render else "brightdata_unlocker"
-                    return FetchResult(
-                        ok=False,
-                        url=url,
-                        final_url=url,
-                        provider=provider,
-                        error_message=brightdata_error or "Bright Data detail fetch failed",
-                    )
+                    if not self.settings.allow_direct_fetch_fallback:
+                        return FetchResult(
+                            ok=False,
+                            url=url,
+                            final_url=url,
+                            provider=provider,
+                            error_message=brightdata_error or "Bright Data detail fetch failed",
+                        )
                 if not self.settings.allow_direct_fetch_fallback:
                     return FetchResult(ok=False, url=url, final_url=url, provider="brightdata_unlocker", error_message=_error_message(exc))
 

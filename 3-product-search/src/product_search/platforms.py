@@ -50,7 +50,7 @@ PLATFORM_RULES: dict[str, PlatformRule] = {
         display_name="淘宝",
         domains=("taobao.com",),
         detail_patterns=_compile_many([r"item\.taobao\.com/item\.htm\?", r"id=\d+"]),
-        aggregate_patterns=_compile_many([r"s\.taobao\.com", r"re\.taobao\.com", r"world\.taobao\.com/search", r"/search"]),
+        aggregate_patterns=_compile_many([r"s\.taobao\.com", r"re\.taobao\.com", r"world\.taobao\.com/search", r"/search", r"/list/", r"/chanpin/"]),
         query_template="site:item.taobao.com/item.htm {keyword}",
     ),
     "tmall": PlatformRule(
@@ -83,10 +83,22 @@ EXTERNAL_PRODUCT_DETAIL_PATTERNS = _compile_many(
     [
         r"/prod/.+/product-\d+-\d+\.html",
         r"/product/detail/\d+",
+        r"/product-detail/\d+",
+        r"/product-detail/[^/?#]+(?:[_-]\d+)?\.html",
+        r"item\.szlcsc\.com/\d+\.html",
+        r"ti\.com(?:\.cn)?/(?:zh-cn/)?product/(?:cn/)?[A-Z0-9]+(?:/part-details/[A-Z0-9]+)?/?$",
+        r"/productdetail/[A-Z0-9-]+/?$",
+        r"/crowdfunding/proddetail/\d+",
+        r"/item/detail(?:\?|$)",
+        r"/[^/?#]+-product/?$",
+        r"/product/[^/?#]+/\d+\.html",
         r"/products/\d+\.html",
+        r"/goods-\d+\.html",
         r"/product/[^/?#]+/?$",
         r"/products/[^/?#]+/?$",
         r"/salepage/index/\d+",
+        r"/(?:dp|gp/product)/[A-Z0-9]{8,}",
+        r"mi\.com/[a-z0-9-]*(?:robot|vacuum)[a-z0-9-]*(?:/|$)",
         r"/mall/productdetail\.html",
         r"/[^/?#]*productdetail[^/?#]*\.html",
     ]
@@ -96,6 +108,7 @@ EXTERNAL_PRODUCT_REJECT_PATTERNS = _compile_many(
     [
         r"patents\.google\.",
         r"(?:^|/)(?:search|list|category|categories|chanpin|brand|tag|wiki)(?:/|[-_?])",
+        r"/products?/(?:residential|commercial|industrial|emobility|automotive-products|solutions?|applications?|c-i|haptic|haptics|motor-gate-drivers|motor-drivers|gate-drivers|haptics-drivers)/?$",
         r"/download/",
         r"/downfile\.",
         r"\.(?:pdf|xlsx?|docx?|pptx?|zip)(?:$|\?)",
@@ -110,6 +123,7 @@ OBJECT_BASE_TERMS = (
     "健身车",
     "动感单车",
     "脚踏车",
+    "跑步机",
     "计时器",
     "定时器",
     "蓝牙耳机",
@@ -118,6 +132,9 @@ OBJECT_BASE_TERMS = (
     "音响",
     "灯具",
     "水枪",
+    "充电站",
+    "马达驱动芯片",
+    "驱动芯片",
 )
 
 
@@ -235,6 +252,9 @@ def extract_product_id(url: str, platform: str = "") -> str:
     normalized = normalize_url(url)
     platform = platform or detect_platform(normalized)
     parsed = urlparse(normalized)
+    match = re.search(r"/crowdfunding/proddetail/(\d+)", parsed.path)
+    if match:
+        return match.group(1)
     if platform in {"taobao", "tmall"}:
         return (parse_qs(parsed.query).get("id") or [""])[0]
     if platform == "pdd":
@@ -286,6 +306,10 @@ def expand_ecommerce_keyword_variants(keyword: str) -> list[str]:
     for object_term in OBJECT_BASE_TERMS:
         if object_term in keyword and object_term != keyword:
             variants.append(object_term)
+    if "灯具" in keyword and "调角" in keyword:
+        variants.extend(["可调角射灯", "可调角筒灯", "调角射灯", "可调角灯具"])
+    if "灯具" in keyword and "调光" in keyword:
+        variants.extend(["可调光射灯", "可调光筒灯", "调光射灯", "可调光灯具"])
     replacements = [
         ("蓝牙音响", "蓝牙音箱"),
         ("音响", "音箱"),
