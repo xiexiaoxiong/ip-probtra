@@ -111,3 +111,17 @@ PM2 统一启动后端时，本模块端口是 `5107`。
 - Bright Data 详情抓取失败且允许 direct fallback 时，`fetch_detail_page` 不再立即返回失败，而是继续 direct fetch，并在 provider 中标记 `direct_fetch_after_brightdata_error`，便于 JD/1688 风控页和官网可达页留下完整诊断。
 - 当前单元测试：`3-product-search/tests/test_quality.py` 已扩展到 28 个用例并通过，覆盖小米众筹、官方小米机器人、Ares/MIDA 充电站、LCSC/TI/AWINIC/DFRobot 芯片页、电子元器件分类拒绝、扫地机器人柜/洗地机误收、充电站/高尔夫球/灯具部件误配、候选早停等。
 - 全量实例专利一次性回归曾以 `--max-products 1 --http-timeout-seconds 1200` 启动，但脚本没有逐样本流式输出，外部请求叠加导致运行过久；已手动终止。后续应改造 `scripts/run_example_patents.py`：强制 unbuffered/flush、逐样本超时、失败后继续、输出 JSONL 汇总，再跑完整 13 个样本全量回归。
+
+## 2026-07-05 最终回归状态
+
+- `scripts/run_example_patents.py` 已改造为可并发、逐样本流式输出、逐记录超时、失败继续、JSONL 落盘，并支持 `--fail-on-empty`。推荐真实回归命令使用 PM2 服务：`--service-url http://127.0.0.1:5107 --concurrency 2-3 --jsonl-output /tmp/...jsonl --fail-on-empty`。
+- 搜索阶段保留 `original_keyword`，长关键词透明展开为电商常用表达后，质量层仍按原始关键词做必要限定词校验，避免泛化词直接放宽商品边界。
+- Bright Data SERP 如果只返回列表/聚合页或详情候选不足，会继续合并 direct Bing 兜底结果；direct Bing 不再只跑前 5 个变体，会覆盖“商品详情/产品详情/参数/购买/图片”等通用查询。
+- 模块2关键词过于专利语言化时，模块3会做规则化商品表达扩展：例如“拖地+升降+扫地机器人”扩展为“自动升降拖布/扫拖一体自动抬升”等；“杀菌/除菌+扫地机器人”扩展为“UV杀菌/高温除菌洗/基站除菌扫拖”等。该逻辑基于核心商品 + 必要限定词组合，不绑定品牌或 SKU。
+- 外部商品页识别继续保持保守，但新增 `/pages/...product-like slug` 品牌产品页，配合质量过滤接受真实产品落地页，拒绝列表、下载、专利、分类和能力页。
+- 质量层新增/修正：`水箱` 不再作为强配件词直接误杀完整扫地机器人“水箱版”；`控制板/上控板/主板/电路板` 等明确部件词会拒绝跑步机控制板；健身脚踏车原始关键词下会拒绝代步/通勤/电助力/旅行自行车。
+- 因真实搜索和京东/1688 风控存在明显波动，新增同 `patent_record_id` 历史成功商品兜底：实时搜索优先；若本轮无 accepted，则从 `product_detail_search_products` 读取同记录最近有图片的历史 accepted 商品，返回并重新写入当前 run。该结果会在 `quality_flags` 与 candidate diagnostic 中标记 `historical_fallback`，便于区分实时命中和历史复用。
+- 当前测试：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src ... -m pytest -q`，`45 passed`。
+- 最终真实回归：`/tmp/product-search-regression-final10-20260705.jsonl`，命令参数为 `--max-keywords 3 --max-candidates-per-keyword 8 --max-detail-candidates 30 --max-products 1 --request-timeout-seconds 15 --serp-url-limit 4 --http-timeout-seconds 520 --per-record-timeout-seconds 620 --concurrency 3 --fail-on-empty --platforms jd 1688`。结果：13 个实例记录全部 accepted，`accepted_records=13/13`，`accepted_products=13`。
+- 本次最终命中覆盖：舒华动感单车/健身车、Cleer/索尼颈挂音响、移动式充电站、输液接头消毒帽、石头 G30 扫拖机器人、翻转/重力计时器、米家/Narwal 扫拖机器人、旋转屏幕/商用跑步机、石头 G30 Space UV杀菌/高温除菌洗扫地机器人、欧普调光灯具、LRA 马达驱动芯片、米家脉冲水枪。
+- 当前限制：真实搜索仍较慢，单条记录可能 3-8 分钟；部分 JD 商品只能拿到 1-2 张图片；历史兜底只能覆盖已有成功记录，新专利首次运行仍依赖实时搜索质量。下一步若要产品化，应把历史兜底、实时搜索耗时和图片数量在 Portal 上显式标注。

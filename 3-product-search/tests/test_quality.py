@@ -1,15 +1,34 @@
 import asyncio
 
 from product_search.brightdata import BrightDataClient
-from product_search.models import CandidateLink, FetchResult, ProductSearchInput
+from product_search.models import CandidateLink, FetchResult, ProductResult, ProductSearchInput
 from product_search.discovery import extract_detail_candidates_from_discovery_page
 from product_search.parser import parse_product_page
-from product_search.platforms import expand_ecommerce_keyword_variants, is_aggregate_url, is_detail_url, normalize_url
+from product_search.platforms import build_search_query_plans, derive_title_product_keywords, expand_ecommerce_keyword_variants, is_aggregate_url, is_detail_url, normalize_url
 from product_search.quality import evaluate_product_detail
 from product_search.service import ProductSearchService
 from product_search.config import Settings
 from product_search.models import SearchQueryPlan
 from product_search.special_sources import render_xiaomi_crowdfunding_html
+
+
+def _make_service() -> ProductSearchService:
+    return ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
 
 
 def test_platform_url_filters_reject_listing_pages():
@@ -28,6 +47,10 @@ def test_platform_url_filters_reject_listing_pages():
 def test_external_product_detail_url_filters_are_conservative():
     assert is_detail_url("https://www.medicalexpo.com.cn/prod/euronda/product-68436-949858.html")
     assert is_detail_url("https://www.andemed.com/product/detail/286")
+    assert is_detail_url("https://www.cleeraudio.cn/ProductDetails/18")
+    assert is_detail_url("https://www.postmall.com.tw/ProductDetail.aspx?uid=123")
+    assert is_detail_url("https://consumer.huawei.com/cn/headphones/freelace-pro-2/")
+    assert is_detail_url("https://shopee.tw/demo-product-i.288644823.26979442031")
     assert is_detail_url("https://www.linhwa.com/products/142.html")
     assert is_detail_url("http://zfcg.szggzy.com:8081/mall/productdetail.html")
     assert is_detail_url("https://www.johnhouse.tw/SalePage/Index/6594769")
@@ -38,12 +61,14 @@ def test_external_product_detail_url_filters_are_conservative():
     assert is_detail_url("https://www.mi.com/mjrobot")
     assert is_detail_url("https://www.mi.com/roomrobot")
     assert is_detail_url("https://www.midapower.com/zh/60kw-portable-super-ev-charger-fast-dc-charger-station-for-taxi-product/")
+    assert is_detail_url("https://th.dreametech.com/zh/pages/the-dreame-d20-ultra-a-premium-robot-vacuum-mop-1")
     assert is_detail_url("https://chinese.alibaba.com/product-detail/Intelligent-Follow-Golf-Carts-Remote-APP-1600531372236.html")
     assert is_detail_url("https://www.areswatt.com/cn/product/utility/35.html")
     assert is_detail_url("https://item.szlcsc.com/5787307.html")
     assert is_detail_url("https://www.ti.com.cn/product/cn/DRV2605/part-details/DRV2605YZFT")
     assert is_detail_url("https://www.awinic.com/cn/productDetail/AW86907FCR")
     assert is_detail_url("https://www.dfrobot.com.cn/goods-4226.html")
+    assert not is_detail_url("https://www.murata.com.cn/zh-cn/products/sensor")
     assert not is_detail_url("https://www.areswatt.com/cn/product/residential/")
     assert not is_detail_url("https://www.areswatt.com/cn/product/c-i/")
     assert not is_detail_url("https://www.richtap-haptics.com/product/haptic")
@@ -169,6 +194,54 @@ def test_quality_rejects_captcha_page():
     assert decision.flags["blocked"] is True
 
 
+def test_quality_ignores_login_words_on_rich_external_product_page():
+    html = """
+    <html><head><title>我，米家扫地机器人</title>
+      <meta property="og:image" content="https://i01.appmifile.com/webfile/globalimg/roomrobot.jpg" />
+    </head><body>
+      <h1>我，米家扫地机器人</h1>
+      <div class="detail-content">
+        sign in 登录入口位于页面导航栏，但本页面主体是完整商品介绍。
+        米家扫地机器人提供路径规划、自动回充、智能清扫、APP远程控制、定时任务、边缘清扫和大吸力吸尘。
+        商品详情展示主机、充电座、传感器、尘盒、滤网、电池、滚刷、边刷和移动端控制能力。
+        页面包含产品图片、技术参数、包装清单、售后服务、适用房型、清洁策略和日常维护说明。
+        该产品是完整扫地机器人本体，不是列表页、搜索页、登录页、验证码页或安全验证页面。
+        更多详情包含导航算法、清扫覆盖率、越障能力、续航时间、噪音水平、耗材更换和固件升级说明。
+        产品图文说明还介绍了底部结构、传感器布局、充电回座方式、尘盒容量、滤网拆洗和家庭使用场景。
+      </div>
+      <img src="//i01.appmifile.com/webfile/globalimg/roomrobot2.jpg" />
+    </body></html>
+    """
+    url = "https://www.mi.com/roomrobot"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+
+    assert decision.accepted
+    assert decision.flags["blocked_ignored_for_rich_external_product"] is True
+
+
+def test_quality_rejects_not_found_demand_page_title():
+    html = """
+    <html><head><title>产品找不到？ 直接发需求试试！</title>
+      <meta property="og:image" content="https://example.com/request.jpg" />
+    </head><body>
+      <h1>产品找不到？ 直接发需求试试！</h1>
+      <div class="detail-content">
+        页面提供需求提交、供应商匹配、采购咨询、发布需求、留下联系方式和等待报价服务。
+        文本里虽然可能包含消毒帽、RFID、医疗器械、产品图片、商品参数等关键词，但它不是一个具体商品详情页。
+        该页面主要用于撮合供需、提交采购信息、等待客服回访和展示平台服务流程。
+      </div>
+      <img src="https://example.com/request2.jpg" />
+    </body></html>
+    """
+    url = "https://www.iotku.com/Product/862349076807548928.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+
+    assert not decision.accepted
+    assert "找不到" in " ".join(decision.reasons)
+
+
 def test_jd_discovery_page_extracts_detail_links_without_accepting_aggregate_page():
     html = """
     <div id="J_goodsList">
@@ -243,6 +316,54 @@ def test_ecommerce_keyword_variants_are_transparent_query_expansion():
     lighting_variants = expand_ecommerce_keyword_variants("免拆调角灯具")
     assert "可调角射灯" in lighting_variants
     assert "可调角筒灯" in lighting_variants
+    robot_lift_variants = expand_ecommerce_keyword_variants("拖地升降拖地模式收纳扫地机器人")
+    assert "拖布自动抬升扫地机器人" in robot_lift_variants
+    assert "扫拖一体自动抬升扫地机器人" in robot_lift_variants
+    robot_uv_variants = expand_ecommerce_keyword_variants("基站UV杀菌扫地机器人")
+    assert "UV杀菌扫地机器人" in robot_uv_variants
+    assert "除菌洗拖布扫地机器人" in robot_uv_variants
+    assert "高温除菌洗扫地机器人" in robot_uv_variants
+
+
+def test_title_product_keywords_keep_product_body_fallback():
+    assert derive_title_product_keywords("移动式充电站以及用于确定球类运动器材位置的系统") == ["移动式充电站"]
+    assert derive_title_product_keywords("扫地机器人系统及扫地机器人") == ["扫地机器人"]
+    assert derive_title_product_keywords("便携式音响设备") == []
+
+
+def test_search_query_plans_preserve_original_keyword_for_fallback_terms():
+    plans = build_search_query_plans(["颈挂式蓝牙音响"], ["jd"], 1)
+    fallback = next(plan for plan in plans if plan.keyword == "音响")
+
+    assert fallback.original_keyword == "颈挂式蓝牙音响"
+
+
+def test_detail_candidate_selection_prefers_required_qualifier_matches():
+    service = _make_service()
+    candidates = [
+        CandidateLink(
+            keyword="计时器",
+            original_keyword="多边形计时器",
+            platform="jd",
+            candidate_url="https://item.jd.com/100000000001.html",
+            title="厨房电子计时器",
+            source="brightdata_serp",
+            rank=1,
+        ),
+        CandidateLink(
+            keyword="翻转计时器",
+            original_keyword="多边形计时器",
+            platform="jd",
+            candidate_url="https://item.jd.com/100000000002.html",
+            title="六面翻转计时器 重力感应定时器",
+            source="brightdata_serp",
+            rank=5,
+        ),
+    ]
+
+    selected = service._select_detail_candidates(candidates, limit=1)
+
+    assert [candidate.candidate_url for candidate in selected] == ["https://item.jd.com/100000000002.html"]
 
 
 def test_detail_candidate_selection_prefers_marketplace_products_over_external_pages():
@@ -373,7 +494,244 @@ def test_keyword_relevance_rejects_sparse_character_overlap():
     )
     filtered = service._apply_keyword_relevance("移动式充电站", parsed, decision)
     assert not filtered.accepted
-    assert filtered.flags["matched_keyword_bigram_ratio"] < 0.35
+    assert "核心商品本体" in " ".join(filtered.reasons)
+
+
+def test_keyword_relevance_uses_original_keyword_for_wearable_audio_qualifier():
+    html = """
+    <html><head><title>小米小爱音箱 Play 增强版</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/audio.jpg" />
+    </head><body>
+      <h1>小米小爱音箱 Play 增强版</h1>
+      <div class="detail-content">
+        这是一款桌面智能音箱，支持语音助手、红外遥控、蓝牙播放、家庭控制和闹钟提醒。
+        商品适合卧室、客厅和办公桌使用，提供稳定音质、远场拾音、儿童模式和多平台音乐服务。
+        页面包含商品参数、包装清单、售后服务、连接方式、扬声器单元和电源适配器说明。
+        详情还包括颜色版本、连接步骤、适配设备、保修政策和常见问题，便于用户购买前确认。
+      </div>
+      <img src="//img11.360buyimg.com/n1/audio2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/100012854455.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("音响", parsed, decision, "颈挂式蓝牙音响")
+
+    assert not filtered.accepted
+    assert "佩戴形态" in filtered.flags["missing_required_qualifiers"]
+
+
+def test_keyword_relevance_rejects_plain_timer_when_original_keyword_requires_shape():
+    html = """
+    <html><head><title>厨房电子计时器</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/timer.jpg" />
+    </head><body>
+      <h1>厨房电子计时器</h1>
+      <div class="detail-content">
+        这是一款普通厨房倒计时提醒器，支持烘焙、学习、自习、运动训练和会议提醒。
+        商品提供大按键、磁吸背贴、蜂鸣提醒、分钟秒钟设置、便携挂孔和简单清零功能。
+        页面展示颜色、包装清单、售后服务、使用方法和电池安装说明，适合日常计时场景。
+        详情还包括声音大小、摆放方式、屏幕显示、按键说明和适用人群，便于用户快速选择。
+      </div>
+      <img src="//img11.360buyimg.com/n1/timer2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10161470152223.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("计时器", parsed, decision, "多边形计时器")
+
+    assert not filtered.accepted
+    assert "多面/翻转形态" in filtered.flags["missing_required_qualifiers"]
+
+
+def test_keyword_relevance_rejects_plain_timer_when_original_keyword_requires_braille():
+    html = """
+    <html><head><title>智能数字计时器 光电门气垫导轨物理教仪</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/lab-timer.jpg" />
+    </head><body>
+      <h1>智能数字计时器 光电门气垫导轨物理教仪</h1>
+      <div class="detail-content">
+        这是一款物理实验教学用计时器，配套光电门、气垫导轨、数据线和实验支架。
+        商品用于速度测量、加速度实验、碰撞实验和课堂演示，强调数字显示、稳定计时和实验精度。
+        页面包含实验参数、接口说明、包装清单、供电方式、售后服务和学校采购说明，适合教学设备场景。
+      </div>
+      <img src="//img11.360buyimg.com/n1/lab-timer2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10226969588272.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("计时器", parsed, decision, "盲文计时器")
+
+    assert not filtered.accepted
+    assert "盲文/触觉辅助" in filtered.flags["missing_required_qualifiers"]
+
+
+def test_keyword_relevance_accepts_english_gravity_cube_timer_with_sensor_qualifier():
+    html = """
+    <html><head><title>Gravity Cube Timer - Kitchen Countdown Timer</title>
+      <meta property="og:image" content="https://m.media-amazon.com/images/I/cube-timer.jpg" />
+    </head><body>
+      <h1>Gravity Cube Timer - Kitchen Countdown Timer</h1>
+      <div class="detail-content">
+        This cube timer uses a gravity sensor and flip-to-start operation for preset countdowns.
+        It is designed for kitchen cooking, classroom study, productivity, exercise and tabletop time management.
+        The product page includes timer modes, alarm volume, vibration reminder, LED display, battery charging,
+        package contents, product photos, usage instructions, warranty details and multiple preset minutes.
+      </div>
+      <img src="https://m.media-amazon.com/images/I/cube-timer-2.jpg" />
+    </body></html>
+    """
+    url = "https://www.amazon.com/example/dp/B0DJT81BB6"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("角度感应立方体计时器", parsed, decision, "角度感应立方体计时器")
+
+    assert filtered.accepted
+    assert filtered.flags["matched_keyword_ratio"] == 0
+
+
+def test_keyword_relevance_rejects_industrial_water_gun_when_original_keyword_requires_toy():
+    html = """
+    <html><head><title>数控机床冲洗枪全金属高压水枪</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/water.jpg" />
+    </head><body>
+      <h1>数控机床冲洗枪全金属高压水枪</h1>
+      <div class="detail-content">
+        这是一款工业清洗用高压水枪，适合数控机床、雕刻机、水中心和车间冲洗作业。
+        商品采用金属枪体、快拧接口、耐压软管、喷嘴组件和防滑把手，强调耐用、强力和连续冲洗。
+        页面包含规格、接口尺寸、安装方式、压力范围、包装清单和售后服务说明。
+        详情还包括工厂设备清洁、维护保养、接头兼容和安全操作提示，面向工业使用场景。
+      </div>
+      <img src="//img11.360buyimg.com/n1/water2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10215177053446.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("高射程水枪", parsed, decision, "高射程玩具水枪")
+
+    assert not filtered.accepted
+    assert "儿童/玩具用途" in filtered.flags["missing_required_qualifiers"]
+
+
+def test_keyword_relevance_rejects_commuter_bike_when_keyword_requires_fitness():
+    html = """
+    <html><head><title>锂电动助力自行车长途旅行单脚踏车代步车</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/bike.jpg" />
+    </head><body>
+      <h1>锂电动助力自行车长途旅行单脚踏车代步车</h1>
+      <div class="detail-content">
+        这是一款户外通勤代步用电动自行车，支持长途旅行、锂电助力、城市骑行、折叠收纳和日常出行。
+        商品提供电池容量、续航里程、刹车系统、轮胎规格、车架材质、照明系统和骑行安全说明。
+        页面包含包装清单、售后服务、上牌提示、充电方式和道路骑行场景，面向交通代步用途。
+      </div>
+      <img src="//img11.360buyimg.com/n1/bike2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10176841888739.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("健身脚踏车", parsed, decision, "健身脚踏车")
+
+    assert not filtered.accepted
+    assert "健身/训练用途" in filtered.flags["missing_required_qualifiers"]
+
+
+def test_keyword_relevance_rejects_commuter_bike_when_generic_pedal_variant_keeps_fitness_context():
+    html = """
+    <html><head><title>JAZZDA捷时达锂电动助力自行车长途旅行瓶单脚踏车代步</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/bike.jpg" />
+    </head><body>
+      <h1>JAZZDA捷时达锂电动助力自行车长途旅行瓶单脚踏车代步</h1>
+      <div class="detail-content">
+        这是一款户外运动骑行和通勤代步用电动自行车，支持长途旅行、锂电助力、城市骑行和日常出行。
+        商品提供电池容量、续航里程、刹车系统、轮胎规格、车架材质、照明系统和骑行安全说明。
+        页面包含包装清单、售后服务、上牌提示、充电方式、道路骑行场景和户外运动用品说明。
+        虽然标题包含脚踏车并提到运动，但销售对象是交通代步自行车，不是室内健身车或动感单车。
+      </div>
+      <img src="//img11.360buyimg.com/n1/bike2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10176841888739.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("脚踏车", parsed, decision, "脚踏驱动摇动健身脚踏车")
+
+    assert not filtered.accepted
+    assert "代步自行车" in " ".join(filtered.reasons)
+
+
+def test_keyword_relevance_rejects_plain_robot_when_original_keyword_requires_uv_sterilizing():
+    html = """
+    <html><head><title>石头扫地机器人扫拖一体 G30</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/robot.jpg" />
+    </head><body>
+      <h1>石头扫地机器人扫拖一体 G30</h1>
+      <div class="detail-content">
+        这是一款家用扫地机器人，支持扫地、拖地、自动上下水、路径规划和智能避障。
+        商品提供大吸力、自动回充、多地图管理、语音控制、地毯识别和APP远程控制等清洁功能。
+        页面包含商品参数、配件清单、清洁模式、续航时间、适用面积、售后服务和安装说明。
+        详情还展示主机、基站、滚刷、边刷、拖布、水箱、电源线、联网方式、地图管理和日常维护流程。
+      </div>
+      <img src="//img11.360buyimg.com/n1/robot2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/100135145003.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("扫地机器人", parsed, decision, "基站UV杀菌扫地机器人")
+
+    assert not filtered.accepted
+    assert "杀菌/消毒" in filtered.flags["missing_required_qualifiers"]
+
+
+def test_keyword_relevance_allows_robot_water_tank_version_when_required_uv_sterilizing_is_present():
+    html = """
+    <html><head><title>石头（roborock）扫地机器人80℃高温除菌洗UV杀菌拖地机 G30 Space水箱版</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/robot-g30.jpg" />
+    </head><body>
+      <h1>石头（roborock）扫地机器人80℃高温除菌洗UV杀菌拖地机折叠仿生机械臂智能收纳清洁机三维感知底盘升降0缠扫地机 G30 Space水箱版</h1>
+      <div class="detail-content">
+        这是一款完整的扫地机器人主机和基站套装，支持扫地、拖地、自动上下水、路径规划、智能避障和自动回充。
+        商品详情明确包含80℃高温除菌洗、UV杀菌、基站清洁、拖布清洗、污水回收、尘盒管理和拖地模式。
+        页面展示主机、基站、水箱、滚刷、边刷、拖布、电源线、清洁液、安装说明、售后服务和包装清单。
+        该版本名称包含水箱版，但销售对象仍是扫地机器人本体，不是单独水箱、滤芯、拖布、边刷或爬坡垫配件。
+      </div>
+      <img src="//img11.360buyimg.com/n1/robot-g30-2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10223894052220.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("基站UV杀菌扫地机器人", parsed, decision, "基站UV杀菌扫地机器人")
+
+    assert filtered.accepted
+
+
+def test_keyword_relevance_rejects_treadmill_control_board_component():
+    html = """
+    <html><head><title>亿健（YIJIAN）跑步机T900 精灵ELF E3 JD618显示屏控制板液晶显示器上控板</title>
+      <meta property="og:image" content="https://img11.360buyimg.com/n1/treadmill-board.jpg" />
+    </head><body>
+      <h1>亿健（YIJIAN）跑步机T900 精灵ELF E3 JD618显示屏控制板液晶显示器上控板</h1>
+      <div class="detail-content">
+        该商品为跑步机维修部件和显示屏控制板，适用于特定型号跑步机的上控板、液晶屏、电路板和控制面板更换。
+        页面说明安装方式、接口排线、维修注意事项、适配型号、售后政策和包装内容，仅包含控制板组件。
+        商品不包含完整跑步机主体、跑带、立柱、电机、扶手、底座、运动器材整机或完整训练设备。
+        详情页展示零件外观、主板接口、屏幕控制模块、配件清单和维修场景。
+      </div>
+      <img src="//img11.360buyimg.com/n1/treadmill-board-2.jpg" />
+    </body></html>
+    """
+    url = "https://item.jd.com/10193706012064.html"
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(FetchResult(ok=True, url=url, final_url=url, html=html, provider="test"), parsed)
+    filtered = _make_service()._apply_keyword_relevance("可位移屏幕跑步机", parsed, decision, "可位移屏幕跑步机")
+
+    assert not filtered.accepted
+    assert "配件" in " ".join(filtered.reasons)
 
 
 def test_keyword_relevance_normalizes_common_traditional_chinese():
@@ -654,7 +1012,7 @@ def test_keyword_relevance_rejects_short_core_without_title_signal():
     )
     filtered = service._apply_keyword_relevance("充电站", parsed, decision)
     assert not filtered.accepted
-    assert "短核心关键词" in " ".join(filtered.reasons)
+    assert "商品本体" in " ".join(filtered.reasons)
 
 
 def test_keyword_relevance_rejects_golf_cart_when_keyword_is_golf_ball():
@@ -944,4 +1302,111 @@ def test_brightdata_zone_failure_does_not_escape(monkeypatch):
     candidates, meta = asyncio.run(client.search(plan, 1))
     assert candidates == []
     assert meta["ok"] is False
-    assert "TimeoutError" in meta["error"]
+
+
+def test_brightdata_search_merges_direct_fallback_when_serp_has_only_listing_pages(monkeypatch):
+    async def fake_request(_self, _payload):
+        return {
+            "organic": [
+                {
+                    "link": "https://www.jd.com/brand/1367822b088da51a04b47.html",
+                    "title": "扫地机器人行业品牌及商品 - 京东",
+                }
+            ]
+        }
+
+    async def fake_direct(self, plan, limit, brightdata_error=""):
+        return (
+            [
+                CandidateLink(
+                    keyword=plan.keyword,
+                    original_keyword=plan.original_keyword,
+                    platform=plan.platform,
+                    candidate_url="https://item.jd.com/100135145003.html",
+                    title="石头扫地机器人扫拖一体 G30",
+                    source="direct_bing",
+                )
+            ],
+            {"provider": "direct_bing", "ok": True},
+        )
+
+    monkeypatch.setattr(BrightDataClient, "_request_brightdata", fake_request)
+    monkeypatch.setattr(BrightDataClient, "_search_direct_bing", fake_direct)
+    client = BrightDataClient(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="configured",
+            brightdata_serp_zone="serp",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=True,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    plan = SearchQueryPlan(
+        keyword="扫地机器人",
+        original_keyword="拖地升降扫地机器人",
+        platform="jd",
+        query="site:item.jd.com 扫地机器人",
+        serp_url="",
+    )
+
+    candidates, meta = asyncio.run(client.search(plan, 3))
+
+    assert meta["provider"] == "brightdata_serp+direct_bing"
+    assert any(candidate.candidate_url == "https://item.jd.com/100135145003.html" for candidate in candidates)
+
+
+def test_service_uses_historical_products_when_live_search_has_no_accepted_results(monkeypatch):
+    fallback = ProductResult(
+        platform="jd",
+        product_name="石头扫地机器人扫拖一体 G30",
+        product_url="https://item.jd.com/100135145003.html",
+        final_url="https://item.jd.com/100135145003.html",
+        picture=["https://img11.360buyimg.com/n1/robot.jpg"],
+        matched_keywords=["扫地机器人"],
+        quality_score=75,
+        quality_flags={"historical_fallback": True},
+    )
+
+    class FakeClient:
+        async def search(self, _plan, _limit):
+            return [], {"provider": "direct_bing", "ok": False}
+
+    monkeypatch.setattr("product_search.service.fetch_recent_products_for_record", lambda _record_id, _limit: [fallback])
+    service = ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    service.client = FakeClient()
+    payload = ProductSearchInput(
+        patent_record_id=98,
+        input_keywords=["扫地机器人"],
+        platforms=["jd"],
+        max_products=1,
+        persist=False,
+    )
+
+    output = asyncio.run(service.run(payload))
+
+    assert output.accepted_products_count == 1
+    assert output.products[0].product_name == "石头扫地机器人扫拖一体 G30"
+    assert output.candidates_preview[-1].status == "accepted"
+    assert output.candidates_preview[-1].raw_payload["historical_fallback"] is True

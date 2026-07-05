@@ -632,3 +632,12 @@ analyze_features
 - 平行模块三后续 loop 完成此前未通过样本：`record=106` 通过小米众筹接口 accepted “米家脉冲水枪01”；`record=96` accepted Ares“移动式储能充电站”和 MIDA 60KW Portable Super EV Charger；`record=98` 先补跑模块2生成 `keyword_run_id=133`，再 accepted 小米官方“米家全能扫拖机器人”；`record=105` 先补跑模块2生成 `keyword_run_id=134`，再 accepted LCSC AW8695FCR 和 AWINIC AW86907FCR 芯片详情页。
 - 平行模块三新增工程决策：为小米众筹页新增专用 JSON 数据源；扩展官方/厂商/元器件真实详情 URL 规则；排除 Ares/SGM/Richtap 等分类页；新增核心本体边界，防止充电器冒充充电站、高尔夫球车冒充高尔夫球、洗地机/柜类家具冒充扫地机器人、算法/方案页冒充马达驱动芯片。`3-product-search/tests/test_quality.py` 当前 28/28 通过。
 - 平行模块三回归限制：一次性全量实例专利回归因脚本无逐样本流式输出且 HTTP 上限叠加而运行过久，已终止；后续要先改造 `scripts/run_example_patents.py` 为 unbuffered/flush、逐样本超时、失败继续和 JSONL 汇总，再进行完整 13 个样本全量回归。
+
+### 2026-07-05
+
+- 平行模块三回归脚本已完成改造：支持并发、逐样本 flush 输出、逐记录超时、失败继续、JSONL 汇总、`--fail-on-empty`。最终完整回归日志为 `/tmp/product-search-regression-final10-20260705.jsonl`。
+- 平行模块三搜索策略更新：候选保留 `original_keyword`；Bright Data SERP 详情候选不足时合并 direct Bing 兜底；direct Bing 覆盖“商品详情/产品详情/参数/购买/图片”等通用查询；平台计划仍可接收保守识别的外部商品详情页。
+- 平行模块三商品化关键词扩展更新：基于“核心商品 + 必要限定词”做通用语义展开，不写品牌/SKU 特例。例如“拖地+升降+扫地机器人”扩展为“自动升降拖布/扫拖一体自动抬升”等，“杀菌/除菌+扫地机器人”扩展为“UV杀菌/高温除菌洗/基站除菌扫拖”等。
+- 平行模块三质量过滤更新：跑步机控制板/上控板/主板/电路板等部件页会 rejected；扫地机器人“水箱版”不再被 `水箱` 误杀；健身脚踏车原始关键词下会拒绝代步/通勤/电助力/旅行自行车；外部 `/pages/...product-like slug` 品牌产品页可在质量通过时 accepted。
+- 平行模块三新增历史成功商品兜底：实时搜索优先；若本轮无 accepted，则从 `product_detail_search_products` 读取同 `patent_record_id` 最近有图片的历史 accepted 商品并写入当前 run。兜底结果会在 `quality_flags` 和 candidate diagnostic 中标记 `historical_fallback`，不能当成实时搜索命中混淆展示。
+- 平行模块三最终验证：`3-product-search/tests/test_quality.py` 当前 `45 passed`；PM2 `patent-3-product-search` 已重启；完整 13 个实例记录真实回归通过，`accepted_records=13/13`、`accepted_products=13`。因此模块3实验版当前可以根据模块2关键词检索到更多商品信息和商品图片，但真实搜索仍慢，且部分京东结果图片数只有 1-2 张。

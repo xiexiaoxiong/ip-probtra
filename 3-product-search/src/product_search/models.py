@@ -24,6 +24,7 @@ class ProductSearchInput(BaseModel):
 
 class SearchQueryPlan(BaseModel):
     keyword: str
+    original_keyword: str = ""
     platform: str
     query: str
     serp_url: str
@@ -31,6 +32,7 @@ class SearchQueryPlan(BaseModel):
 
 class CandidateLink(BaseModel):
     keyword: str
+    original_keyword: str = ""
     platform: str
     candidate_url: str
     title: str = ""

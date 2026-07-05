@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 from product_search.config import Settings
 from product_search.models import CandidateLink, FetchResult, SearchQueryPlan
-from product_search.platforms import normalize_url
+from product_search.platforms import is_detail_url, normalize_url
 from product_search.special_sources import fetch_special_product_page
 
 
@@ -65,6 +65,7 @@ def parse_serp_payload(payload: Any, plan: SearchQueryPlan, limit: int) -> list[
         candidates.append(
             CandidateLink(
                 keyword=plan.keyword,
+                original_keyword=plan.original_keyword or plan.keyword,
                 platform=plan.platform,
                 candidate_url=normalized,
                 title=str(item.get("title") or item.get("name") or "")[:500],
@@ -91,6 +92,7 @@ def parse_html_search_results(html: str, plan: SearchQueryPlan, limit: int, sour
         candidates.append(
             CandidateLink(
                 keyword=plan.keyword,
+                original_keyword=plan.original_keyword or plan.keyword,
                 platform=plan.platform,
                 candidate_url=href,
                 title=text[:500],
@@ -209,6 +211,21 @@ class BrightDataClient:
                     brightdata_error = _error_message(exc)
                     continue
             if brightdata_candidates:
+                if self.settings.allow_direct_fetch_fallback:
+                    detail_count = sum(
+                        1 for candidate in brightdata_candidates if is_detail_url(candidate.candidate_url, candidate.platform)
+                    )
+                    if len(brightdata_candidates) < limit or detail_count < min(3, limit):
+                        direct_candidates, direct_meta = await self._search_direct_bing(plan, limit, brightdata_error)
+                        merged = _merge_candidate_links(brightdata_candidates, direct_candidates)
+                        return merged[:limit], {
+                            "provider": "brightdata_serp+direct_bing",
+                            "ok": bool(merged),
+                            "payload_type": "mixed",
+                            "brightdata_candidate_count": len(brightdata_candidates),
+                            "direct_candidate_count": len(direct_candidates),
+                            "direct_meta": direct_meta,
+                        }
                 return brightdata_candidates[:limit], {
                     "provider": "brightdata_serp",
                     "ok": True,
@@ -224,19 +241,41 @@ class BrightDataClient:
                 "error": brightdata_error or "Bright Data SERP 未配置且禁用了直连兜底",
             }
 
-        query = quote_plus(plan.query)
-        url = f"https://www.bing.com/search?q={query}&setlang=zh-CN&cc=cn"
+        return await self._search_direct_bing(plan, limit, brightdata_error)
+
+    async def _search_direct_bing(
+        self,
+        plan: SearchQueryPlan,
+        limit: int,
+        brightdata_error: str = "",
+    ) -> tuple[list[CandidateLink], dict[str, Any]]:
+        urls = [url for url in _build_serp_urls(plan) if "bing.com/search" in url]
+        if not urls:
+            query = quote_plus(plan.query)
+            urls = [f"https://www.bing.com/search?q={query}&setlang=zh-CN&cc=cn"]
+        urls = urls[: max(1, max(self.settings.serp_url_limit, 12))]
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
         headers = {"User-Agent": self.settings.user_agent}
+        candidates: list[CandidateLink] = []
+        last_error = ""
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-                response = await client.get(url)
-            response.raise_for_status()
-            return parse_html_search_results(response.text, plan, limit, "direct_bing"), {
+                for url in urls:
+                    try:
+                        response = await client.get(url)
+                        response.raise_for_status()
+                        candidates.extend(parse_html_search_results(response.text, plan, limit, "direct_bing"))
+                        if len(candidates) >= limit:
+                            break
+                    except Exception as exc:
+                        last_error = _error_message(exc)
+                        continue
+            return candidates[:limit], {
                 "provider": "direct_bing",
-                "ok": True,
-                "status_code": response.status_code,
+                "ok": bool(candidates),
+                "status_code": 200 if candidates else 0,
                 "fallback_after_brightdata_error": brightdata_error,
+                "error": "" if candidates else last_error,
             }
         except Exception as exc:
             return [], {"provider": "direct_bing", "ok": False, "error": _error_message(exc), "fallback_after_brightdata_error": brightdata_error}
@@ -320,11 +359,40 @@ def _extract_final_url_from_html(html: str) -> str:
     return match.group(1) if match else ""
 
 
+def _merge_candidate_links(*groups: list[CandidateLink]) -> list[CandidateLink]:
+    merged: list[CandidateLink] = []
+    seen: set[str] = set()
+    for group in groups:
+        for candidate in group:
+            key = normalize_url(candidate.candidate_url)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(candidate)
+    return merged
+
+
 def _build_serp_urls(plan: SearchQueryPlan) -> list[str]:
     variants = [plan.query]
     keyword = plan.keyword.strip()
-    if keyword:
-        variants.extend([f"{keyword} 商品", f"{keyword} 价格"])
+    original_keyword = (plan.original_keyword or "").strip()
+    keyword_variants = [keyword]
+    if original_keyword and original_keyword != keyword:
+        keyword_variants.append(original_keyword)
+    for search_keyword in keyword_variants:
+        if search_keyword:
+            variants.extend(
+                [
+                    f"{search_keyword} 商品",
+                    f"{search_keyword} 价格",
+                    f"{search_keyword} 官方 产品",
+                    f"{search_keyword} 官网 商品 图片",
+                    f"{search_keyword} 商品详情 图片",
+                    f"{search_keyword} 产品详情 图片",
+                    f"{search_keyword} 参数 图片",
+                    f"{search_keyword} 购买",
+                ]
+            )
     if plan.platform == "jd":
         variants.extend(
             [

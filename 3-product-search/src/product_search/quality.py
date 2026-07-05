@@ -41,6 +41,18 @@ LIST_PAGE_HINTS = [
     )
 ]
 
+INVALID_PRODUCT_TITLE_PATTERNS = [
+    re.compile(pattern, re.I)
+    for pattern in (
+        "产品找不到",
+        "商品找不到",
+        "直接发需求",
+        "提交需求",
+        "not found",
+        "request a quote",
+    )
+]
+
 
 def is_blocked_page(fetch: FetchResult, parsed: ParsedProductPage | None = None) -> bool:
     haystack = " ".join(
@@ -85,12 +97,25 @@ def evaluate_product_detail(fetch: FetchResult, parsed: ParsedProductPage) -> Qu
     if not is_detail_url(fetch.final_url, parsed.platform):
         reasons.append("URL 未命中平台商品详情页模式")
 
-    if is_blocked_page(fetch, parsed):
+    blocked = is_blocked_page(fetch, parsed)
+    rich_external_product = (
+        detect_platform(fetch.final_url) == "external_product"
+        and bool(parsed.product_name)
+        and len(parsed.description) >= 240
+        and bool(parsed.picture)
+    )
+    if blocked and rich_external_product:
+        flags["blocked_ignored_for_rich_external_product"] = True
+        blocked = False
+
+    if blocked:
         reasons.append("页面疑似登录、验证码或安全验证拦截")
         flags["blocked"] = True
 
     if not parsed.product_name:
         reasons.append("未提取到商品标题")
+    elif any(pattern.search(parsed.product_name) for pattern in INVALID_PRODUCT_TITLE_PATTERNS):
+        reasons.append("商品标题显示为找不到/需求提交页")
     if len(parsed.description) < 120:
         reasons.append("商品详情文本过短")
     if not parsed.picture:

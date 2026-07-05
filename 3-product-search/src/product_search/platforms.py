@@ -85,11 +85,16 @@ EXTERNAL_PRODUCT_DETAIL_PATTERNS = _compile_many(
         r"/product/detail/\d+",
         r"/product-detail/\d+",
         r"/product-detail/[^/?#]+(?:[_-]\d+)?\.html",
+        r"/productdetails/\d+/?$",
+        r"/productdetail\.aspx(?:$|\?)",
+        r"consumer\.huawei\.com/.+/(?:headphones|audio|speaker|wearables)/[^/?#]+/?$",
+        r"shopee\.[^/]+/.+-i\.\d+\.\d+",
         r"item\.szlcsc\.com/\d+\.html",
         r"ti\.com(?:\.cn)?/(?:zh-cn/)?product/(?:cn/)?[A-Z0-9]+(?:/part-details/[A-Z0-9]+)?/?$",
         r"/productdetail/[A-Z0-9-]+/?$",
         r"/crowdfunding/proddetail/\d+",
         r"/item/detail(?:\?|$)",
+        r"/pages/[^/?#]*(?:robot|vacuum|mop|treadmill|speaker|timer|charger|light|bike|product)[^/?#]*",
         r"/[^/?#]+-product/?$",
         r"/product/[^/?#]+/\d+\.html",
         r"/products/\d+\.html",
@@ -108,6 +113,7 @@ EXTERNAL_PRODUCT_REJECT_PATTERNS = _compile_many(
     [
         r"patents\.google\.",
         r"(?:^|/)(?:search|list|category|categories|chanpin|brand|tag|wiki)(?:/|[-_?])",
+        r"/products?/(?:sensor|sensors|product|products|category|categories)/?$",
         r"/products?/(?:residential|commercial|industrial|emobility|automotive-products|solutions?|applications?|c-i|haptic|haptics|motor-gate-drivers|motor-drivers|gate-drivers|haptics-drivers)/?$",
         r"/download/",
         r"/downfile\.",
@@ -136,6 +142,45 @@ OBJECT_BASE_TERMS = (
     "马达驱动芯片",
     "驱动芯片",
 )
+
+TITLE_PRODUCT_MODIFIERS = (
+    "移动式",
+    "可移动",
+    "便携式",
+    "折叠式",
+    "颈挂式",
+    "颈挂",
+    "多边形",
+    "多面体",
+    "医用",
+    "儿童",
+    "玩具",
+    "健身",
+)
+
+
+def derive_title_product_keywords(title: str, limit: int = 1) -> list[str]:
+    text = re.sub(r"\s+", "", title or "")
+    result: list[str] = []
+    seen: set[str] = set()
+    wearable_audio_signal = any(token in text for token in ("颈挂", "颈戴", "挂脖", "挂颈", "穿戴", "可穿戴"))
+    for term in sorted(OBJECT_BASE_TERMS, key=len, reverse=True):
+        if term not in text:
+            continue
+        if term in {"音响", "音箱", "蓝牙音箱", "蓝牙耳机"} and not wearable_audio_signal:
+            continue
+        for modifier in TITLE_PRODUCT_MODIFIERS:
+            phrase = f"{modifier}{term}"
+            if phrase in text and phrase not in seen:
+                seen.add(phrase)
+                result.append(phrase)
+                break
+        if term not in seen:
+            seen.add(term)
+            result.append(term)
+        if len(result) >= limit:
+            break
+    return result[:limit]
 
 
 def unwrap_search_redirect(url: str) -> str:
@@ -293,16 +338,50 @@ def build_search_query_plans(keywords: list[str], platforms: list[str], max_keyw
                     continue
                 query = rule.query_template.format(keyword=keyword)
                 serp_url = "https://www.google.com/search?" f"q={quote_plus(query)}&hl=zh-CN&gl=cn&num=10&brd_json=1"
-                plans.append(SearchQueryPlan(keyword=keyword, platform=platform, query=query, serp_url=serp_url))
+                plans.append(
+                    SearchQueryPlan(
+                        keyword=keyword,
+                        original_keyword=original_keyword,
+                        platform=platform,
+                        query=query,
+                        serp_url=serp_url,
+                    )
+                )
     return plans
 
 
 def expand_ecommerce_keyword_variants(keyword: str) -> list[str]:
     keyword = " ".join(str(keyword or "").split())
     variants = [keyword] if keyword else []
+    normalized = keyword.lower()
     if any(token in keyword for token in ("多边形", "多面体")) and any(token in keyword for token in ("计时器", "定时器")):
         for shape in ("立方体", "六面", "翻转", "多面体"):
             variants.append(re.sub(r"多边形|多面体", shape, keyword))
+    has_robot_body = any(token in keyword for token in ("扫地机器人", "扫拖机器人", "扫地机", "扫拖机"))
+    has_mopping = any(token in keyword for token in ("拖地", "扫拖", "拖布", "擦地", "洗布"))
+    has_lifting = any(token in keyword for token in ("升降", "抬升", "抬起", "升起", "可升降"))
+    if has_robot_body and has_mopping and has_lifting:
+        variants.extend(
+            [
+                "自动升降拖布扫地机器人",
+                "拖布自动抬升扫地机器人",
+                "扫拖一体自动抬升扫地机器人",
+                "可升降拖布扫拖机器人",
+            ]
+        )
+    has_sterilizing = any(token in normalized for token in ("uv", "杀菌", "消毒", "除菌", "紫外"))
+    if has_robot_body and has_sterilizing:
+        variants.extend(
+            [
+                "UV杀菌扫地机器人",
+                "基站UV杀菌扫地机器人",
+                "除菌洗拖布扫地机器人",
+                "高温除菌扫地机器人",
+                "高温除菌洗扫地机器人",
+                "基站除菌扫拖机器人",
+                "除菌洗扫拖一体机器人",
+            ]
+        )
     for object_term in OBJECT_BASE_TERMS:
         if object_term in keyword and object_term != keyword:
             variants.append(object_term)
@@ -334,7 +413,7 @@ def expand_ecommerce_keyword_variants(keyword: str) -> list[str]:
         if cleaned and cleaned not in seen:
             seen.add(cleaned)
             result.append(cleaned)
-    return result[:5]
+    return result[:10]
 
 
 def dedupe_candidate_links(candidates: list[CandidateLink]) -> list[CandidateLink]:

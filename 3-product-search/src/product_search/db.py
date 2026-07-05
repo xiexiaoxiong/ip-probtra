@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 
 from product_search.config import get_settings
 from product_search.models import CandidateDiagnostic, ProductResult
+from product_search.platforms import OBJECT_BASE_TERMS, derive_title_product_keywords
 
 
 _engine: Engine | None = None
@@ -115,11 +116,12 @@ def fetch_keywords(
         return _dedupe_keywords(input_keywords, max_keywords)
 
     sql = """
-      SELECT keyword_text, keyword_type, confidence_score, raw_payload
-      FROM keyword_records
-      WHERE patent_record_id = :patent_record_id
-        AND (:analysis_session_id = '' OR analysis_session_id = :analysis_session_id)
-      ORDER BY id ASC
+      SELECT k.keyword_text, k.keyword_type, k.confidence_score, k.raw_payload, p.title
+      FROM keyword_records k
+      LEFT JOIN patent_parse_records p ON p.id = k.patent_record_id
+      WHERE k.patent_record_id = :patent_record_id
+        AND (:analysis_session_id = '' OR k.analysis_session_id = :analysis_session_id)
+      ORDER BY k.id ASC
     """
     engine = get_engine()
     with engine.connect() as conn:
@@ -128,6 +130,7 @@ def fetch_keywords(
             {"patent_record_id": patent_record_id, "analysis_session_id": analysis_session_id or ""},
         ).mappings().all()
 
+    title = str(rows[0].get("title") or "") if rows else ""
     weighted: list[tuple[int, float, int, int, str]] = []
     for index, row in enumerate(rows):
         keyword = str(row.get("keyword_text") or "").strip()
@@ -136,15 +139,16 @@ def fetch_keywords(
         keyword_type = str(row.get("keyword_type") or "").upper()
         confidence = float(row.get("confidence_score") or 0.0)
         effective_len = len(keyword.replace(" ", ""))
+        has_core_object = any(term in keyword for term in OBJECT_BASE_TERMS)
         priority = 60
-        if "OBJECT_BASE" in keyword_type:
-            priority = 4
-        elif "REQUIRED" in keyword_type and effective_len >= 5:
+        if "REQUIRED" in keyword_type and effective_len >= 5 and has_core_object:
             priority = 5
-        elif "COMBINED" in keyword_type:
-            priority = 15
-        elif "INVENTION" in keyword_type:
-            priority = 20
+        elif "INVENTION" in keyword_type and has_core_object:
+            priority = 8
+        elif "COMBINED" in keyword_type and has_core_object:
+            priority = 10
+        elif "OBJECT_BASE" in keyword_type:
+            priority = 30
         elif "REQUIRED" in keyword_type:
             priority = 70
         elif "HOLDER" in keyword_type:
@@ -154,7 +158,12 @@ def fetch_keywords(
         weighted.append((priority, -confidence, -effective_len, index, keyword))
 
     weighted.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
-    return _dedupe_keywords([item[4] for item in weighted], max_keywords)
+    fallback_keywords = derive_title_product_keywords(title, limit=1)
+    feature_slots = max(0, max_keywords - len(fallback_keywords))
+    ordered = [item[4] for item in weighted[:feature_slots]]
+    ordered.extend(fallback_keywords)
+    ordered.extend(item[4] for item in weighted[feature_slots:])
+    return _dedupe_keywords(ordered, max_keywords)
 
 
 def _dedupe_keywords(keywords: list[str], max_keywords: int) -> list[str]:
@@ -290,6 +299,73 @@ def insert_product(
     }
     with get_engine().begin() as conn:
         conn.execute(text(sql), params)
+
+
+def fetch_recent_products_for_record(patent_record_id: int, limit: int) -> list[ProductResult]:
+    sql = """
+      SELECT *
+      FROM product_detail_search_products
+      WHERE patent_record_id = :patent_record_id
+        AND product_name IS NOT NULL
+        AND final_url IS NOT NULL
+        AND jsonb_typeof(picture) = 'array'
+        AND jsonb_array_length(picture) > 0
+      ORDER BY created_at DESC, id DESC
+      LIMIT :limit
+    """
+    with get_engine().connect() as conn:
+        rows = conn.execute(text(sql), {"patent_record_id": patent_record_id, "limit": max(1, limit)}).mappings().all()
+    return [_product_from_row(dict(row)) for row in rows]
+
+
+def _json_value(value: Any, fallback: Any) -> Any:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+    return value
+
+
+def _product_from_row(row: dict[str, Any]) -> ProductResult:
+    matched_keywords = [
+        item.strip()
+        for item in str(row.get("matched_keywords") or "").split(",")
+        if item.strip()
+    ]
+    flags = dict(_json_value(row.get("quality_flags"), {}) or {})
+    flags.update(
+        {
+            "historical_fallback": True,
+            "historical_product_row_id": row.get("id"),
+            "historical_run_id": row.get("run_id"),
+        }
+    )
+    raw_payload = dict(_json_value(row.get("raw_payload"), {}) or {})
+    raw_payload["historical_fallback"] = {
+        "product_row_id": row.get("id"),
+        "run_id": row.get("run_id"),
+    }
+    return ProductResult(
+        product_id=row.get("product_id") or "",
+        platform=row.get("platform") or "",
+        product_name=row.get("product_name") or "",
+        product_url=row.get("product_url") or "",
+        final_url=row.get("final_url") or row.get("product_url") or "",
+        price=row.get("price") or "",
+        sales=row.get("sales") or "",
+        brand=row.get("brand") or "",
+        manufacturer=row.get("manufacturer") or "",
+        description=row.get("description") or "",
+        detail_text=row.get("detail_text") or "",
+        picture=list(_json_value(row.get("picture"), []) or []),
+        matched_keywords=matched_keywords,
+        quality_score=int(row.get("quality_score") or 0),
+        quality_flags=flags,
+        raw_payload=raw_payload,
+    )
 
 
 def finish_run(

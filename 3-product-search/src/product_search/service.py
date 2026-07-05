@@ -8,7 +8,14 @@ from dataclasses import replace
 
 from product_search.brightdata import BrightDataClient
 from product_search.config import Settings
-from product_search.db import create_run, fetch_keywords, finish_run, insert_candidate, insert_product
+from product_search.db import (
+    create_run,
+    fetch_keywords,
+    fetch_recent_products_for_record,
+    finish_run,
+    insert_candidate,
+    insert_product,
+)
 from product_search.discovery import extract_detail_candidates_from_discovery_page
 from product_search.models import (
     CandidateDiagnostic,
@@ -93,6 +100,14 @@ ACCESSORY_TERMS = (
     "三角垫",
     "垫板",
     "坡道",
+    "控制板",
+    "上控板",
+    "主板",
+    "电路板",
+    "显示屏控制板",
+    "屏幕控制板",
+    "屏幕总成",
+    "液晶屏",
     "支架",
     "保护套",
     "收纳袋",
@@ -103,7 +118,6 @@ ACCESSORY_TERMS = (
     "拖布",
     "抹布",
     "尘袋",
-    "水箱",
     "电池",
     "充电器",
     "遥控器",
@@ -172,6 +186,69 @@ CORE_COMPONENT_MISMATCH_TERMS = {
 }
 
 CORE_OBJECT_ALIAS_TERMS = {
+    "扫地机器人": (
+        "扫地机器人",
+        "扫拖机器人",
+        "扫地机",
+        "扫拖机",
+        "robotvacuum",
+        "roboticvacuum",
+        "vacuumrobot",
+    ),
+    "健身车": (
+        "健身车",
+        "动感单车",
+        "脚踏车",
+        "健身单车",
+        "exercisebike",
+        "stationarybike",
+        "spinningbike",
+        "spinbike",
+    ),
+    "动感单车": (
+        "动感单车",
+        "健身车",
+        "健身单车",
+        "exercisebike",
+        "stationarybike",
+        "spinningbike",
+        "spinbike",
+    ),
+    "脚踏车": (
+        "脚踏车",
+        "健身车",
+        "动感单车",
+        "健身单车",
+        "exercisebike",
+        "stationarybike",
+        "spinningbike",
+        "spinbike",
+    ),
+    "跑步机": (
+        "跑步机",
+        "走步机",
+        "treadmill",
+        "inclinetrainer",
+        "runner",
+    ),
+    "计时器": (
+        "计时器",
+        "定时器",
+        "timer",
+        "countdowntimer",
+        "kitchentimer",
+        "cubetimer",
+        "pomodorotimer",
+    ),
+    "定时器": (
+        "定时器",
+        "计时器",
+        "timer",
+        "countdowntimer",
+        "kitchentimer",
+        "cubetimer",
+        "pomodorotimer",
+    ),
     "灯具": (
         "灯具",
         "射灯",
@@ -222,7 +299,112 @@ CORE_OBJECT_ALIAS_TERMS = {
         "hapticdriver",
         "hapticsdriver",
     ),
+    "音箱": (
+        "音箱",
+        "音响",
+        "扬声器",
+        "蓝牙音箱",
+        "speaker",
+        "bluetoothspeaker",
+        "neckspeaker",
+        "wearablespeaker",
+    ),
+    "音响": (
+        "音响",
+        "音箱",
+        "扬声器",
+        "蓝牙音箱",
+        "speaker",
+        "bluetoothspeaker",
+        "neckspeaker",
+        "wearablespeaker",
+    ),
+    "耳机": (
+        "耳机",
+        "蓝牙耳机",
+        "neckband",
+        "headphones",
+        "earphones",
+        "earbuds",
+    ),
+    "水枪": (
+        "水枪",
+        "watergun",
+        "waterguns",
+        "squirtgun",
+        "squirtguns",
+        "waterblaster",
+    ),
 }
+
+
+REQUIRED_QUALIFIER_GROUPS = (
+    (
+        "佩戴形态",
+        ("颈挂", "颈戴", "挂脖", "挂颈", "穿戴", "可穿戴"),
+        ("颈挂", "颈戴", "挂脖", "挂颈", "项圈", "穿戴", "可穿戴", "neckband", "wearable"),
+    ),
+    (
+        "多面/翻转形态",
+        ("多边形", "多面体", "立方体", "六面", "六边形", "翻转", "翻面"),
+        ("多边形", "多面体", "立方体", "六面", "六边形", "翻转", "翻面", "重力感应", "cube", "cubic", "polygon"),
+    ),
+    (
+        "盲文/触觉辅助",
+        ("盲文", "盲人", "视障", "触感", "触摸", "可触摸"),
+        ("盲文", "盲人", "视障", "语音", "报时", "凸点", "触感", "触摸", "可触摸", "braille", "tactile"),
+    ),
+    (
+        "儿童/玩具用途",
+        ("儿童", "玩具"),
+        ("儿童", "玩具", "亲子", "孩子", "小孩", "宝宝", "戏水", "夏季", "toy", "kids", "children"),
+    ),
+    (
+        "健身/训练用途",
+        ("健身", "训练", "运动"),
+        ("健身", "训练", "运动", "锻炼", "室内", "家用", "exercise", "fitness", "workout", "stationary", "indoor", "gym"),
+    ),
+    (
+        "屏幕/影像显示",
+        ("影像", "显示", "视频", "跟练", "屏幕", "显影"),
+        ("影像", "显示", "视频", "屏幕", "显示屏", "大屏", "跟练", "课程", "app", "智能屏", "display", "screen", "video"),
+    ),
+    (
+        "可调角",
+        ("调角", "可调角"),
+        ("调角", "可调角", "角度", "光束角", "可调", "调节", "转向", "旋转", "tilt", "adjustable"),
+    ),
+    (
+        "角度/重力感应",
+        ("角度感应", "重力感应"),
+        ("角度感应", "重力感应", "重力", "感应", "翻转", "翻面", "gravity", "sensor", "flip"),
+    ),
+    (
+        "免工具/免拆",
+        ("免拆", "免工具"),
+        ("免拆", "免工具", "无需拆卸", "无需工具", "不用拆", "不用工具", "tool-free", "toolfree", "toolless"),
+    ),
+    (
+        "调光/亮度",
+        ("调光", "亮度"),
+        ("调光", "亮度", "调亮", "调暗", "dimming", "dimmer", "brightness"),
+    ),
+    (
+        "拖地/扫拖",
+        ("拖地", "扫拖", "刷地", "洗拖", "拖布"),
+        ("拖地", "扫拖", "拖布", "洗拖", "刷地", "拖擦", "mop", "mopping"),
+    ),
+    (
+        "升降/抬升",
+        ("升降", "抬升", "提升"),
+        ("升降", "抬升", "提升", "自动抬升", "拖布抬升", "lift", "lifting"),
+    ),
+    (
+        "杀菌/消毒",
+        ("杀菌", "消毒", "uv", "紫外"),
+        ("杀菌", "消毒", "除菌", "抗菌", "uv", "紫外", "sterili", "disinfect"),
+    ),
+)
 
 
 def _normalize_relevance_text(value: str) -> str:
@@ -285,7 +467,27 @@ class ProductSearchService:
             detail_candidates = self._select_detail_candidates(candidates, payload.max_detail_candidates)
             candidate_filter_diagnostics = self._diagnose_filtered_candidates(candidates, detail_candidates)
             products, detail_diagnostics = await self._fetch_and_filter_candidates(payload, detail_candidates)
-            diagnostics = search_diagnostics + candidate_filter_diagnostics + detail_diagnostics
+            fallback_diagnostics: list[CandidateDiagnostic] = []
+            if not products:
+                products = fetch_recent_products_for_record(payload.patent_record_id, payload.max_products)
+                if products:
+                    fallback_diagnostics.append(
+                        CandidateDiagnostic(
+                            keyword=", ".join(keywords[:3]),
+                            platform=products[0].platform,
+                            candidate_url=products[0].product_url,
+                            final_url=products[0].final_url,
+                            title=products[0].product_name,
+                            status="accepted",
+                            rejection_reason="实时搜索未得到 accepted 商品，复用同记录历史成功商品",
+                            quality_score=products[0].quality_score,
+                            raw_payload={
+                                "historical_fallback": True,
+                                "product": products[0].model_dump(),
+                            },
+                        )
+                    )
+            diagnostics = search_diagnostics + candidate_filter_diagnostics + detail_diagnostics + fallback_diagnostics
             accepted = products[: payload.max_products]
             rejected_count = sum(1 for item in diagnostics if item.status != "accepted")
 
@@ -410,6 +612,7 @@ class ProductSearchService:
                 html=fetch.html,
                 page_url=fetch.final_url or candidate.candidate_url,
                 keyword=candidate.keyword,
+                original_keyword=candidate.original_keyword or candidate.keyword,
                 platform=candidate.platform,
                 limit=max(1, per_page_limit),
             )
@@ -461,6 +664,7 @@ class ProductSearchService:
 
     def _candidate_relevance_score(self, candidate: CandidateLink) -> float:
         keyword = _normalize_relevance_text(candidate.keyword)
+        validation_keyword = _normalize_relevance_text(candidate.original_keyword or candidate.keyword)
         haystack = _normalize_relevance_text(f"{candidate.title} {candidate.snippet}")
         if not keyword or not haystack:
             return 0.0
@@ -468,7 +672,8 @@ class ProductSearchService:
         char_ratio = sum(1 for char in chars if char in haystack) / max(1, len(chars))
         bigrams = self._keyword_bigrams(keyword)
         bigram_ratio = sum(1 for token in bigrams if token in haystack) / max(1, len(bigrams))
-        return round(char_ratio + bigram_ratio * 1.5, 4)
+        qualifier_score = self._qualifier_sort_score(validation_keyword, haystack)
+        return round(char_ratio + bigram_ratio * 1.5 + qualifier_score, 4)
 
     def _diagnose_filtered_candidates(
         self,
@@ -583,7 +788,12 @@ class ProductSearchService:
                 await asyncio.sleep(0.8)
             fetch = best_fetch
             parsed = best_parsed
-            decision = self._apply_keyword_relevance(candidate.keyword, parsed, best_decision)
+            decision = self._apply_keyword_relevance(
+                candidate.keyword,
+                parsed,
+                best_decision,
+                candidate.original_keyword or candidate.keyword,
+            )
             final_url = parsed.final_url or fetch.final_url
             diagnostics.append(
                 CandidateDiagnostic(
@@ -728,13 +938,16 @@ class ProductSearchService:
             return True
         return provider.startswith("brightdata_unlocker")
 
-    def _apply_keyword_relevance(self, keyword: str, parsed, decision):
+    def _apply_keyword_relevance(self, keyword: str, parsed, decision, original_keyword: str = ""):
         cleaned_keyword = _normalize_relevance_text(keyword)
+        validation_keyword = _normalize_relevance_text(original_keyword or keyword)
         if not decision.accepted:
             return decision
         haystack = _normalize_relevance_text(f"{parsed.product_name} {parsed.description}")
         if not haystack:
             return decision
+        decision.flags["matched_keyword"] = keyword
+        decision.flags["validation_keyword"] = original_keyword or keyword
         if self._is_accessory_mismatch(cleaned_keyword, parsed.product_name):
             decision.accepted = False
             decision.status = "rejected"
@@ -744,6 +957,23 @@ class ProductSearchService:
             decision.accepted = False
             decision.status = "rejected"
             decision.reasons.append("商品标题显示为核心商品的控制/连接/安装部件，不是商品本体")
+            return decision
+        missing_qualifiers = self._missing_required_qualifier_groups(validation_keyword, haystack)
+        if missing_qualifiers:
+            decision.accepted = False
+            decision.status = "rejected"
+            decision.flags["missing_required_qualifiers"] = missing_qualifiers
+            decision.reasons.append("商品详情缺少原始关键词必要限定词: " + "、".join(missing_qualifiers))
+            return decision
+        if self._fitness_bike_transport_mismatch(validation_keyword, parsed.product_name, haystack):
+            decision.accepted = False
+            decision.status = "rejected"
+            decision.reasons.append("商品标题/详情显示为出行代步自行车，不是健身脚踏车/健身车本体")
+            return decision
+        if self._core_product_missing_title_signal(cleaned_keyword, f"{parsed.product_name} {parsed.description[:500]}"):
+            decision.accepted = False
+            decision.status = "rejected"
+            decision.reasons.append("商品页面未显示关键词对应的核心商品本体")
             return decision
         if self._short_core_keyword_missing_title_signal(cleaned_keyword, parsed.product_name):
             decision.accepted = False
@@ -759,15 +989,17 @@ class ProductSearchService:
         bigrams = self._keyword_bigrams(cleaned_keyword)
         bigram_ratio = sum(1 for token in bigrams if token in haystack) / max(1, len(bigrams))
         has_core_object_signal = self._has_core_object_signal(cleaned_keyword, haystack)
+        qualifier_score = self._qualifier_sort_score(validation_keyword, haystack)
+        has_required_qualifier = self._has_required_qualifier_trigger(validation_keyword)
         decision.flags["matched_keyword_ratio"] = round(ratio, 3)
         decision.flags["matched_keyword_bigram_ratio"] = round(bigram_ratio, 3)
-        decision.flags["matched_keyword"] = keyword
         allow_sparse_bigram = has_core_object_signal and (
             ratio >= 0.85
             or ("充电站" in cleaned_keyword and ratio >= 0.58)
             or (("马达驱动芯片" in cleaned_keyword or "驱动芯片" in cleaned_keyword) and ratio >= 0.58)
+            or (has_required_qualifier and qualifier_score > 0)
         )
-        if ratio < 0.58 or (
+        if (ratio < 0.58 and not allow_sparse_bigram) or (
             len(cleaned_keyword) >= 5
             and bigrams
             and bigram_ratio < 0.35
@@ -777,6 +1009,34 @@ class ProductSearchService:
             decision.status = "rejected"
             decision.reasons.append(f"商品详情与检索关键词连续片段覆盖度不足: 字符={ratio:.2f}, 片段={bigram_ratio:.2f}")
         return decision
+
+    def _missing_required_qualifier_groups(self, validation_keyword: str, haystack: str) -> list[str]:
+        missing: list[str] = []
+        for label, triggers, accepted_terms in REQUIRED_QUALIFIER_GROUPS:
+            if not any(trigger in validation_keyword for trigger in triggers):
+                continue
+            if any(term in haystack for term in accepted_terms):
+                continue
+            missing.append(label)
+        return missing
+
+    def _has_required_qualifier_trigger(self, validation_keyword: str) -> bool:
+        return any(
+            trigger in validation_keyword
+            for _label, triggers, _accepted_terms in REQUIRED_QUALIFIER_GROUPS
+            for trigger in triggers
+        )
+
+    def _qualifier_sort_score(self, validation_keyword: str, haystack: str) -> float:
+        score = 0.0
+        for _label, triggers, accepted_terms in REQUIRED_QUALIFIER_GROUPS:
+            if not any(trigger in validation_keyword for trigger in triggers):
+                continue
+            if any(term in haystack for term in accepted_terms):
+                score += 1.0
+            else:
+                score -= 0.75
+        return score
 
     def _keyword_bigrams(self, keyword: str) -> list[str]:
         chars = [char for char in keyword if "\u4e00" <= char <= "\u9fff"]
@@ -809,6 +1069,21 @@ class ProductSearchService:
                 return True
         return False
 
+    def _core_product_missing_title_signal(self, cleaned_keyword: str, product_name: str) -> bool:
+        title = _normalize_relevance_text(product_name)
+        if not title:
+            return False
+        for core_term in CORE_PRODUCT_TERMS:
+            if core_term not in cleaned_keyword:
+                continue
+            if core_term == "高尔夫球" and "充电站" in cleaned_keyword:
+                continue
+            aliases = CORE_OBJECT_ALIAS_TERMS.get(core_term, (core_term,))
+            if any(alias in title for alias in aliases):
+                continue
+            return True
+        return False
+
     def _is_component_mismatch(self, cleaned_keyword: str, product_name: str) -> bool:
         title = _normalize_relevance_text(product_name)
         if not title:
@@ -825,6 +1100,45 @@ class ProductSearchService:
             if any(term in title for term in component_terms):
                 return True
         return False
+
+    def _fitness_bike_transport_mismatch(self, validation_keyword: str, product_name: str, haystack: str) -> bool:
+        if not any(term in validation_keyword for term in ("健身", "训练", "锻炼")):
+            return False
+        if not any(term in validation_keyword for term in ("脚踏车", "健身车", "动感单车", "健身单车")):
+            return False
+        title = _normalize_relevance_text(product_name)
+        if not title:
+            return False
+        fitness_title_terms = (
+            "健身车",
+            "动感单车",
+            "健身单车",
+            "室内单车",
+            "室内健身",
+            "脚踏健身",
+            "exercisebike",
+            "stationarybike",
+            "spinningbike",
+            "spinbike",
+        )
+        if any(term in title for term in fitness_title_terms):
+            return False
+        transport_terms = (
+            "代步",
+            "通勤",
+            "长途旅行",
+            "旅行",
+            "助力自行车",
+            "电动助力",
+            "锂电",
+            "上牌",
+            "公路车",
+            "山地车",
+            "骑行装备",
+            "户外骑行",
+            "城市骑行",
+        )
+        return any(term in title or term in haystack for term in transport_terms)
 
     def _short_core_keyword_missing_title_signal(self, cleaned_keyword: str, product_name: str) -> bool:
         if len(cleaned_keyword) >= 5:

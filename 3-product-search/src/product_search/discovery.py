@@ -12,15 +12,23 @@ def extract_detail_candidates_from_discovery_page(
     html: str,
     page_url: str,
     keyword: str,
+    original_keyword: str = "",
     platform: str,
     limit: int,
 ) -> list[CandidateLink]:
     if platform == "jd" or detect_platform(page_url) == "jd":
-        return _extract_jd_detail_candidates(html=html, page_url=page_url, keyword=keyword, limit=limit)
+        return _extract_jd_detail_candidates(
+            html=html,
+            page_url=page_url,
+            keyword=keyword,
+            original_keyword=original_keyword,
+            limit=limit,
+        )
     return _extract_anchor_detail_candidates(
         html=html,
         page_url=page_url,
         keyword=keyword,
+        original_keyword=original_keyword,
         platform=platform,
         source="discovery_page",
         limit=limit,
@@ -32,6 +40,7 @@ def _extract_anchor_detail_candidates(
     html: str,
     page_url: str,
     keyword: str,
+    original_keyword: str = "",
     platform: str,
     source: str,
     limit: int,
@@ -48,6 +57,7 @@ def _extract_anchor_detail_candidates(
         results.append(
             CandidateLink(
                 keyword=keyword,
+                original_keyword=original_keyword or keyword,
                 platform=platform,
                 candidate_url=href,
                 title=text[:500],
@@ -66,6 +76,7 @@ def _extract_jd_detail_candidates(
     html: str,
     page_url: str,
     keyword: str,
+    original_keyword: str = "",
     limit: int,
 ) -> list[CandidateLink]:
     soup = BeautifulSoup(html or "", "lxml")
@@ -80,6 +91,7 @@ def _extract_jd_detail_candidates(
         results.append(
             CandidateLink(
                 keyword=keyword,
+                original_keyword=original_keyword or keyword,
                 platform="jd",
                 candidate_url=normalized,
                 title=" ".join((title or "").split())[:500],
@@ -109,4 +121,3 @@ def _extract_jd_detail_candidates(
         if len(results) >= limit:
             break
     return results[:limit]
-

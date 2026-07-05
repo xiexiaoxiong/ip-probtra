@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -13,6 +16,7 @@ from sqlalchemy import text
 from product_search.config import bootstrap_local_env, get_settings
 from product_search.db import fetch_keywords, get_engine
 from product_search.models import ProductSearchInput
+from product_search.platforms import OBJECT_BASE_TERMS, derive_title_product_keywords
 from product_search.service import ProductSearchService
 
 
@@ -30,6 +34,10 @@ class KeywordSource:
     analysis_session_id: str
     keyword_count: int
     reason: str
+
+
+def print_line(message: str) -> None:
+    print(message, flush=True)
 
 
 def normalize_patent_number(value: str) -> str:
@@ -143,6 +151,190 @@ async def run_one(record: ExampleRecord, source: KeywordSource, args: argparse.N
     }
 
 
+def keyword_source_to_dict(source: KeywordSource | None) -> dict[str, Any] | None:
+    if source is None:
+        return None
+    return asdict(source)
+
+
+def summarize_product(product: dict[str, Any]) -> dict[str, Any]:
+    pictures = product.get("picture") or []
+    if not isinstance(pictures, list):
+        pictures = []
+    return {
+        "platform": product.get("platform"),
+        "product_name": product.get("product_name"),
+        "final_url": product.get("final_url"),
+        "source_text_url": product.get("source_text_url"),
+        "source_image_url": product.get("source_image_url"),
+        "picture_count": len(pictures),
+        "pictures_sample": pictures[:3],
+        "quality_score": product.get("quality_score"),
+        "price": product.get("price"),
+        "sales": product.get("sales"),
+        "brand": product.get("brand"),
+        "manufacturer": product.get("manufacturer"),
+    }
+
+
+def build_outcome(
+    record: ExampleRecord,
+    source: KeywordSource | None,
+    status: str,
+    *,
+    ok: bool,
+    elapsed_seconds: float = 0.0,
+    error: str | None = None,
+    result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    outcome: dict[str, Any] = {
+        "ok": ok,
+        "status": status,
+        "elapsed_seconds": round(elapsed_seconds, 2),
+        "record": asdict(record),
+        "keyword_source": keyword_source_to_dict(source),
+    }
+    if error:
+        outcome["error"] = error
+    if result:
+        products = [summarize_product(product) for product in result.get("products", [])]
+        outcome.update(
+            {
+                "run_id": int(result.get("run_id") or 0),
+                "keywords": list(result.get("keywords") or []),
+                "candidates": int(result.get("candidates") or 0),
+                "accepted": int(result.get("accepted") or 0),
+                "rejected": int(result.get("rejected") or 0),
+                "products": products,
+            }
+        )
+    return outcome
+
+
+async def append_jsonl(path: Path | None, lock: asyncio.Lock, outcome: dict[str, Any]) -> None:
+    if path is None:
+        return
+    line = json.dumps(outcome, ensure_ascii=False, sort_keys=True)
+    async with lock:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+
+async def run_record(
+    record: ExampleRecord,
+    source: KeywordSource,
+    args: argparse.Namespace,
+    jsonl_path: Path | None,
+    jsonl_lock: asyncio.Lock,
+) -> dict[str, Any]:
+    print_line(
+        f"START | record={record.id} | {record.patent_number} | {record.title} | "
+        f"source={source.reason}:{source.patent_record_id}:{source.analysis_session_id}"
+    )
+    started = time.monotonic()
+    if args.list_only:
+        outcome = build_outcome(record, source, "listed", ok=True)
+        await append_jsonl(jsonl_path, jsonl_lock, outcome)
+        return outcome
+
+    try:
+        run_coro = run_one(record, source, args)
+        if args.per_record_timeout_seconds:
+            result = await asyncio.wait_for(run_coro, timeout=args.per_record_timeout_seconds)
+        else:
+            result = await run_coro
+    except asyncio.TimeoutError:
+        elapsed = time.monotonic() - started
+        outcome = build_outcome(
+            record,
+            source,
+            "timeout",
+            ok=False,
+            elapsed_seconds=elapsed,
+            error=f"per-record timeout after {args.per_record_timeout_seconds}s",
+        )
+        print_line(
+            f"TIMEOUT | record={record.id} | elapsed={outcome['elapsed_seconds']}s | "
+            f"timeout={args.per_record_timeout_seconds}s"
+        )
+        await append_jsonl(jsonl_path, jsonl_lock, outcome)
+        return outcome
+    except Exception as exc:
+        elapsed = time.monotonic() - started
+        outcome = build_outcome(
+            record,
+            source,
+            "error",
+            ok=False,
+            elapsed_seconds=elapsed,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        print_line(f"ERROR | record={record.id} | elapsed={outcome['elapsed_seconds']}s | {outcome['error']}")
+        await append_jsonl(jsonl_path, jsonl_lock, outcome)
+        return outcome
+
+    elapsed = time.monotonic() - started
+    accepted = int(result.get("accepted") or 0)
+    status = "ok" if accepted > 0 else "empty"
+    outcome = build_outcome(
+        record,
+        source,
+        status,
+        ok=(accepted > 0 or not args.fail_on_empty),
+        elapsed_seconds=elapsed,
+        result=result,
+    )
+    print_line(
+        f"DONE | record={record.id} | run={result['run_id']} | candidates={result['candidates']} | "
+        f"accepted={result['accepted']} | rejected={result['rejected']} | "
+        f"elapsed={outcome['elapsed_seconds']}s | keywords={' / '.join(result['keywords'])}"
+    )
+    for product in result["products"]:
+        print_line(
+            "PRODUCT | "
+            f"{product.get('platform')} | {str(product.get('product_name') or '')[:80]} | "
+            f"{product.get('final_url')} | images={len(product.get('picture') or [])} | "
+            f"score={product.get('quality_score')}"
+        )
+    await append_jsonl(jsonl_path, jsonl_lock, outcome)
+    return outcome
+
+
+async def run_records(
+    records: list[tuple[ExampleRecord, KeywordSource]],
+    args: argparse.Namespace,
+    jsonl_path: Path | None,
+    jsonl_lock: asyncio.Lock,
+) -> list[dict[str, Any]]:
+    semaphore = asyncio.Semaphore(max(1, args.concurrency))
+
+    async def guarded(record: ExampleRecord, source: KeywordSource) -> dict[str, Any]:
+        async with semaphore:
+            return await run_record(record, source, args, jsonl_path, jsonl_lock)
+
+    tasks = [asyncio.create_task(guarded(record, source)) for record, source in records]
+    outcomes: list[dict[str, Any]] = []
+    for task in asyncio.as_completed(tasks):
+        outcomes.append(await task)
+    return outcomes
+
+
+def print_summary(outcomes: list[dict[str, Any]]) -> None:
+    status_counts: dict[str, int] = {}
+    for outcome in outcomes:
+        status = str(outcome.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    accepted_records = sum(1 for outcome in outcomes if int(outcome.get("accepted") or 0) > 0)
+    accepted_products = sum(int(outcome.get("accepted") or 0) for outcome in outcomes)
+    parts = [
+        f"records={len(outcomes)}",
+        f"accepted_records={accepted_records}",
+        f"accepted_products={accepted_products}",
+    ]
+    parts.extend(f"{status}={count}" for status, count in sorted(status_counts.items()))
+    print_line("SUMMARY | " + " | ".join(parts))
+
+
 def fetch_aggregated_keywords(record: ExampleRecord, max_keywords: int) -> list[str]:
     sql = """
       SELECT k.keyword_text, k.keyword_type, k.confidence_score, k.id
@@ -174,29 +366,48 @@ def fetch_aggregated_keywords(record: ExampleRecord, max_keywords: int) -> list[
         keyword_type = str(row["keyword_type"] or "").upper()
         confidence = float(row["confidence_score"] or 0.0)
         effective_len = len(keyword.replace(" ", ""))
+        has_core_object = any(term in keyword for term in OBJECT_BASE_TERMS)
         priority = 60
-        if "OBJECT_BASE" in keyword_type:
-            priority = 4
-        elif "COMBINED" in keyword_type and effective_len >= 5:
+        if "REQUIRED" in keyword_type and effective_len >= 5 and has_core_object:
+            priority = 5
+        elif "INVENTION" in keyword_type and has_core_object:
             priority = 8
-        elif "REQUIRED" in keyword_type and effective_len >= 5:
+        elif "COMBINED" in keyword_type and effective_len >= 5 and has_core_object:
             priority = 10
-        elif "INVENTION" in keyword_type:
-            priority = 20
+        elif "OBJECT_BASE" in keyword_type:
+            priority = 30
+        elif "REQUIRED" in keyword_type:
+            priority = 70
         elif "HOLDER" in keyword_type:
             priority = 75
         weighted.append((priority, -confidence, -effective_len, int(row["id"]), keyword))
     weighted.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
 
+    fallback_keywords = derive_title_product_keywords(record.title, limit=1)
     result: list[str] = []
     seen: set[str] = set()
+    feature_slots = max(0, max_keywords - len(fallback_keywords))
     for *_rest, keyword in weighted:
+        if len(result) >= feature_slots:
+            break
+        if keyword in seen:
+            continue
+        seen.add(keyword)
+        result.append(keyword)
+    for keyword in fallback_keywords:
         if keyword in seen:
             continue
         seen.add(keyword)
         result.append(keyword)
         if len(result) >= max_keywords:
             break
+    for *_rest, keyword in weighted:
+        if len(result) >= max_keywords:
+            break
+        if keyword in seen:
+            continue
+        seen.add(keyword)
+        result.append(keyword)
     return result
 
 
@@ -214,12 +425,23 @@ async def main() -> int:
     parser.add_argument("--platforms", nargs="+", default=["jd", "1688"])
     parser.add_argument("--service-url", default="", help="call a running 3-product-search HTTP service instead of direct in-process service")
     parser.add_argument("--http-timeout-seconds", type=int, default=240)
+    parser.add_argument("--per-record-timeout-seconds", type=int, default=0, help="wall-clock timeout per patent record; 0 disables")
+    parser.add_argument("--concurrency", type=int, default=1, help="max patent records to run in parallel")
+    parser.add_argument("--jsonl-output", default="", help="write one JSON object per record as soon as it finishes")
+    parser.add_argument("--fail-on-empty", action="store_true", help="return non-zero if any searched record has no accepted products or no keywords")
     parser.add_argument("--no-persist", action="store_true")
     parser.add_argument("--list-only", action="store_true", help="only list keyword sources; do not search products")
     parser.add_argument("--single-source-keywords", action="store_true", help="only use the selected keyword source instead of aggregating same-patent module2 keywords")
     args = parser.parse_args()
+    args.concurrency = max(1, args.concurrency)
 
     bootstrap_local_env()
+    jsonl_path = Path(args.jsonl_output).expanduser() if args.jsonl_output else None
+    if jsonl_path:
+        jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        jsonl_path.write_text("", encoding="utf-8")
+        print_line(f"JSONL | path={jsonl_path}")
+
     records = load_example_records(args.prefix)
     if args.record_id:
         wanted = set(args.record_id)
@@ -227,31 +449,31 @@ async def main() -> int:
     if args.limit:
         records = records[: args.limit]
 
-    print(f"examples={len(records)}")
+    print_line(f"examples={len(records)}")
+    jsonl_lock = asyncio.Lock()
+    runnable: list[tuple[ExampleRecord, KeywordSource]] = []
+    outcomes: list[dict[str, Any]] = []
     for record in records:
         source = find_keyword_source(record)
         if not source:
-            print(f"NO_KEYWORDS | record={record.id} | {record.patent_number} | {record.title}")
-            continue
-        print(
-            f"START | record={record.id} | {record.patent_number} | {record.title} | "
-            f"source={source.reason}:{source.patent_record_id}:{source.analysis_session_id}"
-        )
-        if args.list_only:
-            continue
-        result = await run_one(record, source, args)
-        print(
-            f"DONE | record={record.id} | run={result['run_id']} | candidates={result['candidates']} | "
-            f"accepted={result['accepted']} | rejected={result['rejected']} | keywords={' / '.join(result['keywords'])}"
-        )
-        for product in result["products"]:
-            print(
-                "PRODUCT | "
-                f"{product.get('platform')} | {str(product.get('product_name') or '')[:80]} | "
-                f"{product.get('final_url')} | images={len(product.get('picture') or [])} | "
-                f"score={product.get('quality_score')}"
+            print_line(f"NO_KEYWORDS | record={record.id} | {record.patent_number} | {record.title}")
+            outcome = build_outcome(
+                record,
+                None,
+                "no_keywords",
+                ok=not args.fail_on_empty,
+                error="no matching keyword_records source",
             )
-    return 0
+            await append_jsonl(jsonl_path, jsonl_lock, outcome)
+            outcomes.append(outcome)
+            continue
+        runnable.append((record, source))
+
+    outcomes.extend(await run_records(runnable, args, jsonl_path, jsonl_lock))
+    print_summary(outcomes)
+    has_runtime_failure = any(outcome.get("status") in {"error", "timeout"} for outcome in outcomes)
+    has_empty_failure = args.fail_on_empty and any(outcome.get("status") in {"empty", "no_keywords"} for outcome in outcomes)
+    return 1 if has_runtime_failure or has_empty_failure else 0
 
 
 if __name__ == "__main__":
