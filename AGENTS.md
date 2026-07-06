@@ -116,6 +116,12 @@ SKIP_ENV_VALIDATION=1 bash scripts/http_run.sh -p 5116
   -> Portal 从模块4响应或 Postgres 恢复结果，展示列表、详情和报告
 ```
 
+实验链路补充：
+
+- 平行模块3 `3-product-search` 写入独立表 `product_detail_search_*`，不替代旧 `3-search`。
+- Portal 提供 `/test/product-pipeline` 和 `/api/test/product-pipeline` 用于单独测试“模块2关键词 -> 新模块3商品详情/图片 -> 模块4比对”。该测试页默认调用新模块3 `127.0.0.1:5107/run`，可手动输入关键词，也可读取 `keyword_records`。
+- 模块4 `parse_and_fetch_node` 仍优先读取旧表 `search_products`；当同一 `patent_record_id + analysis_session_id` 下旧表无商品时，会兜底读取新模块3表 `product_detail_search_products`，用于实验链路比对。该 fallback 不改变主流程旧模块3结果。
+
 重要现状：
 
 - 旧文档仍大量提到 `feishu_url`，但当前代码主线在多个模块中已改为 `patent_record_id` + `analysis_session_id`。
@@ -641,3 +647,12 @@ analyze_features
 - 平行模块三质量过滤更新：跑步机控制板/上控板/主板/电路板等部件页会 rejected；扫地机器人“水箱版”不再被 `水箱` 误杀；健身脚踏车原始关键词下会拒绝代步/通勤/电助力/旅行自行车；外部 `/pages/...product-like slug` 品牌产品页可在质量通过时 accepted。
 - 平行模块三新增历史成功商品兜底：实时搜索优先；若本轮无 accepted，则从 `product_detail_search_products` 读取同 `patent_record_id` 最近有图片的历史 accepted 商品并写入当前 run。兜底结果会在 `quality_flags` 和 candidate diagnostic 中标记 `historical_fallback`，不能当成实时搜索命中混淆展示。
 - 平行模块三最终验证：`3-product-search/tests/test_quality.py` 当前 `45 passed`；PM2 `patent-3-product-search` 已重启；完整 13 个实例记录真实回归通过，`accepted_records=13/13`、`accepted_products=13`。因此模块3实验版当前可以根据模块2关键词检索到更多商品信息和商品图片，但真实搜索仍慢，且部分京东结果图片数只有 1-2 张。
+
+### 2026-07-06
+
+- 新增 Portal 测试页 `/test/product-pipeline` 和 API `/api/test/product-pipeline`，用于按步骤运行关键词生成、新模块3商品详情检索、模块4比对；旧 `/test` 和 `/test/module1` 顶部均已增加“关键词链路测试”入口。
+- 新 API 支持 `action=keywords|productSearch|claimCompare|all`，可选择通用/健身/家电模块2，可手动传入关键词；新模块3默认端点为 `PRODUCT_DETAIL_MODULE3_API_URL || PRODUCT_SEARCH_API_URL || http://127.0.0.1:5107/run`。
+- 模块4新增新模块3兼容读取：当旧 `search_products` 对当前 session 无商品时，读取 `product_detail_search_products`，将 `description + detail_text` 合成商品描述，将 `picture` 作为图片，并在 `raw_data` 标记 `module3_product_detail_fallback=true`。
+- 真实验证：`POST /api/test/product-pipeline` 以 `patentRecordId=101`、`analysisSessionId=module_test_codex_product_1782690000`、关键词“扫地机器人/拖地/升降”调用新模块3成功，`product_detail_search_run_id=213`，accepted 1 个商品 `Narwal Freo X Plus`，18 张图片，含详情描述，耗时约 294 秒。
+- 真实验证：同一 session 调用模块4成功，`claim_compare_run_id=71`，模块4日志显示读取新模块3商品并比对 1 个商品、8 个特征，API 返回 `featureCount=8`，耗时约 176 秒。
+- 验证命令：`pnpm ts-check` 通过；新增测试页/API 单独 `pnpm exec eslint src/app/test/product-pipeline/page.tsx src/app/api/test/product-pipeline/route.ts` 通过；`4-claim-chat/.venv/bin/python -m py_compile 4-claim-chat/src/graphs/nodes/parse_and_fetch_node.py` 通过；`pnpm build` 通过；已重启 `patent-web` 和 `patent-4-claim-chat`。全量 `pnpm lint` 仍因既有 `src/app/module1/page.tsx` 条件 Hook 错误失败，非本次新增代码导致。

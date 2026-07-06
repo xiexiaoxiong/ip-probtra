@@ -26,7 +26,7 @@
 - 节点 `analyze_features` 使用大语言模型（doubao-seed-1-8-251228，支持多模态）
 
 ## 数据流程
-1. **parse_and_fetch**: Postgres `patent_record_id` + `analysis_session_id` → 提取说明书文本+附图URL+独立权利要求列表+商品列表；历史兼容模式可从飞书URL读取
+1. **parse_and_fetch**: Postgres `patent_record_id` + `analysis_session_id` → 提取说明书文本+附图URL+独立权利要求列表+商品列表；历史兼容模式可从飞书URL读取。商品读取优先旧表 `search_products`；若当前 session 旧表无商品，则兜底读取新模块3独立表 `product_detail_search_products`，将 `description + detail_text` 合成商品描述、`picture` 作为图片，并在 `raw_data` 标记 `module3_product_detail_fallback=true`。
 2. **decompose_claim**: 对每个独立权利要求，结合说明书上下文 → 拆解为带claim_id前缀的技术特征（如1A,1B,...,9A,9B,...）
 3. **compare_products_loop**: 并行处理每个商品，子图内逐特征比对所有权利要求
 4. **write_feishu_results**: 写入 `claim_compare_runs` / `claim_compare_results`，历史兼容模式可写飞书子表格
@@ -83,3 +83,9 @@
 ## LLM 返回值解析注意
 - decompose_claim LLM 可能返回 `{"features": [...]}` dict 格式而非直接返回 list
 - 代码已处理 dict → list 自动提取（尝试 features/data/result/items 键）
+
+## 2026-07-06 更新
+
+- `parse_and_fetch_node.py` 新增对平行模块3 `product_detail_search_products` 的 fallback 读取。该逻辑仅在旧 `search_products` 查不到商品时触发，不改变正式旧模块3主流程。
+- 真实验证：同 `patent_record_id=101`、`analysis_session_id=module_test_codex_product_1782690000` 下，旧表无商品但新模块3表有 Narwal 商品详情；模块4 `/run` 成功读取该商品并完成 1 个商品、8 个特征比对，`claim_compare_run_id=71`。
+- 验证命令：`4-claim-chat/.venv/bin/python -m py_compile 4-claim-chat/src/graphs/nodes/parse_and_fetch_node.py` 通过；PM2 `patent-4-claim-chat` 已重启。

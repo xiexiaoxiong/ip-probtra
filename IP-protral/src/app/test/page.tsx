@@ -247,6 +247,11 @@ function TestPageContent() {
                 模块1测试
               </Button>
             </Link>
+            <Link href="/test/product-pipeline">
+              <Button variant="ghost" size="sm" className="gap-1.5">
+                关键词链路测试
+              </Button>
+            </Link>
           </div>
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-primary" />

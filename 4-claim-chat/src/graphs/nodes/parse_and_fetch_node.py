@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
+from sqlalchemy import text
 
 from graphs.state import ParseAndFetchInput, ParseAndFetchOutput
 
@@ -20,6 +21,45 @@ def _build_product_description(row) -> str:
     if supplement_text and supplement_text not in description:
         return f"{description}\n\n【二次检索补充资料】\n{supplement_text}".strip()
     return description
+
+
+def _build_product_detail_description(row: Dict[str, Any]) -> str:
+    parts = [
+        str(row.get("description") or "").strip(),
+        str(row.get("detail_text") or "").strip(),
+    ]
+    return "\n\n".join(part for part in parts if part)
+
+
+def _load_product_detail_rows(session, patent_record_id: int, analysis_session_id: str) -> List[Dict[str, Any]]:
+    """
+    Read products produced by 3-product-search. Module4 still prefers the legacy
+    search_products table; this fallback lets test/prototype flows compare the
+    new product-detail module without copying rows into the old table.
+    """
+    sql = """
+      SELECT id, run_id, product_id, platform, product_name, product_url, final_url,
+             price, sales, brand, manufacturer, matched_keywords, description,
+             detail_text, picture, quality_score, quality_flags, raw_payload,
+             created_at
+      FROM product_detail_search_products
+      WHERE patent_record_id = :patent_record_id
+        AND (:analysis_session_id = '' OR analysis_session_id = :analysis_session_id)
+      ORDER BY created_at DESC, id DESC
+      LIMIT 30
+    """
+    try:
+        rows = session.execute(
+            text(sql),
+            {
+                "patent_record_id": patent_record_id,
+                "analysis_session_id": analysis_session_id or "",
+            },
+        ).mappings().all()
+    except Exception as error:
+        logger.warning("读取 product_detail_search_products 失败，跳过新模块三兜底: %s", error)
+        return []
+    return [dict(row) for row in rows]
 
 
 def parse_and_fetch_node(
@@ -97,6 +137,13 @@ def parse_and_fetch_node(
                     SearchProduct.analysis_session_id == state.analysis_session_id
                 )
             product_rows = product_query.order_by(SearchProduct.id.asc()).all()
+            product_detail_rows = []
+            if not product_rows:
+                product_detail_rows = _load_product_detail_rows(
+                    session,
+                    state.patent_record_id,
+                    state.analysis_session_id,
+                )
         finally:
             session.close()
 
@@ -130,6 +177,31 @@ def parse_and_fetch_node(
                     },
                 }
             )
+        if not products:
+            for row in product_detail_rows:
+                product_images = row.get("picture") if isinstance(row.get("picture"), list) else []
+                stable_product_id = f"product-detail-{row.get('id')}"
+                raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
+                quality_flags = row.get("quality_flags") if isinstance(row.get("quality_flags"), dict) else {}
+                products.append(
+                    {
+                        "id": stable_product_id,
+                        "name": row.get("product_name") or "",
+                        "description": _build_product_detail_description(row),
+                        "images": product_images,
+                        "raw_data": {
+                            **raw_payload,
+                            "source_product_id": row.get("product_id"),
+                            "source_product_detail_search_run_id": row.get("run_id"),
+                            "source_product_detail_search_product_id": row.get("id"),
+                            "source_product_detail_url": row.get("final_url") or row.get("product_url"),
+                            "source_platform": row.get("platform"),
+                            "quality_score": row.get("quality_score"),
+                            "quality_flags": quality_flags,
+                            "module3_product_detail_fallback": True,
+                        },
+                    }
+                )
 
         return ParseAndFetchOutput(
             patent_record_id=state.patent_record_id,

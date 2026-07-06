@@ -87,6 +87,12 @@
 [结果展示: 商品列表 + Claim Chart 比对表]
 ```
 
+### 实验测试链路
+
+- `/test/product-pipeline` 是“关键词 / 新模块三 / 模块四测试”页面，可手动输入关键词，也可先调用模块2生成关键词，再调用平行模块3 `3-product-search` 获取商品详情和图片，最后调用模块4比对。
+- `/api/test/product-pipeline` 支持 `action=keywords|productSearch|claimCompare|all`。`productSearch` 默认调用 `PRODUCT_DETAIL_MODULE3_API_URL || PRODUCT_SEARCH_API_URL || http://127.0.0.1:5107/run`，并从 `product_detail_search_products` 回读商品、图片、质量字段。
+- 该页面不接入正式 `/api/analyze` 主流程；用途是调试新模块3是否能根据关键词检索到更多商品信息和商品图片，以及验证模块4是否能消费新模块3独立表结果。
+
 ### 数据提取策略（步骤6）
 
 1. **方案1（优先）**: 从模块4 API 响应的 `all_comparison_results` 字段直接提取比对数据
@@ -146,6 +152,8 @@
 | 功能 | 文件 | 说明 |
 |------|------|------|
 | 分析编排 | `src/app/api/analyze/route.ts` | 异步轮询，6步骤串行调用+计时 |
+| 关键词/新模块三/模块四测试 API | `src/app/api/test/product-pipeline/route.ts` | 测试模块2、新模块3 5107、模块4 5106 的实验链路 |
+| 关键词/新模块三/模块四测试页 | `src/app/test/product-pipeline/page.tsx` | 手动关键词或模块2关键词驱动商品详情/图片检索，并预览模块4结果 |
 | 工作流调用 | `src/lib/workflow-client.ts` | 扣子编程项目 /run 端点调用 (含行业路由+预热+重试) |
 | 飞书数据读取 | `src/lib/feishu-client.ts` | 飞书多维表格 API (备选数据源) |
 | 类型协议 | `src/lib/types.ts` | SSE 事件协议、业务类型 (5步骤) |
@@ -187,3 +195,10 @@
 ## 包管理规范
 
 **仅允许使用 pnpm** 作为包管理器，**严禁使用 npm 或 yarn**。
+
+## 2026-07-06 更新
+
+- 新增 `/test/product-pipeline` 页面，并在 `/test`、`/test/module1` 顶部增加入口。
+- 新增 `/api/test/product-pipeline`，支持单独跑关键词生成、新模块3商品详情检索、模块4比对或全链路。
+- 真实验证：`patentRecordId=101`、`analysisSessionId=module_test_codex_product_1782690000`、关键词“扫地机器人/拖地/升降”调用新模块3成功返回 1 个商品、18 张图片、详情描述；同一 session 调用模块4成功返回 1 个商品 8 条特征比对。
+- 验证状态：`pnpm ts-check`、新增文件单独 eslint、`pnpm build` 均通过；已重启 `patent-web`。全量 `pnpm lint` 仍因既有 `src/app/module1/page.tsx` 条件 Hook 错误失败。

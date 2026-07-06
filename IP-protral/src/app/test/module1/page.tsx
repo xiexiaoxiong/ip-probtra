@@ -214,6 +214,11 @@ export default function Module1TestPage() {
                 模块3测试
               </Button>
             </Link>
+            <Link href="/test/product-pipeline">
+              <Button variant="ghost" size="sm">
+                关键词链路测试
+              </Button>
+            </Link>
           </div>
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-primary" />
