@@ -202,3 +202,8 @@
 - 新增 `/api/test/product-pipeline`，支持单独跑关键词生成、新模块3商品详情检索、模块4比对或全链路。
 - 真实验证：`patentRecordId=101`、`analysisSessionId=module_test_codex_product_1782690000`、关键词“扫地机器人/拖地/升降”调用新模块3成功返回 1 个商品、18 张图片、详情描述；同一 session 调用模块4成功返回 1 个商品 8 条特征比对。
 - 验证状态：`pnpm ts-check`、新增文件单独 eslint、`pnpm build` 均通过；已重启 `patent-web`。全量 `pnpm lint` 仍因既有 `src/app/module1/page.tsx` 条件 Hook 错误失败。
+- `module_test_1783352605979` 的问题不是前端没触发请求，而是该 session 没有关键词来源；新模块3内部返回 failed“未找到模块2关键词”，旧测试页却按 HTTP 200 显示完成，模块4随后在 0 商品下空跑。
+- `/api/test/product-pipeline` 已新增 `GET` 示例专利列表，读取 `module1_abstract_examples_1782749163_%` 测试记录和已有关键词/新模块3/模块4运行摘要；前端测试页可选择示例专利并自动填入 `patentRecordId`、示例关键词和新的 `analysisSessionId`。
+- 测试 API 步骤现在返回 `completed/failed/skipped`，并在关键词缺失、模块3 failed、accepted 为 0、商品为空、模块4无结果时返回 `ok:false` 和可读诊断；`action=all` 会在上游失败时跳过下游，避免误导用户。
+- 测试页新增示例专利状态表、步骤诊断和新模块3候选诊断；failed/skipped 不再显示为绿色完成。重放 `module_test_1783352605979` 无关键词请求时，页面/API 会明确提示“没有可用于新模块三的关键词”。
+- 2026-07-06 已重新构建并重启 `patent-web`。入口验证：`/test/product-pipeline` 返回 200，`/api/test/product-pipeline` 返回 13 个示例专利，缺关键词重放返回 `ok:false`。

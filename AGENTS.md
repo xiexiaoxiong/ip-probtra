@@ -339,7 +339,7 @@ keyword_records/input_keywords
 
 - 真实电商页存在波动：京东详情页通过 Bright Data `render=true` 单独抓取可成功，但批量抓取中仍可能返回空响应；1688 多个页面仍出现验证码或详情信息不足。
 - 13 个实例专利中，当前数据库能为 11 个找到同专利号/同标题的历史模块2关键词；`CN204260680U` 和 `CN108181988B` 仍需补跑模块2后才能按最新模块1记录测试。
-- 当前尚未完成 `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 13 个专利的全量“足够多商品”验证，不能视为目标完成。
+- `/Users/xiexiaoxiong/Downloads/IP-probtra/实例专利` 13 个示例专利已完成一轮新模块3真实回归，均可得到 accepted 商品；真实搜索仍慢，且是否“足够多商品”要结合每次运行预算、平台风控和历史兜底标记判断。
 
 ## 模块4：权利要求-商品比对
 
@@ -656,3 +656,10 @@ analyze_features
 - 真实验证：`POST /api/test/product-pipeline` 以 `patentRecordId=101`、`analysisSessionId=module_test_codex_product_1782690000`、关键词“扫地机器人/拖地/升降”调用新模块3成功，`product_detail_search_run_id=213`，accepted 1 个商品 `Narwal Freo X Plus`，18 张图片，含详情描述，耗时约 294 秒。
 - 真实验证：同一 session 调用模块4成功，`claim_compare_run_id=71`，模块4日志显示读取新模块3商品并比对 1 个商品、8 个特征，API 返回 `featureCount=8`，耗时约 176 秒。
 - 验证命令：`pnpm ts-check` 通过；新增测试页/API 单独 `pnpm exec eslint src/app/test/product-pipeline/page.tsx src/app/api/test/product-pipeline/route.ts` 通过；`4-claim-chat/.venv/bin/python -m py_compile 4-claim-chat/src/graphs/nodes/parse_and_fetch_node.py` 通过；`pnpm build` 通过；已重启 `patent-web` 和 `patent-4-claim-chat`。全量 `pnpm lint` 仍因既有 `src/app/module1/page.tsx` 条件 Hook 错误失败，非本次新增代码导致。
+- `module_test_1783352605979` 复盘：该 session 没有 `analysis_sessions`、`keyword_runs`、`keyword_records`；新模块3曾写入 3 条 failed run，错误为“未找到模块2关键词”，模块4随后在 0 商品下空跑。根因是测试 API/page 把模块3内部 failed 状态当作 HTTP 成功，导致页面看起来像完成但实际没有商品。
+- `/api/test/product-pipeline` 已改为显式区分 `completed/failed/skipped`：模块3前置检查必须有模块2关键词、手动关键词或当前 session 历史关键词；模块3内部失败、accepted 为 0 或没有商品行均返回 `ok:false` 和步骤诊断；`action=all` 会在上游失败时跳过下游，避免继续空跑模块4。
+- `/test/product-pipeline` 已改为可选择模块1示例专利，自动填入 `patentRecordId`、示例关键词和新的 `analysisSessionId`；页面展示示例专利状态、步骤诊断、新模块3候选诊断，并把 failed/skipped 步骤显示为失败/跳过而不是绿色完成。
+- `3-product-search` 新增运行依赖 `psycopg2-binary>=2.9.10` 并提交 `uv.lock`，否则用 `uv run python scripts/run_example_patents.py` 在干净环境运行会因缺少 `psycopg2` 无法连接 Postgres。
+- 新模块3示例专利批量验证：`/tmp/product-pipeline-examples-module3-20260706.jsonl`，13 个示例记录全部 accepted，`accepted_records=13/13`、`accepted_products=13`，输出商品均带图片。随后用模块4 `/async_run` + 状态轮询验证 13 个示例全部 completed，结果写入 `/tmp/product-pipeline-examples-module4-async-20260706.json`，`passed=13`、`failed=0`。
+- 前端构建和服务状态：本次 `pnpm ts-check`、测试页/API 单文件 eslint、`3-product-search` 45 个 pytest、模块4 `parse_and_fetch_node.py` py_compile、`pnpm build` 均通过；已重启 `patent-web`，`http://127.0.0.1:3001/test/product-pipeline` 和 `/api/test/product-pipeline` 返回 200。内置 Browser 插件因 `sandboxCwd must be an absolute file URI` 初始化失败，Playwright/Puppeteer 未安装，故本次用 HTTP/curl 完成渲染入口与 API 验证。
+- 根 `.gitignore` 新增 `__pycache__/` 和 `*.py[cod]`，防止 Python 模块测试后反复出现缓存未跟踪文件。

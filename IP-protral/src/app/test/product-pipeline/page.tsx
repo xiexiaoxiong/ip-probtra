@@ -12,6 +12,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  XCircle,
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +35,8 @@ import type { IndustryType } from '@/lib/types';
 
 type PipelineAction = 'keywords' | 'productSearch' | 'claimCompare' | 'all';
 type RunStatus = 'idle' | 'running' | 'completed' | 'error';
+type StepStatus = 'completed' | 'failed' | 'skipped';
+type DisplayStatus = RunStatus | 'skipped';
 
 type KeywordRow = {
   id?: number;
@@ -73,12 +76,17 @@ type CompareRow = {
 };
 
 type StepPayload = Record<string, unknown> & {
+  status?: StepStatus;
   elapsedMs?: number;
+  errorMessage?: string;
   keywordRunId?: number;
   keywords?: KeywordRow[];
   keywordsCount?: number;
   productDetailSearchRunId?: number;
   acceptedProductsCount?: number;
+  totalCandidateLinksCount?: number;
+  rejectedCandidatesCount?: number;
+  candidateSummary?: CandidateSummaryRow[];
   products?: ProductRow[];
   claimCompareRunId?: number;
   productCount?: number;
@@ -98,6 +106,37 @@ type PipelineResponse = {
   productSearchStep?: StepPayload;
   claimCompareStep?: StepPayload;
   keywords?: KeywordRow[];
+};
+
+type CandidateSummaryRow = {
+  status?: string;
+  rejection_reason?: string;
+  count?: number;
+};
+
+type ExamplePatent = {
+  id: number;
+  taskId?: string;
+  patentNumber?: string;
+  title?: string;
+  keywords: string[];
+  keywordCount?: number;
+  keywordSourcePatentRecordId?: number | null;
+  keywordSourceSessionId?: string | null;
+  latestProductRun?: {
+    id?: number;
+    status?: string;
+    accepted_products_count?: number;
+    product_rows?: number;
+    image_count?: number;
+    error_message?: string;
+  } | null;
+  latestClaimRun?: {
+    id?: number;
+    status?: string;
+    product_count?: number;
+    error_message?: string;
+  } | null;
 };
 
 type PersistedState = {
@@ -147,6 +186,14 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value : value == null ? '' : String(value);
 }
 
+function stepDisplayStatus(step?: StepPayload, fallback: DisplayStatus = 'idle'): DisplayStatus {
+  if (!step) return fallback;
+  if (step.status === 'failed') return 'error';
+  if (step.status === 'skipped') return 'skipped';
+  if (step.status === 'completed') return 'completed';
+  return fallback;
+}
+
 function imageUrls(product: ProductRow): string[] {
   return Array.isArray(product.picture) ? product.picture.filter((url): url is string => typeof url === 'string') : [];
 }
@@ -190,12 +237,14 @@ function StepCard({
   elapsedMs,
 }: {
   title: string;
-  status: RunStatus;
+  status: DisplayStatus;
   value: string;
   elapsedMs?: number;
 }) {
   const isCompleted = status === 'completed';
   const isRunning = status === 'running';
+  const isError = status === 'error';
+  const isSkipped = status === 'skipped';
   return (
     <Card className="shadow-sm">
       <CardContent className="flex items-center justify-between gap-4 p-4">
@@ -208,8 +257,12 @@ function StepCard({
         </div>
         {isRunning ? (
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        ) : isError ? (
+          <XCircle className="h-5 w-5 text-destructive" />
         ) : isCompleted ? (
           <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+        ) : isSkipped ? (
+          <Search className="h-5 w-5 text-muted-foreground" />
         ) : (
           <Search className="h-5 w-5 text-muted-foreground" />
         )}
@@ -233,6 +286,9 @@ export default function ProductPipelineTestPage() {
   const [result, setResult] = useState<PipelineResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [examples, setExamples] = useState<ExamplePatent[]>([]);
+  const [examplesError, setExamplesError] = useState<string | null>(null);
+  const [selectedExampleId, setSelectedExampleId] = useState('');
 
   useEffect(() => {
     try {
@@ -256,6 +312,29 @@ export default function ProductPipelineTestPage() {
     } catch {
       window.sessionStorage.removeItem(STORAGE_KEY);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadExamples() {
+      try {
+        const response = await fetch('/api/test/product-pipeline', { cache: 'no-store' });
+        const data = (await response.json()) as { ok?: boolean; examples?: ExamplePatent[]; error?: string };
+        if (cancelled) return;
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        setExamples(Array.isArray(data.examples) ? data.examples : []);
+        setExamplesError(null);
+      } catch (loadError) {
+        if (cancelled) return;
+        setExamplesError(loadError instanceof Error ? loadError.message : String(loadError));
+      }
+    }
+    void loadExamples();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -313,6 +392,22 @@ export default function ProductPipelineTestPage() {
     return Array.isArray(rows) ? rows : [];
   }, [result]);
 
+  const selectedExample = useMemo(
+    () => examples.find((example) => String(example.id) === selectedExampleId) || null,
+    [examples, selectedExampleId],
+  );
+
+  const loadExample = (example: ExamplePatent) => {
+    setSelectedExampleId(String(example.id));
+    setPatentRecordId(String(example.id));
+    setManualKeywords(example.keywords.join('\n'));
+    setAnalysisSessionId(`module_test_${Date.now()}_${example.id}`);
+    setStatus('idle');
+    setResult(null);
+    setError(null);
+    setElapsedMs(null);
+  };
+
   const runPipeline = async (action: PipelineAction) => {
     const patentId = Number(patentRecordId);
     if (!Number.isInteger(patentId) || patentId <= 0) {
@@ -350,7 +445,10 @@ export default function ProductPipelineTestPage() {
       const data = (await response.json()) as PipelineResponse;
       setElapsedMs(Date.now() - startedAt);
       if (!response.ok || data.ok === false) {
-        throw new Error(data.error || `HTTP ${response.status}`);
+        setResult(data);
+        setStatus('error');
+        setError(data.error || `HTTP ${response.status}`);
+        return;
       }
       setResult(data);
       setStatus('completed');
@@ -410,6 +508,38 @@ export default function ProductPipelineTestPage() {
               <CardTitle className="text-base">测试参数</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>示例专利</Label>
+                <Select
+                  value={selectedExampleId}
+                  onValueChange={(value) => {
+                    const example = examples.find((item) => String(item.id) === value);
+                    if (example) loadExample(example);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={examples.length > 0 ? '选择示例专利' : '正在读取示例专利'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {examples.map((example) => (
+                      <SelectItem key={example.id} value={String(example.id)}>
+                        {example.id} · {example.patentNumber || '无专利号'} · {example.title || '未命名'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {examplesError && <div className="text-xs text-destructive">{examplesError}</div>}
+                {selectedExample && (
+                  <div className="space-y-2 rounded-md border bg-muted/20 p-2 text-xs">
+                    <div className="font-medium">{selectedExample.title || '-'}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="secondary">关键词 {selectedExample.keywordCount || 0}</Badge>
+                      <Badge variant="outline">最近商品 {selectedExample.latestProductRun?.accepted_products_count || 0}</Badge>
+                      <Badge variant="outline">图片 {selectedExample.latestProductRun?.image_count || 0}</Badge>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="patentRecordId">patent_record_id</Label>
                 <Input
@@ -510,9 +640,9 @@ export default function ProductPipelineTestPage() {
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-4">
               <StepCard title="当前动作" status={status} value={ACTION_LABELS[lastAction]} elapsedMs={elapsedMs || undefined} />
-              <StepCard title="关键词" status={result?.keywordStep ? 'completed' : status === 'running' && lastAction !== 'claimCompare' ? 'running' : 'idle'} value={`${keywords.length} 个`} elapsedMs={result?.keywordStep?.elapsedMs} />
-              <StepCard title="新模块三" status={result?.productSearchStep ? 'completed' : status === 'running' && ['productSearch', 'all'].includes(lastAction) ? 'running' : 'idle'} value={`${products.length} 个商品`} elapsedMs={result?.productSearchStep?.elapsedMs} />
-              <StepCard title="模块四" status={result?.claimCompareStep ? 'completed' : status === 'running' && ['claimCompare', 'all'].includes(lastAction) ? 'running' : 'idle'} value={`${result?.claimCompareStep?.featureCount || 0} 条结果`} elapsedMs={result?.claimCompareStep?.elapsedMs} />
+              <StepCard title="关键词" status={stepDisplayStatus(result?.keywordStep, status === 'running' && lastAction !== 'claimCompare' ? 'running' : 'idle')} value={`${keywords.length} 个`} elapsedMs={result?.keywordStep?.elapsedMs} />
+              <StepCard title="新模块三" status={stepDisplayStatus(result?.productSearchStep, status === 'running' && ['productSearch', 'all'].includes(lastAction) ? 'running' : 'idle')} value={`${products.length} 个商品`} elapsedMs={result?.productSearchStep?.elapsedMs} />
+              <StepCard title="模块四" status={stepDisplayStatus(result?.claimCompareStep, status === 'running' && ['claimCompare', 'all'].includes(lastAction) ? 'running' : 'idle')} value={`${result?.claimCompareStep?.featureCount || 0} 条结果`} elapsedMs={result?.claimCompareStep?.elapsedMs} />
             </div>
 
             <Card className="shadow-sm">
@@ -541,8 +671,58 @@ export default function ProductPipelineTestPage() {
                 </CardContent>
               </Card>
             )}
+
+            {(result?.keywordStep?.errorMessage || result?.productSearchStep?.errorMessage || result?.claimCompareStep?.errorMessage) && (
+              <Card className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">步骤诊断</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {result?.keywordStep?.errorMessage && <div>模块2：{result.keywordStep.errorMessage}</div>}
+                  {result?.productSearchStep?.errorMessage && <div>新模块三：{result.productSearchStep.errorMessage}</div>}
+                  {result?.claimCompareStep?.errorMessage && <div>模块四：{result.claimCompareStep.errorMessage}</div>}
+                  {result?.productSearchStep && (
+                    <div className="flex flex-wrap gap-2 pt-1 text-xs">
+                      <Badge variant="outline">候选 {result.productSearchStep.totalCandidateLinksCount || 0}</Badge>
+                      <Badge variant="outline">accepted {result.productSearchStep.acceptedProductsCount || 0}</Badge>
+                      <Badge variant="outline">rejected {result.productSearchStep.rejectedCandidatesCount || 0}</Badge>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
+
+        {Array.isArray(result?.productSearchStep?.candidateSummary) && result.productSearchStep.candidateSummary.length > 0 && (
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">新模块三候选诊断</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[120px]">状态</TableHead>
+                      <TableHead>原因</TableHead>
+                      <TableHead className="w-[90px]">数量</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {result.productSearchStep.candidateSummary.map((row, index) => (
+                      <TableRow key={`${row.status}-${row.rejection_reason}-${index}`}>
+                        <TableCell>{row.status || '-'}</TableCell>
+                        <TableCell className="text-muted-foreground">{row.rejection_reason || '-'}</TableCell>
+                        <TableCell>{row.count || 0}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="shadow-sm">
           <CardHeader className="pb-3">
@@ -674,6 +854,57 @@ export default function ProductPipelineTestPage() {
                           {row.reason || row.evidence || '-'}
                         </div>
                       </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">示例专利状态</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[70px]">ID</TableHead>
+                    <TableHead>专利</TableHead>
+                    <TableHead className="w-[90px]">关键词</TableHead>
+                    <TableHead className="w-[110px]">最近商品</TableHead>
+                    <TableHead className="w-[90px]">图片</TableHead>
+                    <TableHead className="w-[110px]">最近比对</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {examples.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-20 text-center text-sm text-muted-foreground">
+                        暂无示例专利
+                      </TableCell>
+                    </TableRow>
+                  ) : examples.map((example) => (
+                    <TableRow key={example.id}>
+                      <TableCell>{example.id}</TableCell>
+                      <TableCell className="min-w-[360px]">
+                        <button type="button" className="text-left font-medium text-primary hover:underline" onClick={() => loadExample(example)}>
+                          {example.patentNumber || '-'} · {example.title || '-'}
+                        </button>
+                        <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                          {example.keywords.join(' / ') || '无关键词'}
+                        </div>
+                      </TableCell>
+                      <TableCell>{example.keywordCount || 0}</TableCell>
+                      <TableCell>
+                        <Badge variant={(example.latestProductRun?.accepted_products_count || 0) > 0 ? 'default' : 'secondary'}>
+                          {example.latestProductRun?.accepted_products_count || 0}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{example.latestProductRun?.image_count || 0}</TableCell>
+                      <TableCell>{example.latestClaimRun?.product_count || 0}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

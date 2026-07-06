@@ -125,3 +125,12 @@ PM2 统一启动后端时，本模块端口是 `5107`。
 - 最终真实回归：`/tmp/product-search-regression-final10-20260705.jsonl`，命令参数为 `--max-keywords 3 --max-candidates-per-keyword 8 --max-detail-candidates 30 --max-products 1 --request-timeout-seconds 15 --serp-url-limit 4 --http-timeout-seconds 520 --per-record-timeout-seconds 620 --concurrency 3 --fail-on-empty --platforms jd 1688`。结果：13 个实例记录全部 accepted，`accepted_records=13/13`，`accepted_products=13`。
 - 本次最终命中覆盖：舒华动感单车/健身车、Cleer/索尼颈挂音响、移动式充电站、输液接头消毒帽、石头 G30 扫拖机器人、翻转/重力计时器、米家/Narwal 扫拖机器人、旋转屏幕/商用跑步机、石头 G30 Space UV杀菌/高温除菌洗扫地机器人、欧普调光灯具、LRA 马达驱动芯片、米家脉冲水枪。
 - 当前限制：真实搜索仍较慢，单条记录可能 3-8 分钟；部分 JD 商品只能拿到 1-2 张图片；历史兜底只能覆盖已有成功记录，新专利首次运行仍依赖实时搜索质量。下一步若要产品化，应把历史兜底、实时搜索耗时和图片数量在 Portal 上显式标注。
+
+## 2026-07-06 Portal 联调回归
+
+- 新增运行依赖 `psycopg2-binary>=2.9.10` 并生成 `uv.lock`。原因是用 `uv run python scripts/run_example_patents.py` 在干净环境跑示例专利时，脚本需要连接 Postgres 读取示例记录，缺少 `psycopg2` 会直接失败。
+- 配合 Portal `/test/product-pipeline` 重新跑 13 个示例专利，命令输出为 `/tmp/product-pipeline-examples-module3-20260706.jsonl`；参数为 `--service-url http://127.0.0.1:5107 --max-keywords 3 --max-candidates-per-keyword 8 --max-detail-candidates 30 --max-products 1 --request-timeout-seconds 15 --serp-url-limit 4 --http-timeout-seconds 520 --per-record-timeout-seconds 620 --concurrency 3 --fail-on-empty --platforms jd 1688`。
+- 本次新模块3结果：13 个示例记录全部有 accepted 商品，`accepted_records=13/13`、`accepted_products=13`；覆盖动感单车、佩戴式音频、移动式充电站、消毒帽、扫拖机器人、计时器、跑步机、灯具、LRA 马达驱动芯片和水枪等样本。
+- 后续模块4异步联调使用同批示例记录和新模块3结果，输出 `/tmp/product-pipeline-examples-module4-async-20260706.json`，13 个示例全部 completed，说明 `product_detail_search_products` 可被模块4 fallback 消费。
+- 注意：示例脚本使用固定 `*_product_detail_test` session，重复跑会在同一 session 中累积历史商品；Portal 测试页选择示例专利时会创建新的 `analysisSessionId`，更适合观察单次运行结果。
+- 测试状态：`PYTHONPATH=src uv run --with pytest pytest -q` 为 `45 passed`。不要用不带 `--with pytest` 的全新 uv 环境跑测试，除非先把 pytest 安装进环境。
