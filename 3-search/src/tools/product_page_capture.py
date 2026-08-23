@@ -142,7 +142,7 @@ class CaptureConfig:
     detail_image_candidate_limit: int = 12
     detail_image_max_results: int = 6
     detail_image_min_confidence: float = 0.55
-    vision_model: str = "glm-4.5v"
+    vision_model: str = "glm-4.6v"
     enable_fullpage_region_llm: bool = True
 
 
@@ -170,9 +170,9 @@ def bootstrap_local_env() -> None:
 
 def resolve_local_model_alias(model_name: str) -> str:
     requested = str(model_name or "").strip()
-    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.7").strip() or "glm-4.7"
-    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.5-air").strip() or default_model
-    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.5v").strip() or default_model
+    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.6v").strip() or "glm-4.6v"
+    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.6v").strip() or default_model
+    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.6v").strip() or default_model
 
     if not requested:
         return default_model
@@ -1450,7 +1450,7 @@ def parse_args(argv: list[str]) -> CaptureConfig:
     )
     parser.add_argument(
         "--vision-model",
-        default="glm-4.5v",
+        default="glm-4.6v",
         help="Vision model alias. Defaults to the locally configured Zhipu-compatible vision model.",
     )
     parser.add_argument(
@@ -1476,7 +1476,7 @@ def parse_args(argv: list[str]) -> CaptureConfig:
         detail_image_candidate_limit=max(1, int(args.detail_image_candidate_limit)),
         detail_image_max_results=max(1, int(args.detail_image_max_results)),
         detail_image_min_confidence=max(0.0, min(1.0, float(args.detail_image_min_confidence))),
-        vision_model=str(args.vision_model or "glm-4.5v").strip() or "glm-4.5v",
+        vision_model=str(args.vision_model or "glm-4.6v").strip() or "glm-4.6v",
         enable_fullpage_region_llm=bool(args.enable_fullpage_region_llm),
     )
 

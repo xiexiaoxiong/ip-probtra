@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic OPS full-text fixture; no text is copied from a real patent. -->
+<ops:world-patent-data
+    xmlns:ops="http://ops.epo.org"
+    xmlns:ftxt="http://www.epo.org/fulltext">
+  <ftxt:fulltext-documents>
+    <ftxt:fulltext-document system="ops.epo.org" country="EP" doc-number="3456789" kind="A1" lang="EN">
+      <ftxt:description lang="EN">
+        <ftxt:heading>DESCRIPTION</ftxt:heading>
+        <ftxt:p id="p0001">A mobile chassis carries a cleaning-pad support and an electric lifting actuator.</ftxt:p>
+        <ftxt:p id="p0002">A floor sensor detects carpet and a controller commands the actuator to move the pad from a working position to a raised position.</ftxt:p>
+        <ftxt:p id="p0003">The raised pad is spaced from the floor while the mobile chassis crosses the detected carpet region.</ftxt:p>
+      </ftxt:description>
+    </ftxt:fulltext-document>
+  </ftxt:fulltext-documents>
+</ops:world-patent-data>

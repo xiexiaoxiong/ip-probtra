@@ -1,9 +1,9 @@
 {
   "config": {
-    "model": "doubao-seed-1-8-251228",
+    "model": "glm-4.6v",
     "temperature": 0.0,
     "top_p": 0.7,
-    "max_completion_tokens": 16000,
+    "max_completion_tokens": 12000,
     "thinking": "disabled"
   },
   "tools": [],

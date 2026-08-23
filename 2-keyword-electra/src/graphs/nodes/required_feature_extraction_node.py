@@ -271,6 +271,64 @@ def _canonicalize_features(
     return canonical_required, canonical_optional
 
 
+def _feature_source_tier(feature: dict[str, Any], state: RequiredFeatureExtractionInput) -> str:
+    """按专利文本来源给特征分级，避免把说明书效果误当成独立权利要求必要特征。"""
+    text = _normalize_text(str(feature.get("text", "")))
+    if not text:
+        return "unknown"
+    if text in _normalize_text(state.claim_text):
+        return "independent_claim" if state.claim_type.upper() == "INDEPENDENT" else "dependent_claim"
+    if text in _normalize_text(state.dependent_claims_text):
+        return "dependent_claim"
+    specification_context = _normalize_text(
+        "\n".join(
+            [
+                state.abstract_text,
+                state.invention_content,
+                state.background_tech,
+                state.invention_point,
+            ]
+        )
+    )
+    if text in specification_context:
+        return "specification_effect"
+    return "unknown"
+
+
+def _reclassify_features_by_source(
+    required: list[dict[str, Any]],
+    optional: list[dict[str, Any]],
+    state: RequiredFeatureExtractionInput,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """只有独立权利要求直接记载的特征才能保留为 required。"""
+    grounded_required: list[dict[str, Any]] = []
+    grounded_optional: list[dict[str, Any]] = []
+
+    for feature in required:
+        source_tier = _feature_source_tier(feature, state)
+        enriched = {**feature, "source_tier": source_tier}
+        if source_tier == "independent_claim":
+            grounded_required.append(enriched)
+        else:
+            grounded_optional.append(
+                {
+                    **enriched,
+                    "type": "OPTIONAL_FEATURE",
+                    "reason": (
+                        f"{feature.get('reason', '')}；未在独立权利要求中直接记载，"
+                        "降为扩展特征"
+                    ).strip("；"),
+                }
+            )
+
+    for feature in optional:
+        grounded_optional.append(
+            {**feature, "source_tier": _feature_source_tier(feature, state)}
+        )
+
+    return _canonicalize_features(grounded_required, grounded_optional)
+
+
 def _fallback_features(state: RequiredFeatureExtractionInput) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], str]:
     claim_text = _normalize_text(state.claim_text)
     context_text = _normalize_text(
@@ -296,6 +354,7 @@ def _fallback_features(state: RequiredFeatureExtractionInput) -> tuple[list[dict
                 "type": "REQUIRED_FEATURE",
                 "reason": reason,
                 "source": "规则兜底",
+                "source_tier": "independent_claim",
                 "confidence": confidence,
             }
         )
@@ -307,6 +366,7 @@ def _fallback_features(state: RequiredFeatureExtractionInput) -> tuple[list[dict
                 "type": "OPTIONAL_FEATURE",
                 "reason": reason,
                 "source": "规则兜底",
+                "source_tier": "independent_claim",
                 "confidence": confidence,
             }
         )
@@ -379,6 +439,12 @@ def required_feature_extraction_node(
     integrations: 大语言模型
     """
     fallback_required, fallback_optional, fallback_excluded, fallback_log = _fallback_features(state)
+    if state.claim_type.upper() != "INDEPENDENT":
+        fallback_optional = [
+            {**feature, "type": "OPTIONAL_FEATURE", "source_tier": "dependent_claim"}
+            for feature in fallback_required + fallback_optional
+        ]
+        fallback_required = []
     model_required: list[dict[str, Any]] = []
     model_optional: list[dict[str, Any]] = []
     model_excluded: list[str] = []
@@ -390,7 +456,16 @@ def required_feature_extraction_node(
             _cfg = json.load(fd)
 
         llm_config = _cfg.get("config", {})
-        sp = _cfg.get("sp", "")
+        sp = (
+            "硬性来源规则：required_features 必须在独立权利要求中有直接文字依据；"
+            "只出现在摘要、说明书、发明内容或从属权利要求中的结构、模式和技术效果，"
+            "必须归入 optional_features。\n\n"
+            + _cfg.get("sp", "")
+        )
+        sp = sp.replace(
+            "在独立权利要求或摘要/发明内容中有明确依据",
+            "在独立权利要求中有直接、明确依据",
+        )
         up = _cfg.get("up", "")
 
         user_prompt = Template(up).render(
@@ -416,6 +491,11 @@ def required_feature_extraction_node(
 
         parsed = _extract_jsonish(_extract_text_content(response.content))
         model_required, model_optional, model_excluded, model_log = _coerce_result(parsed)
+        model_required, model_optional = _reclassify_features_by_source(
+            model_required,
+            model_optional,
+            state,
+        )
     except Exception as error:
         model_log = f"LLM必要特征识别失败，使用规则兜底: {error}"
 

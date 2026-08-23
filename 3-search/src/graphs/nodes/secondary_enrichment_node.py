@@ -309,7 +309,7 @@ def _image_vision_supplement(product: Dict[str, Any]) -> Dict[str, Any]:
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=content),
             ],
-            model=os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.5v"),
+            model=os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.6v"),
             max_completion_tokens=2048,
         )
         text = _normalize_space(response_text)

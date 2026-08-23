@@ -1,5 +1,6 @@
 import type { IndustryType } from './types';
 import { detectIndustryFromText, module2ConfigKeyForIndustry } from './industry-keyword-flow';
+import { postJsonWithTimeout } from './long-running-http';
 
 interface ModuleConfig {
   url: string;
@@ -112,7 +113,7 @@ function getModuleConfigs(): {
   };
 }
 
-function createHeaders(token?: string, extraHeaders?: HeadersInit): HeadersInit {
+function createHeaders(token?: string, extraHeaders?: HeadersInit): Record<string, string> {
   const headers: Record<string, string> = token
     ? {
         Authorization: `Bearer ${token}`,
@@ -152,19 +153,17 @@ async function callModuleApi(
     }
 
     try {
-      const response = await fetch(module.url, {
-        method: 'POST',
+      const response = await postJsonWithTimeout(module.url, payload, {
         headers: createHeaders(module.token),
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
+        timeoutMs,
       });
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
+        const errorText = response.text;
         throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 300)}`);
       }
 
-      const data = (await response.json()) as ModuleResponse;
+      const data = JSON.parse(response.text) as ModuleResponse;
       if (onProgress) {
         onProgress('工作流执行完成');
       }
@@ -376,6 +375,7 @@ export async function runModule3(
   patentRecordId: number,
   analysisSessionId: string,
   inputKeywords?: string[],
+  inputObjectTerms?: string[],
   onProgress?: (message: string) => void,
 ): Promise<Module3Result> {
   const configs = getModuleConfigs();
@@ -385,6 +385,7 @@ export async function runModule3(
       patent_record_id: patentRecordId,
       analysis_session_id: analysisSessionId,
       input_keywords: inputKeywords || [],
+      input_object_terms: inputObjectTerms || [],
     },
     onProgress,
     20 * 60 * 1000,
@@ -413,6 +414,7 @@ export async function startModule3Async(
   analysisSessionId: string,
   runId: string,
   inputKeywords?: string[],
+  inputObjectTerms?: string[],
   onProgress?: (message: string) => void,
 ): Promise<Module3AsyncStartResult> {
   const configs = getModuleConfigs();
@@ -427,6 +429,7 @@ export async function startModule3Async(
       patent_record_id: patentRecordId,
       analysis_session_id: analysisSessionId,
       input_keywords: inputKeywords || [],
+      input_object_terms: inputObjectTerms || [],
     }),
     signal: AbortSignal.timeout(30_000),
   });

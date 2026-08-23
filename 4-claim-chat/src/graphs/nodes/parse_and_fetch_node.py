@@ -38,14 +38,21 @@ def _load_product_detail_rows(session, patent_record_id: int, analysis_session_i
     new product-detail module without copying rows into the old table.
     """
     sql = """
+      WITH latest_run AS (
+        SELECT id
+        FROM product_detail_search_runs
+        WHERE patent_record_id = :patent_record_id
+          AND (:analysis_session_id = '' OR analysis_session_id = :analysis_session_id)
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      )
       SELECT id, run_id, product_id, platform, product_name, product_url, final_url,
              price, sales, brand, manufacturer, matched_keywords, description,
              detail_text, picture, quality_score, quality_flags, raw_payload,
              created_at
       FROM product_detail_search_products
-      WHERE patent_record_id = :patent_record_id
-        AND (:analysis_session_id = '' OR analysis_session_id = :analysis_session_id)
-      ORDER BY created_at DESC, id DESC
+      WHERE run_id = (SELECT id FROM latest_run)
+      ORDER BY id ASC
       LIMIT 30
     """
     try:

@@ -14,6 +14,7 @@ _engine_lock = threading.Lock()
 try:
     from dotenv import load_dotenv
     env_candidates = [
+        Path(__file__).resolve().parents[4] / "IP-protral" / ".env.local",
         Path(__file__).resolve().parents[3] / "IP-protral" / ".env.local",
         Path(__file__).resolve().parents[2] / ".env.local",
         Path.cwd() / ".env.local",

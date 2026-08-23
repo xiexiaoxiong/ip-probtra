@@ -237,7 +237,7 @@ def _decompose_single_claim(
     })
 
     # 调用大模型
-    model: str = llm_config.get("model", "doubao-seed-2-0-pro-260215")
+    model: str = llm_config.get("model", "glm-4.6v")
     temperature: float = float(llm_config.get("temperature", 0.1))
     max_tokens: int = int(llm_config.get("max_completion_tokens", 8192))
 
@@ -274,6 +274,9 @@ def _decompose_single_claim(
             )
         except Exception as e:
             logger.error(f"调用大模型拆解权利要求{claim_id}失败 (第{attempt_index}次): {e}")
+            error_detail = str(e)
+            if "HTTP 429" in error_detail or "速率限制" in error_detail:
+                break
             continue
 
         response_text = _content_to_text(response.content)

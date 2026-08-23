@@ -1,0 +1,84 @@
+{
+  "case_id": "wireless-earphone-decision-2022215166391",
+  "claim_id": "1",
+  "decision_source": {
+    "file_name": "20260429无效宣告请求审查决定书 (集优品) .pdf",
+    "pages": [6, 7, 8],
+    "usage": "post_freeze_evaluation_only"
+  },
+  "documents": [
+    {
+      "publication_number": "CN216649931U",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "closest_prior_art",
+      "legal_reasoning": {
+        "type": "inventive_step_combination",
+        "outcome": "claim_lacks_inventive_step",
+        "note": "出音孔被认定为常规设置；定位卡槽/卡凸区别由证据1的多卡槽卡紧组件结合公知常识给出启示。该结论不等于单篇文献公开全部特征。"
+      },
+      "concepts": [
+        {
+          "concept_id": "rotatable_connection",
+          "label": "耳挂与耳机本体可旋转连接",
+          "feature_ids": ["1-f-92ccb8e2be63"],
+          "feature_selector_groups": [["可旋转式连接", "旋转连接"]],
+          "expected_disclosure": "disclosed"
+        },
+        {
+          "concept_id": "electronic_components",
+          "label": "PCBA板、喇叭和电池的耳机电子组件",
+          "feature_ids": ["1-f-a3a90deda30e"],
+          "feature_selector_groups": [["PCBA板", "电子组件"]],
+          "expected_disclosure": "disclosed"
+        },
+        {
+          "concept_id": "sound_outlet",
+          "label": "对应喇叭的出音孔",
+          "feature_ids": ["1-f-7aa8b300feca"],
+          "feature_selector_groups": [["出音孔", "声学出口"]],
+          "expected_disclosure": "not_disclosed"
+        },
+        {
+          "concept_id": "boss_equivalent_shaft",
+          "label": "圆形凸台的等同连接角色由转轴承担",
+          "feature_ids": ["1-f-14a4ed28cacd"],
+          "feature_selector_groups": [["圆形凸台", "圆形凸起"]],
+          "expected_disclosure": "disclosed"
+        },
+        {
+          "concept_id": "loop_equivalent_rotor",
+          "label": "套圈的等同连接角色由环形转体承担",
+          "feature_ids": ["1-f-8c075164a527"],
+          "feature_selector_groups": [["套圈", "环形套"]],
+          "expected_disclosure": "disclosed"
+        },
+        {
+          "concept_id": "outside_relation",
+          "label": "套圈/环形转体位于圆形凸台/转轴外侧",
+          "feature_ids": ["1-f-8c075164a527"],
+          "feature_selector_groups": [["套设于外侧", "外侧"]],
+          "expected_disclosure": "disclosed"
+        },
+        {
+          "concept_id": "spaced_positioning_slots",
+          "label": "套圈延伸方向间距设置若干定位卡槽",
+          "feature_ids": ["1-f-2950ea34063b"],
+          "feature_selector_groups": [["定位卡槽"], ["间距", "若干"]],
+          "expected_disclosure": "not_disclosed"
+        },
+        {
+          "concept_id": "positioning_projection",
+          "label": "圆形凸台一侧设置匹配的定位卡凸",
+          "feature_ids": ["1-f-83716834f960"],
+          "feature_selector_groups": [["定位卡凸", "定位凸起"]],
+          "expected_disclosure": "not_disclosed"
+        }
+      ]
+    },
+    {"publication_number": "CN215818549U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定正文未将该文献作为权利要求1的单篇结构映射依据。"},
+    {"publication_number": "CN210781272U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "仅用于其他权利要求。"},
+    {"publication_number": "CN210274475U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "仅用于其他权利要求。"},
+    {"publication_number": "CN210431794U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "仅用于其他权利要求。"},
+    {"publication_number": "CN210042148U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "仅用于其他权利要求。"}
+  ]
+}

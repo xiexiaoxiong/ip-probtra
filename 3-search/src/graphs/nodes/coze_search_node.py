@@ -27,6 +27,48 @@ COZE_COLD_START_RETRIES = int(os.getenv("COZE_COLD_START_RETRIES", "2"))
 COZE_COLD_START_EXTRA_TIMEOUT = int(os.getenv("COZE_COLD_START_EXTRA_TIMEOUT", "600"))
 COZE_PER_KEYWORD_PRODUCT_LIMIT = int(os.getenv("COZE_PER_KEYWORD_PRODUCT_LIMIT", "5"))
 
+PRODUCT_CATEGORY_SUFFIXES = (
+    "扫地机器人", "机器人", "头戴耳机", "开放式耳机", "耳机", "音响", "扬声器",
+    "跑步机", "椭圆机", "划船机", "健身车", "洗衣机", "洗碗机", "吸尘器",
+    "净水器", "净化器", "显示器", "摄像头", "计时器", "电饭煲", "冰箱",
+    "空调", "风扇", "门锁", "水枪", "泵", "阀", "锅", "杯", "灯具",
+)
+
+
+def _normalize_match_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "")).lower()
+
+
+def _expanded_object_terms(object_terms: List[str]) -> List[str]:
+    expanded: List[str] = []
+    seen: set[str] = set()
+    for value in object_terms:
+        normalized = _normalize_match_text(value)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            expanded.append(normalized)
+        for suffix in PRODUCT_CATEGORY_SUFFIXES:
+            normalized_suffix = _normalize_match_text(suffix)
+            if normalized.endswith(normalized_suffix) and normalized_suffix not in seen:
+                seen.add(normalized_suffix)
+                expanded.append(normalized_suffix)
+    return expanded
+
+
+def _product_matches_object_terms(product: Dict[str, Any], object_terms: List[str]) -> bool:
+    anchors = _expanded_object_terms(object_terms)
+    if not anchors:
+        return True
+    product_text = _normalize_match_text(
+        " ".join(
+            [
+                str(product.get("product_name") or ""),
+                str(product.get("description") or ""),
+            ]
+        )
+    )
+    return any(anchor in product_text for anchor in anchors)
+
 
 def _extract_products_from_response(response_data: Any) -> List[Dict[str, Any]]:
     """从Coze响应中提取商品列表，兼容多种响应格式"""
@@ -262,6 +304,22 @@ def coze_search_node(
                     failed += 1
                     logger.warning("关键词 '%s' 检索异常: %s", keyword, error)
                     continue
+
+                if state.object_terms and products:
+                    raw_count = len(products)
+                    products = [
+                        product
+                        for product in products
+                        if _product_matches_object_terms(product, state.object_terms)
+                    ]
+                    rejected_count = raw_count - len(products)
+                    if rejected_count:
+                        logger.warning(
+                            "关键词 '%s' 的结果中剔除%d个跨品类商品, object_terms=%s",
+                            keyword,
+                            rejected_count,
+                            state.object_terms,
+                        )
 
                 if products:
                     successful += 1

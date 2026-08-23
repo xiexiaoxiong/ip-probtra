@@ -3,6 +3,7 @@
 职责：从 Postgres 的 keyword_records 读取关键词
 """
 import logging
+import re
 from typing import List
 
 from langchain_core.runnables import RunnableConfig
@@ -12,6 +13,19 @@ from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import GetKeywordsInput, GetKeywordsOutput
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_for_containment(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "")).lower()
+
+
+def _contains_object_term(keyword: str, object_terms: List[str]) -> bool:
+    normalized_keyword = _normalize_for_containment(keyword)
+    return any(
+        normalized_term in normalized_keyword
+        for term in object_terms
+        if (normalized_term := _normalize_for_containment(term))
+    )
 
 
 def get_keywords_node(
@@ -27,8 +41,13 @@ def get_keywords_node(
     try:
         if state.input_keywords is not None:
             keywords = [keyword.strip() for keyword in state.input_keywords if keyword and keyword.strip()]
+            object_terms = [term.strip() for term in (state.input_object_terms or []) if term and term.strip()]
+            object_terms = list(dict.fromkeys(object_terms))
+            if object_terms:
+                keywords = [keyword for keyword in keywords if _contains_object_term(keyword, object_terms)]
             return GetKeywordsOutput(
                 keywords=list(dict.fromkeys(keywords)),
+                object_terms=object_terms,
                 error_message="",
             )
 
@@ -49,11 +68,34 @@ def get_keywords_node(
         finally:
             session.close()
 
+        object_terms: List[str] = []
+        for row in rows:
+            keyword_text = (row.keyword_text or "").strip()
+            raw_payload = row.raw_payload if isinstance(row.raw_payload, dict) else {}
+            raw_object_terms = raw_payload.get("object_terms", [])
+            if isinstance(raw_object_terms, list):
+                object_terms.extend(
+                    str(term).strip()
+                    for term in raw_object_terms
+                    if isinstance(term, str) and term.strip()
+                )
+            if str(row.keyword_type or "").upper() == "OBJECT_BASE" and keyword_text:
+                object_terms.append(keyword_text)
+
+        object_terms = list(dict.fromkeys(object_terms))
         keywords: List[str] = []
         for row in rows:
             keyword_text = (row.keyword_text or "").strip()
-            if keyword_text:
-                keywords.append(keyword_text)
+            if not keyword_text or str(row.source_location or "") == "必要特征基础词":
+                continue
+            raw_payload = row.raw_payload if isinstance(row.raw_payload, dict) else {}
+            if str(raw_payload.get("query_role", "executable_search")) != "executable_search":
+                continue
+            if str(raw_payload.get("guard_status", "passed")) != "passed":
+                continue
+            if object_terms and not _contains_object_term(keyword_text, object_terms):
+                continue
+            keywords.append(keyword_text)
 
         keywords = list(dict.fromkeys(keywords))
         if not keywords:
@@ -67,7 +109,7 @@ def get_keywords_node(
             state.patent_record_id,
             len(keywords),
         )
-        return GetKeywordsOutput(keywords=keywords, error_message="")
+        return GetKeywordsOutput(keywords=keywords, object_terms=object_terms, error_message="")
     except Exception as error:
         logger.error("获取关键词失败: %s", error, exc_info=True)
         return GetKeywordsOutput(

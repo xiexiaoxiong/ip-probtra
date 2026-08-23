@@ -10,11 +10,15 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from graphs.nodes.required_feature_extraction_node import _fallback_features  # noqa: E402
+from graphs.nodes.required_feature_extraction_node import (  # noqa: E402
+    _fallback_features,
+    _reclassify_features_by_source,
+)
 from graphs.nodes.keyword_combination_node import (  # noqa: E402
     _apply_guardrails,
     _build_context_extension_keywords,
     _build_required_feature_keywords,
+    _object_texts,
 )
 from graphs.state import RequiredFeatureExtractionInput  # noqa: E402
 
@@ -76,13 +80,16 @@ def main() -> None:
         skeleton + noisy_model_keywords + context_extensions,
         required_features=required,
         excluded_generic_terms=excluded,
+        object_terms=_object_texts(
+            state.primary_product_object,
+            state.search_product_objects,
+            [],
+        ),
     )
     keyword_texts = [item["keyword_text"] for item in final_keywords]
 
     expected = {
         "扫地机器人",
-        "拖地",
-        "升降",
         "拖地扫地机器人",
         "升降扫地机器人",
         "拖地升降扫地机器人",
@@ -91,7 +98,69 @@ def main() -> None:
     }
     missing = expected.difference(keyword_texts)
     assert not missing, f"missing expected keywords {missing}; got {keyword_texts}"
+    assert "拖地" not in keyword_texts, f"bare feature query leaked: {keyword_texts}"
+    assert "升降" not in keyword_texts, f"bare feature query leaked: {keyword_texts}"
+    assert all("扫地机器人" in keyword for keyword in keyword_texts), keyword_texts
     assert "懒人扫地机器人" not in keyword_texts, f"unconstrained audience keyword leaked: {keyword_texts}"
+
+    headset_state = RequiredFeatureExtractionInput(
+        claim_text=(
+            "1.一种开放式头戴耳机，包括头戴和两个发音单元，"
+            "发音单元上设置有贯通靠近耳朵一侧与相对外侧的中空孔。"
+        ),
+        abstract_text="封闭中空孔后可以实现开放式和封闭式两种模式切换。",
+        invention_content="通过封闭件封闭中空孔实现闭式切换。",
+        dependent_claims_text="7.根据权利要求1所述的耳机，包括可拆卸封闭件。",
+        invention_point="中空孔结构以及开放和封闭模式切换",
+        primary_product_object="开放式头戴耳机",
+        search_product_objects=["开放式头戴耳机"],
+    )
+    headset_required, headset_optional = _reclassify_features_by_source(
+        [
+            {"text": "中空孔", "type": "REQUIRED_FEATURE", "source": "权利要求1"},
+            {"text": "闭式切换", "type": "REQUIRED_FEATURE", "source": "摘要"},
+        ],
+        [],
+        headset_state,
+    )
+    assert [feature["text"] for feature in headset_required] == ["中空孔"], headset_required
+    assert "闭式切换" in {feature["text"] for feature in headset_optional}, headset_optional
+    assert next(feature for feature in headset_optional if feature["text"] == "闭式切换")["source_tier"] == "specification_effect"
+
+    headset_skeleton = _build_required_feature_keywords(
+        headset_required,
+        headset_state.primary_product_object,
+        headset_state.search_product_objects,
+        [],
+    )
+    headset_final = _apply_guardrails(
+        headset_skeleton
+        + [
+            {
+                "keyword_text": "中空孔",
+                "keyword_type": "required_feature",
+                "combination_pattern": "必要特征基础词",
+                "confidence": 0.9,
+            },
+            {
+                "keyword_text": "闭式切换",
+                "keyword_type": "required_feature",
+                "combination_pattern": "必要特征基础词",
+                "confidence": 0.9,
+            },
+        ],
+        required_features=headset_required,
+        object_terms=_object_texts(
+            headset_state.primary_product_object,
+            headset_state.search_product_objects,
+            [],
+        ),
+    )
+    headset_keywords = [item["keyword_text"] for item in headset_final]
+    assert "中空孔" not in headset_keywords, headset_keywords
+    assert "闭式切换" not in headset_keywords, headset_keywords
+    assert "中空孔开放式头戴耳机" in headset_keywords, headset_keywords
+    assert all("开放式头戴耳机" in keyword for keyword in headset_keywords), headset_keywords
 
     print("required keyword strategy ok")
     print(keyword_texts)

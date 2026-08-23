@@ -1,23 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requiredTestServiceUrl, requireTestUser } from '@/lib/test-route-guard';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 1200; // 20 minutes timeout
 
-const MODULE3_URL = process.env.MODULE3_API_URL || 'http://127.0.0.1:5105/run';
-const MODULE3_TOKEN = process.env.MODULE3_API_TOKEN || '';
-
 export async function POST(request: NextRequest) {
+  const unauthorized = await requireTestUser(request);
+  if (unauthorized) return unauthorized;
   try {
     const body = await request.json();
+    const module3Url = requiredTestServiceUrl('TEST_MODULE3_API_URL', [5105]);
+    const module3Token = process.env.TEST_MODULE3_API_TOKEN || '';
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    if (MODULE3_TOKEN) {
-      headers['Authorization'] = `Bearer ${MODULE3_TOKEN}`;
+    if (module3Token) {
+      headers['Authorization'] = `Bearer ${module3Token}`;
     }
 
-    const response = await fetch(MODULE3_URL, {
+    const response = await fetch(module3Url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),

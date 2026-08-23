@@ -49,6 +49,7 @@ class FetchResult(BaseModel):
     html: str = ""
     provider: str = ""
     error_message: str = ""
+    capture_meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class ParsedProductPage(BaseModel):

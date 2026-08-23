@@ -1,0 +1,34 @@
+{
+  "case_id": "battery-slurry-decision-2014106703299",
+  "claim_id": "1",
+  "decision_source": {"file_name": "无效决定（收到日：20210127）-锂离子电池隔膜的高固含量水性陶瓷浆料及其加工方法-ZL201410670329.9-专利权人：深圳星源.pdf", "pages": [5, 6, 7, 8], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {
+      "publication_number": "CN103633269A",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "closest_prior_art",
+      "legal_reasoning": {"type": "inventive_step", "outcome": "claim_remains_inventive", "note": "其他证据未给出从多种增稠剂中选择特定碱溶性高分子乳液增稠剂并配合相应水性润湿剂的动机。"},
+      "concepts": [
+        {"concept_id": "aqueous_slurry", "label": "锂离子电池隔膜用水性陶瓷浆料", "feature_selector_groups": [["陶瓷颗粒"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "dispersant", "label": "水性分散剂", "feature_selector_groups": [["水性分散剂"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "latex", "label": "水性乳胶", "feature_selector_groups": [["水性乳胶"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "alkali_soluble_emulsion_thickener", "label": "特定碱溶性高分子乳液增稠剂", "feature_selector_groups": [["碱溶性高分子乳液增稠剂"]], "expected_disclosure": "not_disclosed"},
+        {"concept_id": "aqueous_wetting_agent", "label": "特定水性润湿剂", "feature_selector_groups": [["水性润湿剂"]], "expected_disclosure": "not_disclosed"}
+      ]
+    },
+    {
+      "publication_number": "CN103915594A",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "alternative_closest_prior_art",
+      "legal_reasoning": {"type": "inventive_step", "outcome": "claim_remains_inventive"},
+      "concepts": [
+        {"concept_id": "alkali_soluble_emulsion_thickener", "label": "特定碱溶性高分子乳液增稠剂", "feature_selector_groups": [["碱溶性高分子乳液增稠剂"]], "expected_disclosure": "not_disclosed"},
+        {"concept_id": "aqueous_wetting_agent", "label": "特定水性润湿剂", "feature_selector_groups": [["水性润湿剂"]], "expected_disclosure": "not_disclosed"}
+      ]
+    },
+    {"publication_number": "CN103396710A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定正文未将该文献作为权利要求1的单篇最接近现有技术进行特征映射。"},
+    {"publication_number": "CN103618059A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定正文未将该文献作为权利要求1的单篇最接近现有技术进行特征映射。"},
+    {"publication_number": "CN103647034A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "作为组合启示材料讨论，不等于单篇公开权利要求1。"},
+    {"publication_number": "CN103915595A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定正文未对该同族/相关文献作独立逐项映射。"}
+  ]
+}

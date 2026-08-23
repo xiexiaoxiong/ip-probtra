@@ -1,0 +1,18 @@
+{
+  "case_id": "gas-stove-decision-2016110150593",
+  "claim_id": "10",
+  "decision_source": {"file_name": "金斗亿201611015059.3无效宣告审查决定书（4W120559）.pdf", "pages": [9, 10, 11], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {
+      "publication_number": "CN2519162Y",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "closest_prior_art_inherited_from_claim_1",
+      "legal_reasoning": {"type": "derivative_inventive_step_reasoning", "outcome": "claim_remains_inventive"},
+      "concepts": [
+        {"concept_id": "adapter_structure", "label": "切面配合并可变换相对位置的连接部件", "feature_selector_groups": [["连接部件"], ["相对位置"]], "expected_disclosure": "not_disclosed"}
+      ]
+    },
+    {"publication_number": "CN106091032A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定仅沿用权利要求1的组合动机分析，未逐项映射权利要求10。"},
+    {"publication_number": "CN104508377A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定仅沿用权利要求1的组合动机分析，未逐项映射权利要求10。"}
+  ]
+}

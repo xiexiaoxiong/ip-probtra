@@ -1,0 +1,47 @@
+[
+  {
+    "subject_terms_zh": ["消防供水设施"],
+    "subject_terms_en": ["fire water supply fixture"],
+    "features": [
+      {"feature_id": "F1", "terms_zh": ["埋设基座"], "terms_en": ["buried mounting base"]},
+      {"feature_id": "F2", "terms_zh": ["限位块"], "terms_en": ["stop block"]},
+      {"feature_id": "F3", "terms_zh": ["滑动限位槽"], "terms_en": ["sliding stop groove"]}
+    ]
+  },
+  {
+    "subject_terms_zh": ["流体控制设备"],
+    "subject_terms_en": ["fluid control equipment"],
+    "features": [
+      {"feature_id": "F1", "terms_zh": ["地下支承结构"], "terms_en": ["subsurface support assembly"]},
+      {"feature_id": "F2", "terms_zh": ["行程约束构件"], "terms_en": ["travel restraint member"]},
+      {"feature_id": "F3", "terms_zh": ["导向约束结构"], "terms_en": ["guided restraint assembly"]}
+    ]
+  },
+  {
+    "subject_terms_zh": ["高度调节设备"],
+    "subject_terms_en": ["height adjustable equipment"],
+    "features": [
+      {"feature_id": "F1", "terms_zh": ["容纳升降"], "terms_en": ["motion accommodation"]},
+      {"feature_id": "F2", "terms_zh": ["行程止挡"], "terms_en": ["travel stopping"]},
+      {"feature_id": "F3", "terms_zh": ["升降导向"], "terms_en": ["vertical guiding"]}
+    ]
+  },
+  {
+    "subject_terms_zh": ["升降支承组件"],
+    "subject_terms_en": ["lifting support module"],
+    "features": [
+      {"feature_id": "F1", "terms_zh": ["基座容纳路径"], "terms_en": ["base receiving path"]},
+      {"feature_id": "F2", "terms_zh": ["本体固定连接"], "terms_en": ["body fixed connection"]},
+      {"feature_id": "F3", "terms_zh": ["块槽滑动配合"], "terms_en": ["block groove sliding engagement"]}
+    ]
+  },
+  {
+    "subject_terms_zh": ["地下伸缩装置"],
+    "subject_terms_en": ["subsurface telescopic apparatus"],
+    "features": [
+      {"feature_id": "F1", "terms_zh": ["隐蔽收纳"], "terms_en": ["concealed stowage"]},
+      {"feature_id": "F2", "terms_zh": ["越程防止"], "terms_en": ["overtravel prevention"]},
+      {"feature_id": "F3", "terms_zh": ["受控直线移动"], "terms_en": ["controlled linear movement"]}
+    ]
+  }
+]

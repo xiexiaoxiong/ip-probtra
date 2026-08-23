@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "pn": "US20190300001A1",
+      "pdf": {
+        "path": "https://open.zhihuiya.com/pdf/watermark/US/A1/example.pdf?sign=fixture"
+      },
+      "patent_id": "718ead9c-4f3c-4674-8f5a-24e126827269"
+    }
+  ],
+  "status": true,
+  "error_code": 0
+}

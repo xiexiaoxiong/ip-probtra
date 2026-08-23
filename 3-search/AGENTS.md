@@ -88,7 +88,7 @@
 
 ## 工作流数据流
 ```
-GraphInput (patent_record_id, analysis_session_id, input_keywords?)
+GraphInput (patent_record_id, analysis_session_id, input_keywords?, input_object_terms?)
     ↓
 entry (初始化状态，生成数据集ID)
     ↓
@@ -104,6 +104,12 @@ exit (输出结果)
     ↓
 GraphOutput (product_dataset_id, search_run_id, total_products_count, is_complete, error_message, enriched_products_count, enrichment_error_message)
 ```
+
+## 2026-07-15 商品客体边界
+
+- Portal 会把模块2确认过的 `object_terms` 作为 `input_object_terms` 传入正式模块3；数据库读取模式也会从关键词 `raw_payload.object_terms` 和 `OBJECT_BASE` 记录恢复客体。
+- `coze_search` 在持久化前检查商品名称/描述是否包含产品客体或受控类目后缀。明显跨品类结果必须拒绝，例如耳机专利下由“中空孔”召回的 PP 中空塑料板。
+- 图片视觉增强默认模型为 `glm-4.6v`；图片请求不得静默降级为纯文本模型。
 
 ## 数据库表结构
 保存到 Postgres 的商品数据包含以下表：

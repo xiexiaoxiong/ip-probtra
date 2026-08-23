@@ -5,6 +5,9 @@
 /** 分析会话状态 */
 export type AnalysisStatus = 'idle' | 'running' | 'completed' | 'error';
 
+/** 侵权分析与专利无效调查必须使用不同业务数据链路。 */
+export type AnalysisKind = 'infringement' | 'invalidity';
+
 /** 单个步骤的状态 */
 export type StepStatus = 'pending' | 'running' | 'waiting_input' | 'partial' | 'completed' | 'error';
 
@@ -197,6 +200,9 @@ export interface AnalysisResults {
   industryReasoning?: string;
   industryUsed?: IndustryType;
   keywordConfirmation?: KeywordConfirmationState;
+  invalidityInvestigationId?: string;
+  invalidityStatus?: string;
+  invalidityReportVersion?: string;
 }
 
 /** 分析会话 */
@@ -204,6 +210,8 @@ export interface AnalysisSession {
   id: string;
   userId?: number;
   userName?: string;
+  analysisKind: AnalysisKind;
+  pipelineVersion?: string | null;
   status: AnalysisStatus;
   input: AnalysisInput;
   steps: AnalysisStep[];
@@ -286,6 +294,7 @@ export type AnalysisSSEEvent =
 
 /** 开始分析请求 */
 export interface AnalyzeRequest {
+  analysisKind?: AnalysisKind;
   type: InputType;
   /** URL 输入时的专利网址 */
   url?: string;
@@ -343,6 +352,15 @@ export const WORKFLOW_MODULES = [
     name: '结果汇总',
     description: '汇总 Postgres 与工作流响应，必要时读取飞书兼容数据',
   },
+] as const;
+
+export const INVALIDITY_WORKFLOW_MODULES = [
+  { id: 1, name: '目标专利快照', description: '解析并冻结权利要求、说明书、附图与来源哈希' },
+  { id: 2, name: '关键日与特征', description: '逐项权利要求确认关键日并拆解必要技术特征' },
+  { id: 3, name: '全球现有技术检索', description: '检索全球专利与非专利材料并核验日期、来源和全文' },
+  { id: 4, name: '单文献新颖性比对', description: '每篇材料分别比对全部特征，禁止拼接新颖性' },
+  { id: 5, name: '区别特征与创造性', description: '选择最接近现有技术并按区别特征继续有界检索' },
+  { id: 6, name: 'CC 表与审计报告', description: '汇总逐权利要求结果、证据位置、排除记录和未解决缺口' },
 ] as const;
 
 /** 行业类型 */

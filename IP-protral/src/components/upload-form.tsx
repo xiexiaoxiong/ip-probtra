@@ -15,9 +15,10 @@ import { Upload, Link, FileText, X, Loader2, ClipboardPaste } from 'lucide-react
 interface UploadFormProps {
   onSubmit: (data: { type: 'url' | 'file' | 'text'; url?: string; fileKey?: string; fileName?: string; fileUrl?: string; text?: string }) => void;
   isAnalyzing: boolean;
+  uploadEndpoint?: string;
 }
 
-export function UploadForm({ onSubmit, isAnalyzing }: UploadFormProps) {
+export function UploadForm({ onSubmit, isAnalyzing, uploadEndpoint = '/api/upload' }: UploadFormProps) {
   const [activeTab, setActiveTab] = useState<'url' | 'file' | 'text'>('text');
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -58,7 +59,7 @@ export function UploadForm({ onSubmit, isAnalyzing }: UploadFormProps) {
         const formData = new FormData();
         formData.append('file', file);
 
-        const response = await fetch('/api/upload', {
+        const response = await fetch(uploadEndpoint, {
           method: 'POST',
           body: formData,
         });
@@ -86,7 +87,7 @@ export function UploadForm({ onSubmit, isAnalyzing }: UploadFormProps) {
         setUploading(false);
       }
     }
-  }, [activeTab, url, patentText, file, onSubmit]);
+  }, [activeTab, url, patentText, file, onSubmit, uploadEndpoint]);
 
   const canSubmit =
     !isAnalyzing &&

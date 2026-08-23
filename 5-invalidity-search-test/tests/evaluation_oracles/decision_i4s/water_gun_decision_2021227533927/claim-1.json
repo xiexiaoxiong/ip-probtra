@@ -1,0 +1,22 @@
+{
+  "case_id": "water_gun_decision_2021227533927",
+  "claim_id": "1",
+  "decision_source": {"file_name": "无效宣告请求审查决定书_2021227533927.pdf", "pages": [8, 9, 10, 11, 12, 13, 14, 15], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {"publication_number": "CN101970127A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "该决定正文没有对当前自动范围内的独立权利要求1作逐项判断，不从请求人陈述或其他权利要求反推答案。"},
+    {"publication_number": "CN107917642A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "CN203518819U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "CN207950396U", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "DE841868C", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "TW262532B", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US20030151880A1", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US20080245815A1", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US20120097704A1", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US20200080816A1", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US3796376A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US5799827A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US5975358A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "US6138871A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"},
+    {"publication_number": "WO1995000221A1", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "同上。"}
+  ]
+}

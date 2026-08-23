@@ -39,6 +39,9 @@ function envValue(name) {
 
 function workflowApp(folderName, port) {
   const cwd = appPath(folderName);
+  // 本项目需要统一分析文本和图片。不要让 .env.local 中遗留的纯文本/旧视觉
+  // 模型覆盖运行配置；如需升级模型，应在这里统一评审后修改。
+  const multimodalModel = 'glm-4.6v';
 
   return {
     name: `patent-${folderName.replace(/\s+/g, '-').toLowerCase()}`,
@@ -53,28 +56,28 @@ function workflowApp(folderName, port) {
       DATABASE_URL: envValue('DATABASE_URL') || envValue('PGDATABASE_URL'),
       COZE_WORKLOAD_IDENTITY_API_KEY:
         envValue('COZE_WORKLOAD_IDENTITY_API_KEY') ||
-        envValue('LOCAL_LLM_API_KEY') ||
-        envValue('LOCAL_LLM_FALLBACK_API_KEY'),
+        envValue('LOCAL_LLM_API_KEY'),
       COZE_INTEGRATION_BASE_URL:
         envValue('COZE_INTEGRATION_BASE_URL') ||
-        envValue('LOCAL_LLM_BASE_URL') ||
-        envValue('LOCAL_LLM_FALLBACK_BASE_URL'),
+        envValue('LOCAL_LLM_BASE_URL'),
       COZE_INTEGRATION_MODEL_BASE_URL:
         envValue('COZE_INTEGRATION_MODEL_BASE_URL') ||
-        envValue('LOCAL_LLM_BASE_URL') ||
-        envValue('LOCAL_LLM_FALLBACK_BASE_URL'),
+        envValue('LOCAL_LLM_BASE_URL'),
       LOCAL_LLM_BASE_URL: envValue('LOCAL_LLM_BASE_URL'),
       LOCAL_LLM_API_KEY: envValue('LOCAL_LLM_API_KEY'),
-      LOCAL_LLM_DEFAULT_MODEL: envValue('LOCAL_LLM_DEFAULT_MODEL'),
-      LOCAL_LLM_FAST_MODEL: envValue('LOCAL_LLM_FAST_MODEL'),
-      LOCAL_LLM_VISION_MODEL: envValue('LOCAL_LLM_VISION_MODEL'),
+      LOCAL_LLM_DEFAULT_MODEL: multimodalModel,
+      LOCAL_LLM_FAST_MODEL: multimodalModel,
+      LOCAL_LLM_VISION_MODEL: multimodalModel,
+      LOCAL_LLM_BIGMODEL_IMAGE_MODE: envValue('LOCAL_LLM_BIGMODEL_IMAGE_MODE') || 'multimodal',
+      LOCAL_LLM_ALLOW_FALLBACK: '0',
       LOCAL_LLM_TEXT_PROVIDER: envValue('LOCAL_LLM_TEXT_PROVIDER'),
       LOCAL_LLM_VISION_PROVIDER: envValue('LOCAL_LLM_VISION_PROVIDER'),
-      LOCAL_LLM_FALLBACK_BASE_URL: envValue('LOCAL_LLM_FALLBACK_BASE_URL'),
-      LOCAL_LLM_FALLBACK_API_KEY: envValue('LOCAL_LLM_FALLBACK_API_KEY'),
-      LOCAL_LLM_FALLBACK_DEFAULT_MODEL: envValue('LOCAL_LLM_FALLBACK_DEFAULT_MODEL'),
-      LOCAL_LLM_FALLBACK_FAST_MODEL: envValue('LOCAL_LLM_FALLBACK_FAST_MODEL'),
-      LOCAL_LLM_FALLBACK_VISION_MODEL: envValue('LOCAL_LLM_FALLBACK_VISION_MODEL'),
+      // 显式空值阻止 Python dotenv 重新加载纯文本 fallback 配置。
+      LOCAL_LLM_FALLBACK_BASE_URL: '',
+      LOCAL_LLM_FALLBACK_API_KEY: '',
+      LOCAL_LLM_FALLBACK_DEFAULT_MODEL: '',
+      LOCAL_LLM_FALLBACK_FAST_MODEL: '',
+      LOCAL_LLM_FALLBACK_VISION_MODEL: '',
       LOCAL_LLM_DIRECT_INTERFACE: envValue('LOCAL_LLM_DIRECT_INTERFACE'),
       LOCAL_LLM_BIGMODEL_DIRECT_IPS: envValue('LOCAL_LLM_BIGMODEL_DIRECT_IPS'),
       LOCAL_LLM_FORCE_DIRECT_ROUTE: envValue('LOCAL_LLM_FORCE_DIRECT_ROUTE'),
@@ -99,6 +102,18 @@ function workflowApp(folderName, port) {
       COZE_SEARCH_API_TOKEN: envValue('COZE_SEARCH_API_TOKEN'),
       COZE_SEARCH_TIMEOUT: envValue('COZE_SEARCH_TIMEOUT'),
       COZE_MAX_CONCURRENT: envValue('COZE_MAX_CONCURRENT'),
+      ...(folderName === '3-andun-search'
+        ? {
+            ANDUN_API_ENV: envValue('ANDUN_API_ENV') || 'qa',
+            ANDUN_API_BASE_URL: envValue('ANDUN_API_BASE_URL'),
+            ANDUN_APP_KEY: envValue('ANDUN_APP_KEY'),
+            ANDUN_APP_SECRET: envValue('ANDUN_APP_SECRET'),
+            ANDUN_REQUEST_TIMEOUT_SECONDS: envValue('ANDUN_REQUEST_TIMEOUT_SECONDS') || '30',
+            ANDUN_REQUEST_RETRY_ATTEMPTS: envValue('ANDUN_REQUEST_RETRY_ATTEMPTS') || '4',
+            ANDUN_POLL_INTERVAL_SECONDS: envValue('ANDUN_POLL_INTERVAL_SECONDS') || '10',
+            ANDUN_MAX_WAIT_SECONDS: envValue('ANDUN_MAX_WAIT_SECONDS') || '1800',
+          }
+        : {}),
     },
   };
 }
@@ -114,6 +129,7 @@ module.exports = {
     workflowApp('2-keyword-electra', 5104),
     workflowApp('3-search', 5105),
     workflowApp('3-product-search', 5107),
+    workflowApp('3-andun-search', 5108),
     workflowApp('4-claim-chat', 5106),
     {
       name: 'patent-web',
@@ -134,7 +150,46 @@ module.exports = {
         MODULE2_FITNESS_API_URL: envValue('MODULE2_FITNESS_API_URL') || 'http://127.0.0.1:5103/run',
         MODULE2_HOME_APPLIANCES_API_URL: envValue('MODULE2_HOME_APPLIANCES_API_URL') || 'http://127.0.0.1:5104/run',
         MODULE3_API_URL: envValue('MODULE3_API_URL') || 'http://127.0.0.1:5105/run',
+        ANDUN_MODULE3_API_URL: envValue('ANDUN_MODULE3_API_URL') || 'http://127.0.0.1:5108',
         MODULE4_API_URL: envValue('MODULE4_API_URL') || 'http://127.0.0.1:5106/run',
+        PATENT_ANALYSIS_MODULE1_API_URL:
+          envValue('PATENT_ANALYSIS_MODULE1_API_URL') || envValue('TEST_MODULE1_API_URL') || envValue('MODULE1_API_URL') || 'http://127.0.0.1:5101/run',
+        PATENT_ANALYSIS_MODULE1_API_TOKEN:
+          envValue('PATENT_ANALYSIS_MODULE1_API_TOKEN') || envValue('TEST_MODULE1_API_TOKEN') || envValue('MODULE1_API_TOKEN'),
+        PATENT_ANALYSIS_MODULE2_API_URL:
+          envValue('PATENT_ANALYSIS_MODULE2_API_URL') || envValue('TEST_MODULE2_API_URL') || envValue('MODULE2_API_URL') || 'http://127.0.0.1:5102/run',
+        PATENT_ANALYSIS_MODULE2_API_TOKEN:
+          envValue('PATENT_ANALYSIS_MODULE2_API_TOKEN') || envValue('TEST_MODULE2_API_TOKEN') || envValue('MODULE2_API_TOKEN'),
+        PATENT_ANALYSIS_MODULE2_FITNESS_API_URL:
+          envValue('PATENT_ANALYSIS_MODULE2_FITNESS_API_URL') || envValue('TEST_MODULE2_FITNESS_API_URL') || envValue('MODULE2_FITNESS_API_URL') || 'http://127.0.0.1:5103/run',
+        PATENT_ANALYSIS_MODULE2_FITNESS_API_TOKEN:
+          envValue('PATENT_ANALYSIS_MODULE2_FITNESS_API_TOKEN') || envValue('TEST_MODULE2_FITNESS_API_TOKEN') || envValue('MODULE2_FITNESS_API_TOKEN'),
+        PATENT_ANALYSIS_MODULE2_HOME_APPLIANCES_API_URL:
+          envValue('PATENT_ANALYSIS_MODULE2_HOME_APPLIANCES_API_URL') || envValue('TEST_MODULE2_HOME_APPLIANCES_API_URL') || envValue('MODULE2_HOME_APPLIANCES_API_URL') || 'http://127.0.0.1:5104/run',
+        PATENT_ANALYSIS_MODULE2_HOME_APPLIANCES_API_TOKEN:
+          envValue('PATENT_ANALYSIS_MODULE2_HOME_APPLIANCES_API_TOKEN') || envValue('TEST_MODULE2_HOME_APPLIANCES_API_TOKEN') || envValue('MODULE2_HOME_APPLIANCES_API_TOKEN'),
+        PATENT_ANALYSIS_PRODUCT_SEARCH_API_URL:
+          envValue('PATENT_ANALYSIS_PRODUCT_SEARCH_API_URL') || envValue('TEST_PRODUCT_DETAIL_MODULE3_API_URL') || envValue('PRODUCT_DETAIL_MODULE3_API_URL') || envValue('PRODUCT_SEARCH_API_URL') || 'http://127.0.0.1:5107/run',
+        PATENT_ANALYSIS_PRODUCT_SEARCH_API_TOKEN:
+          envValue('PATENT_ANALYSIS_PRODUCT_SEARCH_API_TOKEN') || envValue('TEST_PRODUCT_DETAIL_MODULE3_API_TOKEN') || envValue('PRODUCT_DETAIL_MODULE3_API_TOKEN') || envValue('PRODUCT_SEARCH_API_TOKEN'),
+        PATENT_ANALYSIS_MODULE4_API_URL:
+          envValue('PATENT_ANALYSIS_MODULE4_API_URL') || envValue('TEST_MODULE4_API_URL') || envValue('MODULE4_API_URL') || 'http://127.0.0.1:5106/run',
+        PATENT_ANALYSIS_MODULE4_API_TOKEN:
+          envValue('PATENT_ANALYSIS_MODULE4_API_TOKEN') || envValue('TEST_MODULE4_API_TOKEN') || envValue('MODULE4_API_TOKEN'),
+        INVALIDITY_API_URL:
+          envValue('INVALIDITY_API_URL') || envValue('INVALIDITY_TEST_API_URL') || 'http://127.0.0.1:5209',
+        INVALIDITY_API_TOKEN:
+          envValue('INVALIDITY_API_TOKEN') || envValue('INVALIDITY_TEST_API_TOKEN'),
+        INVALIDITY_UPLOAD_ROOT:
+          envValue('INVALIDITY_UPLOAD_ROOT') || envValue('INVALIDITY_TEST_UPLOAD_ROOT'),
+        INVALIDITY_TEST_API_URL:
+          envValue('INVALIDITY_TEST_API_URL') || 'http://127.0.0.1:5209',
+        INVALIDITY_TEST_API_TOKEN: envValue('INVALIDITY_TEST_API_TOKEN'),
+        INVALIDITY_TEST_UPLOAD_ROOT: envValue('INVALIDITY_TEST_UPLOAD_ROOT'),
+        INVALIDITY_PROD_API_URL:
+          envValue('INVALIDITY_PROD_API_URL') || 'http://127.0.0.1:5109',
+        INVALIDITY_PROD_API_TOKEN: envValue('INVALIDITY_PROD_API_TOKEN'),
+        INVALIDITY_PROD_UPLOAD_ROOT: envValue('INVALIDITY_PROD_UPLOAD_ROOT'),
         FEISHU_APP_ID: envValue('FEISHU_APP_ID'),
         FEISHU_APP_SECRET: envValue('FEISHU_APP_SECRET'),
       },

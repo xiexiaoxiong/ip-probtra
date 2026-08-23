@@ -92,7 +92,7 @@
 ```json
 {
     "config": {
-        "model": "glm-5-0-260211",
+        "model": "glm-4.6v",
         "temperature": 0.3
     },
     "sp": "【修改 System Prompt，定义角色和规则】",
@@ -190,7 +190,7 @@
   3. 客体必须精确到具体产品（跑步机 ✅ vs 健身器材 ❌）
   4. 输出格式从字符串改为 JSON 数组
   5. 节点输入增加 `invention_content` 字段用于回溯
-- **统一模型**：所有节点默认模型统一为 `glm-5-0-260211`
+- **统一模型**：PM2 运行时把所有模型别名统一解析为 `glm-4.6v` 多模态模型
 - **修改文件**：
   - `config/product_object_extraction_llm_cfg.json` - 重写 SP/UP
   - `src/graphs/nodes/product_object_extraction_node.py` - 适配多客体逻辑
@@ -247,6 +247,13 @@
 ---
 
 ## 输入输出说明
+
+## 2026-07-15 关键词边界规则
+
+- `required_features` 仅允许来自当前独立权利要求的直接限定；从属权利要求、摘要、说明书中的效果或目标表述必须降为 `optional_features`，并记录 `source_tier`。
+- 可执行检索词必须包含产品客体。禁止输出“中空孔”“闭式切换”这类裸特征词；保留的骨架为产品客体、特征+产品客体、多特征+产品客体。
+- `result_assembly` 必须把 `query_role=executable_search`、`guard_status`、`object_terms`、`feature_terms`、`feature_source_tiers` 写入 `raw_payload`，供 Portal 和模块3复核。
+- 上述规则同时适用于 `2-keyword`、`2-keyword-fitness`、`2-keyword-electra`，不得只修改一个行业版本。
 
 ### 输入
 - **feishu_url**：飞书多维表格链接（必填）

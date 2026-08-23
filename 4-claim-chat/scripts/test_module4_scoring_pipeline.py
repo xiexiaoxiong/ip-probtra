@@ -7,8 +7,11 @@ Run from 4-claim-chat:
 
 from __future__ import annotations
 
+import importlib
+import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,9 +19,14 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from graphs.nodes.apply_rules_node import apply_rules_node  # noqa: E402
-from graphs.nodes.analyze_features_node import _downgrade_weak_enrichment_only_units  # noqa: E402
+from graphs.nodes.analyze_features_node import (  # noqa: E402
+    _build_rule_fallback_analysis,
+    _downgrade_weak_enrichment_only_units,
+    _should_abort_llm_batch_retries,
+)
 from graphs.nodes.review_analysis_node import review_analysis_node  # noqa: E402
 from graphs.state import ApplyRulesInput, ReviewAnalysisInput  # noqa: E402
+from graphs.state import AnalyzeFeaturesInput  # noqa: E402
 from utils.claim_scoring import (  # noqa: E402
     build_feature_segments,
     classify_unit_status,
@@ -192,10 +200,89 @@ def test_weak_enrichment_with_ocr_support_keeps_match() -> None:
     assert downgraded["token_units"][0]["unit_status"] == "match"
 
 
+def test_rule_fallback_never_promotes_partial_word_overlap() -> None:
+    feature = _feature("1A", "1", "壳体一端")
+    fallback = _build_rule_fallback_analysis(
+        features=[feature],
+        feature_segments_map={"1A": feature["feature_segments"]},
+        product_name="电源适配器",
+        product_description="电源线一端连接插头，另一端连接电源。",
+    )[0]
+
+    assert fallback["analysis_failed"] is True
+    assert fallback["analysis_source"] == "rule_fallback"
+    assert fallback["reasoning_type"] == "相关信息缺失"
+    assert fallback["evidence"] == ""
+    assert all(unit["unit_status"] == "uncertain" for unit in fallback["token_units"])
+    assert "大模型调用失败" in fallback["reason"]
+
+
+def test_rate_limit_and_cooldown_abort_batch_retries() -> None:
+    assert _should_abort_llm_batch_retries(RuntimeError("HTTP 429: rate limit exceeded"))
+    assert _should_abort_llm_batch_retries(RuntimeError("LLM provider cooling down for 299s"))
+    assert _should_abort_llm_batch_retries(RuntimeError("触发速率限制"))
+    assert not _should_abort_llm_batch_retries(RuntimeError("temporary empty response"))
+
+
+def test_analyze_node_stops_after_first_rate_limit() -> None:
+    analyze_module = importlib.import_module("graphs.nodes.analyze_features_node")
+    original_invoke = analyze_module.invoke_local_llm
+    original_workspace = os.environ.get("COZE_WORKSPACE_PATH")
+    original_attempts = os.environ.get("MODULE4_ANALYZE_BATCH_ATTEMPTS")
+    original_sleep = os.environ.get("MODULE4_ANALYZE_BATCH_RETRY_SLEEP_SECONDS")
+    calls = 0
+
+    def raise_rate_limit(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("HTTP 429: rate limit exceeded")
+
+    try:
+        analyze_module.invoke_local_llm = raise_rate_limit
+        os.environ["COZE_WORKSPACE_PATH"] = str(ROOT)
+        os.environ["MODULE4_ANALYZE_BATCH_ATTEMPTS"] = "6"
+        os.environ["MODULE4_ANALYZE_BATCH_RETRY_SLEEP_SECONDS"] = "0"
+        feature = _feature("1A", "1", "壳体一端")
+        output = analyze_module.analyze_features_node(
+            AnalyzeFeaturesInput(
+                features=[feature],
+                product_data={
+                    "name": "电源适配器",
+                    "description": "电源线一端连接插头。",
+                    "images": [],
+                },
+                specification_text="",
+            ),
+            config={"metadata": {"llm_cfg": "config/analyze_features_llm_cfg.json"}},
+            runtime=SimpleNamespace(context=None),
+        )
+    finally:
+        analyze_module.invoke_local_llm = original_invoke
+        for key, value in (
+            ("COZE_WORKSPACE_PATH", original_workspace),
+            ("MODULE4_ANALYZE_BATCH_ATTEMPTS", original_attempts),
+            ("MODULE4_ANALYZE_BATCH_RETRY_SLEEP_SECONDS", original_sleep),
+        ):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    assert calls == 1
+    assert output.raw_analysis[0]["analysis_failed"] is True
+    assert all(
+        unit["unit_status"] == "uncertain"
+        for unit in output.raw_analysis[0]["token_units"]
+    )
+
+
 test_status_normalization()
 test_token_mismatch_zeroes_claim_and_product()
 test_product_score_sums_features_without_mismatch()
 test_feature_score_caps_overlapping_matched_length()
 test_weak_enrichment_only_match_is_downgraded()
 test_weak_enrichment_with_ocr_support_keeps_match()
+test_rule_fallback_never_promotes_partial_word_overlap()
+test_rate_limit_and_cooldown_abort_batch_retries()
+test_analyze_node_stops_after_first_rate_limit()
 print("module4 scoring pipeline tests passed")

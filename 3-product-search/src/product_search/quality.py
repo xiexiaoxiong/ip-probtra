@@ -80,6 +80,11 @@ def evaluate_product_detail(fetch: FetchResult, parsed: ParsedProductPage) -> Qu
         "is_detail_url": is_detail_url(fetch.final_url, parsed.platform),
         "is_aggregate_url": is_aggregate_url(fetch.final_url),
         "blocked": False,
+        "image_count": len(parsed.picture),
+        "image_capture_complete": bool(
+            fetch.provider == "local_browser_stable"
+            and (fetch.capture_meta or {}).get("stopped_because_stable")
+        ),
     }
 
     if not fetch.ok:

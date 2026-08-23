@@ -1,0 +1,16 @@
+{
+  "benchmark_version": "blind-retrieval-v2",
+  "case_id": "gas-stove-decision-2016110150593",
+  "runtime_visibility": "forbidden_until_search_results_frozen",
+  "expected_documents": [
+    {"label": "D1", "publication_number": "CN2519162Y", "required": true, "maximum_cumulative_rank": 10},
+    {"label": "D2", "publication_number": "CN106091032A", "required": true, "maximum_cumulative_rank": 10},
+    {
+      "label": "D3",
+      "publication_number": "CN104508377A",
+      "equivalent_publication_numbers": ["US20150122134A1", "WO2013175438A1"],
+      "required": true,
+      "maximum_cumulative_rank": 10
+    }
+  ]
+}

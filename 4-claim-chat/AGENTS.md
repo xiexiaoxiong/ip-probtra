@@ -22,8 +22,8 @@
 
 ## 技能使用
 - 当前主线依赖 Postgres 表读取/写入；飞书多维表格集成仅为历史兼容路径
-- 节点 `decompose_claim` 使用大语言模型（doubao-seed-2-0-pro-260215）
-- 节点 `analyze_features` 使用大语言模型（doubao-seed-1-8-251228，支持多模态）
+- 节点 `decompose_claim` 使用 `glm-4.6v`
+- 节点 `analyze_features` 使用 `glm-4.6v` 多模态模型，同时提交商品文本与图片
 
 ## 数据流程
 1. **parse_and_fetch**: Postgres `patent_record_id` + `analysis_session_id` → 提取说明书文本+附图URL+独立权利要求列表+商品列表；历史兼容模式可从飞书URL读取。商品读取优先旧表 `search_products`；若当前 session 旧表无商品，则兜底读取新模块3独立表 `product_detail_search_products`，将 `description + detail_text` 合成商品描述、`picture` 作为图片，并在 `raw_data` 标记 `module3_product_detail_fallback=true`。
@@ -89,3 +89,17 @@
 - `parse_and_fetch_node.py` 新增对平行模块3 `product_detail_search_products` 的 fallback 读取。该逻辑仅在旧 `search_products` 查不到商品时触发，不改变正式旧模块3主流程。
 - 真实验证：同 `patent_record_id=101`、`analysis_session_id=module_test_codex_product_1782690000` 下，旧表无商品但新模块3表有 Narwal 商品详情；模块4 `/run` 成功读取该商品并完成 1 个商品、8 个特征比对，`claim_compare_run_id=71`。
 - 验证命令：`4-claim-chat/.venv/bin/python -m py_compile 4-claim-chat/src/graphs/nodes/parse_and_fetch_node.py` 通过；PM2 `patent-4-claim-chat` 已重启。
+
+## 2026-07-12 模型故障安全规则
+
+- LLM 批次失败时禁止使用局部词、短子串或营销词生成 `match`。规则兜底必须把全部 `token_units` 保持为 `uncertain`，使用 `reasoning_type=相关信息缺失`，并标注 `analysis_failed=true`、`analysis_source=rule_fallback`。
+- HTTP 429、速率限制或进程级 cooling-down 属于当前批次不可重试错误；首次失败后立即退出批次重试，不执行剩余次数和退避休眠。
+- Portal 测试 API 把“大模型调用失败”“模型调用失败”和“规则兜底”统一计入 `llmErrorCount`；只要存在失败兜底行，测试步骤不得显示 completed。
+- `scripts/test_module4_scoring_pipeline.py` 已覆盖“壳体一端”与无关“一端”的局部词重合不产生 match，以及 429 在 6 次配置下实际只调用模型 1 次。
+
+## 2026-07-15 多模态模型规则
+
+- `analyze_features`、`decompose_claim`、`review_analysis` 配置显式使用 `glm-4.6v`；PM2 的 default/fast/vision 模型也统一为 `glm-4.6v`。
+- 只要输入含商品图片，传输层必须保留同一请求中的 `text` 与 `image_url` 内容块。禁止因提供商兼容或请求失败把图片转成文字说明后调用纯文本模型。
+- 默认 `LOCAL_LLM_ALLOW_FALLBACK=0`。多模态调用失败时应返回明确失败并使用既有的 uncertain 安全兜底，不得静默丢图后给出确定结论。
+- `scripts/test_multimodal_transport.py` 以无网络桩测试断言实际请求模型为 `glm-4.6v`，且负载同时含文本和图片。

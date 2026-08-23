@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from product_search.config import bootstrap_local_env, get_settings
 from product_search.db import fetch_keywords, get_engine
-from product_search.models import ProductSearchInput
+from product_search.models import DEFAULT_PLATFORMS, ProductSearchInput
 from product_search.platforms import OBJECT_BASE_TERMS, derive_title_product_keywords
 from product_search.service import ProductSearchService
 
@@ -126,6 +126,7 @@ async def run_one(record: ExampleRecord, source: KeywordSource, args: argparse.N
             "record_id": record.id,
             "patent_number": record.patent_number,
             "title": record.title,
+            "analysis_session_id": payload.analysis_session_id,
             "keyword_source": source,
             "run_id": int(data.get("product_detail_search_run_id") or 0),
             "keywords": list(data.get("keywords") or []),
@@ -141,6 +142,7 @@ async def run_one(record: ExampleRecord, source: KeywordSource, args: argparse.N
         "record_id": record.id,
         "patent_number": record.patent_number,
         "title": record.title,
+        "analysis_session_id": payload.analysis_session_id,
         "keyword_source": source,
         "run_id": result.product_detail_search_run_id,
         "keywords": result.keywords,
@@ -201,6 +203,7 @@ def build_outcome(
         outcome.update(
             {
                 "run_id": int(result.get("run_id") or 0),
+                "analysis_session_id": str(result.get("analysis_session_id") or ""),
                 "keywords": list(result.get("keywords") or []),
                 "candidates": int(result.get("candidates") or 0),
                 "accepted": int(result.get("accepted") or 0),
@@ -422,7 +425,7 @@ async def main() -> int:
     parser.add_argument("--max-products", type=int, default=5)
     parser.add_argument("--request-timeout-seconds", type=int, default=None)
     parser.add_argument("--serp-url-limit", type=int, default=None)
-    parser.add_argument("--platforms", nargs="+", default=["jd", "1688"])
+    parser.add_argument("--platforms", nargs="+", default=list(DEFAULT_PLATFORMS))
     parser.add_argument("--service-url", default="", help="call a running 3-product-search HTTP service instead of direct in-process service")
     parser.add_argument("--http-timeout-seconds", type=int, default=240)
     parser.add_argument("--per-record-timeout-seconds", type=int, default=0, help="wall-clock timeout per patent record; 0 disables")

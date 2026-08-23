@@ -7,6 +7,7 @@ dependencies = [
   "fastapi>=0.121.0",
   "httpx>=0.28.0",
   "lxml>=6.0.0",
+  "playwright>=1.58.0",
   "pydantic>=2.12.0",
   "python-dotenv>=1.2.0",
   "psycopg2-binary>=2.9.10",

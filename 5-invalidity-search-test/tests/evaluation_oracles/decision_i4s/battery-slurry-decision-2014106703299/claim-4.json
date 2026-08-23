@@ -1,0 +1,13 @@
+{
+  "case_id": "battery-slurry-decision-2014106703299",
+  "claim_id": "4",
+  "decision_source": {"file_name": "无效决定（收到日：20210127）-锂离子电池隔膜的高固含量水性陶瓷浆料及其加工方法-ZL201410670329.9-专利权人：深圳星源.pdf", "pages": [7, 8], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {"publication_number": "CN103633269A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定仅因权利要求1的创造性理由不成立而概括维持权利要求2-5，未逐项映射独立权利要求4的加工步骤。"},
+    {"publication_number": "CN103915594A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未逐项映射权利要求4。"},
+    {"publication_number": "CN103396710A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未逐项映射权利要求4。"},
+    {"publication_number": "CN103618059A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未逐项映射权利要求4。"},
+    {"publication_number": "CN103647034A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未逐项映射权利要求4。"},
+    {"publication_number": "CN103915595A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未逐项映射权利要求4。"}
+  ]
+}

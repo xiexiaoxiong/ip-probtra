@@ -10,6 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from product_search.config import Settings
+from product_search.browser_fetch import fetch_with_browser
 from product_search.models import CandidateLink, FetchResult, SearchQueryPlan
 from product_search.platforms import is_detail_url, normalize_url
 from product_search.special_sources import fetch_special_product_page
@@ -20,6 +21,16 @@ def _error_message(exc: Exception) -> str:
     if message:
         return message[:500]
     return f"{type(exc).__name__}: {exc!r}"[:500]
+
+
+def _looks_blocked_browser_result(result: FetchResult) -> bool:
+    haystack = f"{result.final_url} {result.html[:5000]}".lower()
+    markers = (
+        "risk_handler", "安全验证", "验证码", "请完成验证", "滑块验证",
+        "punish", "sec.taobao.com", "login.taobao.com", "passport.jd.com",
+        "passport.suning.com", "/login.aspx", "账号登录",
+    )
+    return any(marker.lower() in haystack for marker in markers)
 
 
 def _json_or_text(response: httpx.Response) -> Any:
@@ -98,6 +109,32 @@ def parse_html_search_results(html: str, plan: SearchQueryPlan, limit: int, sour
                 title=text[:500],
                 snippet="",
                 source=source,
+                rank=len(candidates) + 1,
+            )
+        )
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def parse_suning_search_results(html: str, plan: SearchQueryPlan, limit: int) -> list[CandidateLink]:
+    soup = BeautifulSoup(html or "", "lxml")
+    candidates: list[CandidateLink] = []
+    seen: set[str] = set()
+    for anchor in soup.select('a[href*="product.suning.com/"]'):
+        href = normalize_url(str(anchor.get("href") or ""), "https://search.suning.com/")
+        if not href or href in seen or not is_detail_url(href, "suning"):
+            continue
+        seen.add(href)
+        title = " ".join(str(anchor.get("title") or anchor.get_text(" ", strip=True) or "").split())
+        candidates.append(
+            CandidateLink(
+                keyword=plan.keyword,
+                original_keyword=plan.original_keyword or plan.keyword,
+                platform="suning",
+                candidate_url=href,
+                title=title[:500],
+                source="direct_suning",
                 rank=len(candidates) + 1,
             )
         )
@@ -249,6 +286,12 @@ class BrightDataClient:
         limit: int,
         brightdata_error: str = "",
     ) -> tuple[list[CandidateLink], dict[str, Any]]:
+        marketplace_candidates: list[CandidateLink] = []
+        marketplace_meta: dict[str, Any] = {}
+        if plan.platform == "suning":
+            marketplace_candidates, marketplace_meta = await self._search_direct_suning(plan, limit)
+            if len(marketplace_candidates) >= limit:
+                return marketplace_candidates[:limit], marketplace_meta
         urls = [url for url in _build_serp_urls(plan) if "bing.com/search" in url]
         if not urls:
             query = quote_plus(plan.query)
@@ -256,7 +299,7 @@ class BrightDataClient:
         urls = urls[: max(1, max(self.settings.serp_url_limit, 12))]
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
         headers = {"User-Agent": self.settings.user_agent}
-        candidates: list[CandidateLink] = []
+        candidates: list[CandidateLink] = list(marketplace_candidates)
         last_error = ""
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
@@ -270,15 +313,42 @@ class BrightDataClient:
                     except Exception as exc:
                         last_error = _error_message(exc)
                         continue
-            return candidates[:limit], {
-                "provider": "direct_bing",
+            merged = _merge_candidate_links(marketplace_candidates, candidates)
+            return merged[:limit], {
+                "provider": "direct_suning+direct_bing" if marketplace_candidates else "direct_bing",
                 "ok": bool(candidates),
                 "status_code": 200 if candidates else 0,
                 "fallback_after_brightdata_error": brightdata_error,
                 "error": "" if candidates else last_error,
+                "marketplace_meta": marketplace_meta,
             }
         except Exception as exc:
             return [], {"provider": "direct_bing", "ok": False, "error": _error_message(exc), "fallback_after_brightdata_error": brightdata_error}
+
+    async def _search_direct_suning(
+        self,
+        plan: SearchQueryPlan,
+        limit: int,
+    ) -> tuple[list[CandidateLink], dict[str, Any]]:
+        search_url = f"https://search.suning.com/{quote_plus(plan.keyword)}/"
+        try:
+            timeout = httpx.Timeout(self.settings.request_timeout_seconds)
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=True,
+                headers={"User-Agent": self.settings.user_agent},
+            ) as client:
+                response = await client.get(search_url)
+                response.raise_for_status()
+            candidates = parse_suning_search_results(response.text, plan, limit)
+            return candidates, {
+                "provider": "direct_suning",
+                "ok": bool(candidates),
+                "status_code": response.status_code,
+                "candidate_count": len(candidates),
+            }
+        except Exception as exc:
+            return [], {"provider": "direct_suning", "ok": False, "error": _error_message(exc)}
 
     async def fetch_detail_page(self, url: str, force_render: bool = False) -> FetchResult:
         special_result = await fetch_special_product_page(url, self.settings.request_timeout_seconds, self.settings.user_agent)
@@ -302,7 +372,21 @@ class BrightDataClient:
                     raise RuntimeError("Bright Data returned empty response")
                 final_url = _extract_final_url_from_html(html) or url
                 provider = "brightdata_unlocker_render" if force_render else "brightdata_unlocker"
-                return FetchResult(ok=True, url=url, final_url=normalize_url(final_url), html=html, provider=provider)
+                brightdata_result = FetchResult(
+                    ok=True, url=url, final_url=normalize_url(final_url), html=html, provider=provider
+                )
+                if force_render and self.settings.browser_fallback_enabled:
+                    browser_result = await fetch_with_browser(url, self.settings)
+                    brightdata_result.capture_meta["local_browser_attempted"] = True
+                    if browser_result.error_message:
+                        brightdata_result.capture_meta["local_browser_error"] = browser_result.error_message
+                    browser_blocked = _looks_blocked_browser_result(browser_result)
+                    if browser_result.ok and not browser_blocked:
+                        browser_image_signals = len(re.findall(r"(?:<img|image|\.jpg|\.jpeg|\.png|\.webp)", browser_result.html, re.I))
+                        brightdata_image_signals = len(re.findall(r"(?:<img|image|\.jpg|\.jpeg|\.png|\.webp)", html, re.I))
+                        if browser_image_signals >= brightdata_image_signals:
+                            return browser_result
+                return brightdata_result
             except Exception as exc:
                 brightdata_error = _error_message(exc)
                 if self.settings.render_fallback_enabled and not force_render:
@@ -326,6 +410,19 @@ class BrightDataClient:
                 if not self.settings.allow_direct_fetch_fallback:
                     return FetchResult(ok=False, url=url, final_url=url, provider="brightdata_unlocker", error_message=_error_message(exc))
 
+        browser_attempt_meta: dict[str, Any] = {}
+        if force_render and self.settings.browser_fallback_enabled:
+            browser_result = await fetch_with_browser(url, self.settings)
+            if browser_result.ok and not _looks_blocked_browser_result(browser_result):
+                return browser_result
+            browser_attempt_meta = {
+                "local_browser_attempted": True,
+                "local_browser_rejected": bool(browser_result.ok),
+                "local_browser_final_url": browser_result.final_url,
+                "local_browser_error": browser_result.error_message,
+                "local_browser_capture": browser_result.capture_meta,
+            }
+
         if not self.settings.allow_direct_fetch_fallback:
             return FetchResult(ok=False, url=url, final_url=url, provider="none", error_message="Bright Data Unlocker 未配置且禁用了直连兜底")
 
@@ -346,6 +443,9 @@ class BrightDataClient:
             if brightdata_error:
                 result.provider = "direct_fetch_after_brightdata_error"
                 result.error_message = result.error_message or f"Bright Data fallback: {brightdata_error}"
+            elif browser_attempt_meta:
+                result.provider = "direct_fetch_after_browser_rejection"
+            result.capture_meta = browser_attempt_meta
             return result
         except Exception as exc:
             error = _error_message(exc)

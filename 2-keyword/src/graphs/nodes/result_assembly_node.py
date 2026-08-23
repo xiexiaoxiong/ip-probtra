@@ -49,7 +49,13 @@ def result_assembly_node(
             "source_location": keyword.get("combination_pattern", ""),
             "generation_method": "KEYWORD_COMBINATION",
             "confidence_score": keyword.get("confidence", 0.8),
-            "created_at": created_at
+            "created_at": created_at,
+            "query_role": keyword.get("query_role", "executable_search"),
+            "guard_status": keyword.get("guard_status", "passed"),
+            "guard_reason": keyword.get("guard_reason", "contains_product_object"),
+            "object_terms": keyword.get("object_terms", []),
+            "feature_terms": keyword.get("feature_terms", []),
+            "feature_source_tiers": keyword.get("feature_source_tiers", []),
         }
         keywords.append(keyword_item)
     

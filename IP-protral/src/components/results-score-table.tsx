@@ -24,15 +24,47 @@ export function ResultsScoreTable({ products, comparisons, sessionId }: ResultsS
   const sortedProducts = sortProductsByComparisonScore(products, comparisons);
 
   return (
-    <div className="rounded-lg border overflow-hidden bg-background">
-      <Table>
+    <div className="w-full max-w-full overflow-hidden rounded-lg border bg-background">
+      <Table className="w-full table-fixed">
+        <colgroup>
+          <col style={{ width: '38%' }} />
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '26%' }} />
+        </colgroup>
         <TableHeader>
           <TableRow className="bg-muted/40">
-            <TableHead>Product</TableHead>
-            <TableHead>品牌</TableHead>
-            <TableHead className="w-[110px]">Score</TableHead>
-            <TableHead className="w-[120px]">商品图片</TableHead>
-            <TableHead>Feature</TableHead>
+            <TableHead
+              className="whitespace-normal break-words align-top"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
+              Product
+            </TableHead>
+            <TableHead
+              className="whitespace-normal break-words align-top"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
+              品牌
+            </TableHead>
+            <TableHead
+              className="whitespace-normal break-words align-top"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
+              Score
+            </TableHead>
+            <TableHead
+              className="whitespace-normal break-words align-top"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
+              商品图片
+            </TableHead>
+            <TableHead
+              className="whitespace-normal break-words align-top"
+              style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
+              Feature
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -41,25 +73,48 @@ export function ResultsScoreTable({ products, comparisons, sessionId }: ResultsS
             const score = comparison?.productSimilarityScore ?? 0;
             return (
               <TableRow key={product.id}>
-                <TableCell>
-                  <div className="space-y-1">
+                <TableCell
+                  className="align-top whitespace-normal break-words min-w-0"
+                  style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                >
+                  <div className="space-y-1 min-w-0">
                     <div className="text-[11px] text-muted-foreground">#{index + 1}</div>
-                    <Link href={`/results/${encodeURIComponent(product.id)}?session=${encodeURIComponent(sessionId)}`} className="font-medium hover:underline">
+                    <Link
+                      href={`/results/${encodeURIComponent(product.id)}?session=${encodeURIComponent(sessionId)}`}
+                      className="font-medium hover:underline block"
+                      style={{ display: 'block', overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'normal' }}
+                    >
                       {product.name}
                     </Link>
                   </div>
                   {product.source && (
-                    <div className="text-xs text-muted-foreground mt-1">{product.source}</div>
+                    <div
+                      className="text-xs text-muted-foreground mt-1 break-all"
+                      style={{ wordBreak: 'break-all' }}
+                    >
+                      {product.source}
+                    </div>
                   )}
                 </TableCell>
-                <TableCell>{product.brand || '—'}</TableCell>
-                <TableCell>
+                <TableCell
+                  className="align-top whitespace-normal break-words"
+                  style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                >
+                  {product.brand || '—'}
+                </TableCell>
+                <TableCell
+                  className="align-top whitespace-normal break-words"
+                  style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                >
                   <span className={`font-semibold ${scoreColorClass(comparison?.productSimilarityScore ?? 0, comparison?.productScoreBand)}`}>
                     {score.toFixed(2)}
                   </span>
                 </TableCell>
-                <TableCell>
-                  <div className="h-14 w-14 overflow-hidden rounded-md border bg-muted flex items-center justify-center">
+                <TableCell
+                  className="align-top whitespace-normal break-words"
+                  style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                >
+                  <div className="flex aspect-square w-full max-w-14 items-center justify-center overflow-hidden rounded-md border bg-muted">
                     {product.imageUrl ? (
                       <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
                     ) : (
@@ -67,7 +122,10 @@ export function ResultsScoreTable({ products, comparisons, sessionId }: ResultsS
                     )}
                   </div>
                 </TableCell>
-                <TableCell>
+                <TableCell
+                  className="align-top whitespace-normal break-words"
+                  style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                >
                   <div className="flex flex-wrap gap-1">
                     {(comparison?.claimElements || []).map((element) => (
                       <span

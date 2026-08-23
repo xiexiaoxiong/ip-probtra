@@ -20,7 +20,12 @@ function sanitizeFileName(value: string): string {
 }
 
 function encodeContentDisposition(fileName: string): string {
-  return `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  const asciiFileName = fileName
+    .replace(/[^\x20-\x7e]/g, '')
+    .replace(/["\\]/g, '_')
+    .trim() || 'analysis-report.xlsx';
+
+  return `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
 export async function GET(
@@ -34,7 +39,7 @@ export async function GET(
 
   const { id } = await params;
   const session = await getSessionAsync(id);
-  if (!session) {
+  if (!session || session.analysisKind !== 'infringement') {
     return NextResponse.json({ error: '分析会话不存在' }, { status: 404 });
   }
 
@@ -42,11 +47,16 @@ export async function GET(
     return NextResponse.json({ error: '无权导出该分析报告' }, { status: 403 });
   }
 
+  const startedAt = Date.now();
   try {
     const workbook = await withPgClient((client) => buildAnalysisReportWorkbook(client, session));
     const fileBuffer = await workbook.xlsx.writeBuffer();
     const patentTitle = session.results?.patent?.title || session.patentTitle || 'analysis-report';
     const fileName = `${sanitizeFileName(patentTitle)}-${session.id}.xlsx`;
+
+    console.info(
+      `[Export ${session.id}] 报告生成完成 (${fileBuffer.byteLength} bytes, ${Date.now() - startedAt}ms)`,
+    );
 
     return new NextResponse(fileBuffer, {
       headers: {
@@ -56,6 +66,7 @@ export async function GET(
       },
     });
   } catch (error) {
+    console.error(`[Export ${session.id}] 导出失败 (${Date.now() - startedAt}ms)`, error);
     const message = error instanceof Error ? error.message : '导出报告失败';
     return NextResponse.json({ error: message }, { status: 500 });
   }

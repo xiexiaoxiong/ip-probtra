@@ -103,14 +103,197 @@ def _infer_title_from_text(text: str) -> str:
     return candidates[0][:500]
 
 
-def _extract_images(soup: BeautifulSoup, final_url: str, limit: int = 18) -> list[str]:
+def _extract_images(soup: BeautifulSoup, final_url: str, limit: int | None = None) -> list[str]:
     images: list[str] = []
     seen: set[str] = set()
+    identity_indexes: dict[str, int] = {}
 
-    def add(raw: str) -> None:
+    def full() -> bool:
+        return limit is not None and len(images) >= limit
+
+    def identity_key(normalized: str) -> str:
+        parsed = urlparse(normalized)
+        host = parsed.netloc.lower()
+        path = parsed.path
+        if "360buyimg.com" in host and "jfs/" in path:
+            path = "/jfs/" + path.split("jfs/", 1)[1]
+        elif "imgservice.suning.cn" in host and "/uimg1/b2c/image/" in path:
+            path = re.sub(r"(\.(?:jpg|jpeg|png|webp))(?:_[^/]*)$", r"\1", path, flags=re.I)
+        elif "alicdn.com" in host or "tbcdn.cn" in host:
+            path = re.sub(r"(\.(?:jpg|jpeg|png|webp))(?:_[^/]*)$", r"\1", path, flags=re.I)
+        return f"{host}{path}".lower()
+
+    def quality_hint(normalized: str) -> int:
+        lower = normalized.lower()
+        score = 0
+        if "/n0/" in lower or "/imgextra/" in lower:
+            score += 3
+        if re.search(r"\.(?:jpg|jpeg|png|webp)$", urlparse(lower).path):
+            score += 2
+        if re.search(r"(?:s\d+x\d+|_\d+x\d+|q\d+)", lower):
+            score -= 2
+        return score
+
+    def srcset_urls(raw: str) -> list[str]:
+        urls: list[str] = []
+        for part in str(raw or "").split(","):
+            url = part.strip().split(" ")[0].strip()
+            if url:
+                urls.append(url)
+        return urls
+
+    def attr_tokens(tag) -> set[str]:
+        values: list[str] = []
+        for key in ("alt", "title", "class", "id", "role", "aria-label", "width", "height", "style"):
+            value = tag.get(key)
+            if isinstance(value, list):
+                value = " ".join(str(item) for item in value)
+            if value:
+                values.append(str(value))
+        parent = getattr(tag, "parent", None)
+        if parent:
+            for key in ("class", "id", "role", "aria-label"):
+                value = parent.get(key)
+                if isinstance(value, list):
+                    value = " ".join(str(item) for item in value)
+                if value:
+                    values.append(str(value))
+        tokens = set(re.findall(r"[a-z0-9_-]+", " ".join(values).lower()))
+        components = {
+            component
+            for token in tokens
+            for component in re.split(r"[-_]", token)
+            if component
+        }
+        return tokens | components
+
+    def is_non_product_image(raw: str, normalized: str, tag=None) -> bool:
+        lower = normalized.lower()
+        if lower.startswith("data:"):
+            return True
+        if "{" in lower or "}" in lower:
+            return True
+        parsed_lower = urlparse(lower)
+        lower_path = parsed_lower.path
+        lower_file = lower_path.rsplit("/", 1)[-1]
+        blocked_url_tokens = (
+            "sprite",
+            "icon",
+            "logo",
+            "avatar",
+            "qrcode",
+            "qr-code",
+            "wechat",
+            "weixin",
+            "jcm.jd.com/pre",
+            "/etc/designs/",
+            "/footer/",
+            "/themes/default/assets/",
+            "/theme/default/assets/",
+            "/public/base/public/",
+            "/project/cmsweb/suning/public/base/",
+            "/project/pdsweb/",
+            "/pdsweb/csspc",
+            "/pds-web/project/",
+            "/uimg/cms/img/",
+            "/common/images/goods.png",
+            "about-sony-close",
+        )
+        if any(token in lower for token in blocked_url_tokens):
+            return True
+        blocked_file_prefixes = (
+            "search.",
+            "search-",
+            "search_",
+            "cart.",
+            "cart-",
+            "cart_",
+            "nav.",
+            "nav-",
+            "menu.",
+            "menu-",
+            "user.",
+            "user-",
+            "order.",
+            "order-",
+            "coupon.",
+            "coupon-",
+            "chat.",
+            "chat-",
+            "chat2.",
+            "service.",
+            "service-",
+            "snms.",
+            "snms-",
+            "blank.",
+            "blank-",
+            "blank_pic",
+            "loading.",
+            "loading-",
+            "placeholder.",
+            "placeholder-",
+            "trend.",
+            "trend-",
+        )
+        blocked_file_exact = (
+            "er.png",
+            "er.jpg",
+            "er.jpeg",
+            "er.webp",
+            "ewm.png",
+            "ewm.jpg",
+            "ewm.jpeg",
+            "ewm.webp",
+        )
+        blocked_file_substrings = (
+            "shopping-cart",
+            "kefu",
+            "nationalemblem",
+            "erweima",
+            "ewm",
+            "about-sony-close",
+            "new_people",
+            "gend-finish",
+            "return-process",
+            "tmreturn-process",
+            "juhua",
+            "item_place_holder",
+            "\u70b9\u8d5e",
+        )
+        if lower_file in blocked_file_exact:
+            return True
+        if lower_file.startswith(blocked_file_prefixes) or any(token in lower_file for token in blocked_file_substrings):
+            return True
+        if tag is None:
+            return False
+        context_tokens = attr_tokens(tag)
+        blocked_context_tokens = (
+            "logo",
+            "brand-logo",
+            "site-logo",
+            "navbar",
+            "nav-logo",
+            "avatar",
+            "qrcode",
+            "qr-code",
+            "wechat",
+            "weixin",
+            "floatingbox",
+            "coupon",
+            "order",
+            "cart",
+            "kefu",
+            "service_item",
+            "footer",
+        )
+        if any(token in context_tokens for token in blocked_context_tokens):
+            return True
+        return False
+
+    def add(raw: str, tag=None) -> bool:
         normalized = normalize_url(raw, final_url)
         if not normalized or normalized in seen:
-            return
+            return False
         lower = normalized.lower()
         parsed = urlparse(lower)
         image_hosts = (
@@ -133,28 +316,142 @@ def _extract_images(soup: BeautifulSoup, final_url: str, limit: int = 18) -> lis
         image_like = bool(re.search(r"\.(?:jpg|jpeg|png|webp|gif)(?:$|\?)", parsed.path)) or any(
             host in parsed.netloc for host in image_hosts
         ) or any(token in parsed.path for token in image_path_tokens)
-        if (
-            lower.startswith("data:")
-            or any(token in lower for token in ("sprite", "icon", "logo", "avatar", "jcm.jd.com/pre"))
-            or not image_like
-        ):
-            return
+        if is_non_product_image(raw, normalized, tag=tag) or not image_like:
+            return False
+        key = identity_key(normalized)
+        if key in identity_indexes:
+            index = identity_indexes[key]
+            if quality_hint(normalized) > quality_hint(images[index]):
+                seen.discard(images[index])
+                images[index] = normalized
+                seen.add(normalized)
+            return False
         seen.add(normalized)
+        identity_indexes[key] = len(images)
         images.append(normalized)
+        return True
 
     for value in (_meta_content(soup, "og:image", "twitter:image"),):
         if value:
             add(value)
     for img in soup.select("img"):
-        for attr in ("data-original", "_src", "data-src", "data-lazyload", "data-ks-lazyload", "data-img", "ng-src", "src"):
+        for attr in (
+            "data-original",
+            "_src",
+            "data-src",
+            "data-lazy-src",
+            "data-lazy-img",
+            "data-lazy-img-slave",
+            "data-lazyload",
+            "data-ks-lazyload",
+            "data-origin",
+            "data-url",
+            "data-thumb",
+            "data-img",
+            "data-imgurl",
+            "src-large",
+            "src-medium",
+            "data-src-large",
+            "data-zoom-image",
+            "zoom-src",
+            "ng-src",
+            "srcset",
+            "data-srcset",
+            "src",
+        ):
             raw = img.get(attr)
-            if raw:
-                add(str(raw))
-                if images and images[-1] == normalize_url(str(raw), final_url):
+            if not raw:
+                continue
+            raw_values = srcset_urls(str(raw)) if "srcset" in attr else [str(raw)]
+            added_any = False
+            for raw_value in raw_values:
+                added_any = add(raw_value, tag=img) or added_any
+                if full():
                     break
-        if len(images) >= limit:
+            if added_any:
+                break
+        if full():
             break
-    return images[:limit]
+    for source in soup.select("source"):
+        for attr in ("srcset", "data-srcset", "src"):
+            raw = source.get(attr)
+            if not raw:
+                continue
+            for raw_value in srcset_urls(str(raw)):
+                add(raw_value, tag=source)
+                if full():
+                    break
+            if full():
+                break
+        if full():
+            break
+    if not full():
+        for tag in soup.select("[style]"):
+            style = str(tag.get("style") or "")
+            for match in re.finditer(r"url\((['\"]?)(.*?)\1\)", style):
+                add(match.group(2), tag=tag)
+                if full():
+                    break
+            if full():
+                break
+    if not full() and "jd.com" in urlparse(final_url).netloc:
+        for script in soup.select("script"):
+            text = (
+                script.string or script.get_text(" ", strip=False) or ""
+            ).replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
+            if not text:
+                continue
+            for match in re.finditer(r"(?:https?:)?//img\d+\.360buyimg\.com/[^\s\"'<>\\]+?\.(?:jpg|jpeg|png|webp)", text, re.I):
+                add(match.group(0), tag=script)
+                if full():
+                    break
+            if full():
+                break
+            for match in re.finditer(r"(?<![A-Za-z0-9_/-])(jfs/[^\s\"'<>\\]+?\.(?:jpg|jpeg|png|webp))", text, re.I):
+                add(f"https://img10.360buyimg.com/n1/s720x720_{match.group(1)}", tag=script)
+                if full():
+                    break
+            if full():
+                break
+    if not full() and detect_platform(final_url) in {"taobao", "tmall", "1688"}:
+        # Alibaba pages commonly keep gallery URLs in JSON instead of rendered img nodes.
+        # URLs may carry resize suffixes or omit a conventional extension.
+        alibaba_image_re = re.compile(
+            r"((?:https?:)?//(?:[^\s\"'<>\\]*\.)?(?:alicdn\.com|tbcdn\.cn)/[^\s\"'<>\\,}\]]+)",
+            re.I,
+        )
+        for script in soup.select("script"):
+            text = (script.string or script.get_text(" ", strip=False) or "").replace("\\/", "/")
+            for match in alibaba_image_re.finditer(text):
+                add(match.group(1), tag=script)
+                if full():
+                    break
+            if full():
+                break
+    if not full():
+        generic_image_re = re.compile(
+            r"((?:https?:)?//[^\s\"'<>\\]+?\.(?:jpg|jpeg|png|webp)|"
+            r"/[^\s\"'<>\\]+?\.(?:jpg|jpeg|png|webp)|"
+            r"(?:_nuxt|assets|static|uploads|upload|images|img)/[^\s\"'<>\\]+?\.(?:jpg|jpeg|png|webp))"
+            r"(?:\?[^\s\"'<>\\]*)?",
+            re.I,
+        )
+        for script in soup.select("script"):
+            text = (
+                script.string or script.get_text(" ", strip=False) or ""
+            ).replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
+            if not text:
+                continue
+            for match in generic_image_re.finditer(text):
+                raw = match.group(0)
+                if raw.startswith(("_nuxt/", "assets/", "static/", "uploads/", "upload/", "images/", "img/")):
+                    raw = "/" + raw
+                add(raw, tag=script)
+                if full():
+                    break
+            if full():
+                break
+    return images if limit is None else images[:limit]
 
 
 def _extract_detail_text(soup: BeautifulSoup) -> str:
@@ -207,6 +504,7 @@ def _extract_price(text: str) -> str:
 
 
 def parse_product_page(html: str, requested_url: str, final_url: str) -> ParsedProductPage:
+    raw_soup = BeautifulSoup(html or "", "lxml")
     soup = BeautifulSoup(html or "", "lxml")
     for tag in soup(["script", "style", "noscript", "svg"]):
         tag.decompose()
@@ -220,7 +518,7 @@ def parse_product_page(html: str, requested_url: str, final_url: str) -> ParsedP
     if not _is_valid_product_title(title):
         title = _infer_title_from_text(combined_text) or title
     title = _clean_product_title(title)
-    images = _extract_images(soup, final_url)
+    images = _extract_images(raw_soup, final_url)
     raw_payload: dict[str, Any] = {
         "requested_url": requested_url,
         "final_url": final_url,

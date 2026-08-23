@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "pn": "US20190300001A1",
+      "patent_id": "718ead9c-4f3c-4674-8f5a-24e126827269",
+      "description": [
+        {
+          "lang": "EN",
+          "text": "<p>The sealed chamber protects the optical sensor from moisture.</p>",
+          "data_format": "original"
+        }
+      ]
+    }
+  ],
+  "status": true,
+  "error_code": 0
+}

@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withPgClient } from '@/lib/postgres';
+import { requireTestUser } from '@/lib/test-route-guard';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const unauthorized = await requireTestUser(request);
+  if (unauthorized) return unauthorized;
   const { searchParams } = request.nextUrl;
   const searchRunId = searchParams.get('search_run_id');
   const patentRecordId = searchParams.get('patent_record_id');

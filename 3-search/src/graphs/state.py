@@ -13,6 +13,7 @@ class GraphInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     input_keywords: Optional[List[str]] = Field(default=None, description="搜索关键词列表（可选，如不提供则从表格读取）")
+    input_object_terms: Optional[List[str]] = Field(default=None, description="商品客体词列表，用于结果品类兜底过滤")
 
 
 class GraphOutput(BaseModel):
@@ -34,9 +35,11 @@ class GlobalState(BaseModel):
     patent_record_id: int = Field(default=0, description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     input_keywords: Optional[List[str]] = Field(default=None, description="用户输入的关键词")
+    input_object_terms: Optional[List[str]] = Field(default=None, description="用户输入的商品客体词")
 
     # 关键词数据
     keywords: List[str] = Field(default=[], description="关键词列表")
+    object_terms: List[str] = Field(default=[], description="商品客体词列表")
 
     # Coze 搜索结果
     products: List[Dict[str, Any]] = Field(default=[], description="商品列表")
@@ -66,11 +69,13 @@ class GetKeywordsInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     input_keywords: Optional[List[str]] = Field(default=None, description="用户输入的关键词")
+    input_object_terms: Optional[List[str]] = Field(default=None, description="用户输入的商品客体词")
 
 
 class GetKeywordsOutput(BaseModel):
     """获取关键词节点的输出"""
     keywords: List[str] = Field(default=[], description="关键词列表")
+    object_terms: List[str] = Field(default=[], description="商品客体词列表")
     error_message: str = Field(default="", description="错误信息")
 
 
@@ -79,6 +84,7 @@ class CozeSearchInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     keywords: List[str] = Field(default=[], description="关键词列表")
+    object_terms: List[str] = Field(default=[], description="商品客体词列表")
     product_dataset_id: str = Field(default="", description="数据集ID")
     retrieval_start_time: str = Field(default="", description="检索开始时间")
     search_run_id: int = Field(default=0, description="商品检索运行记录ID")
@@ -140,6 +146,7 @@ class EntryInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     input_keywords: Optional[List[str]] = Field(default=None, description="搜索关键词列表")
+    input_object_terms: Optional[List[str]] = Field(default=None, description="商品客体词列表")
 
 
 class EntryOutput(BaseModel):
@@ -147,6 +154,7 @@ class EntryOutput(BaseModel):
     patent_record_id: int = Field(default=0, description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     input_keywords: Optional[List[str]] = Field(default=None, description="用户输入的关键词")
+    input_object_terms: Optional[List[str]] = Field(default=None, description="用户输入的商品客体词")
     product_dataset_id: str = Field(default="", description="数据集ID")
     retrieval_start_time: str = Field(default="", description="检索开始时间")
 
@@ -156,11 +164,13 @@ class GetKeywordsWrapperInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     input_keywords: Optional[List[str]] = Field(default=None, description="用户输入的关键词")
+    input_object_terms: Optional[List[str]] = Field(default=None, description="用户输入的商品客体词")
 
 
 class GetKeywordsWrapperOutput(BaseModel):
     """获取关键词包装节点的输出"""
     keywords: List[str] = Field(default=[], description="关键词列表")
+    object_terms: List[str] = Field(default=[], description="商品客体词列表")
     error_message: str = Field(default="", description="错误信息")
 
 
@@ -169,6 +179,7 @@ class CozeSearchWrapperInput(BaseModel):
     patent_record_id: int = Field(..., description="专利解析主记录ID")
     analysis_session_id: str = Field(default="", description="分析会话ID")
     keywords: List[str] = Field(default=[], description="关键词列表")
+    object_terms: List[str] = Field(default=[], description="商品客体词列表")
     product_dataset_id: str = Field(default="", description="数据集ID")
     retrieval_start_time: str = Field(default="", description="检索开始时间")
     search_run_id: int = Field(default=0, description="商品检索运行记录ID")

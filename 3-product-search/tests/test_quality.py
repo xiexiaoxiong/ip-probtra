@@ -1,10 +1,13 @@
 import asyncio
 
-from product_search.brightdata import BrightDataClient
+import pytest
+
+from product_search.brightdata import BrightDataClient, parse_suning_search_results
+from product_search.browser_fetch import fetch_with_browser
 from product_search.models import CandidateLink, FetchResult, ProductResult, ProductSearchInput
 from product_search.discovery import extract_detail_candidates_from_discovery_page
 from product_search.parser import parse_product_page
-from product_search.platforms import build_search_query_plans, derive_title_product_keywords, expand_ecommerce_keyword_variants, is_aggregate_url, is_detail_url, normalize_url
+from product_search.platforms import build_search_query_plans, canonicalize_product_url, derive_title_product_keywords, expand_ecommerce_keyword_variants, is_aggregate_url, is_detail_url, normalize_url
 from product_search.quality import evaluate_product_detail
 from product_search.service import ProductSearchService
 from product_search.config import Settings
@@ -77,6 +80,34 @@ def test_external_product_detail_url_filters_are_conservative():
     assert not is_detail_url("https://ylbzj.yancheng.gov.cn/module/download/downfile.jsp")
     assert not is_detail_url("https://www.baihewuhan.com/list-xiaodumao.html")
     assert normalize_url("https://") == ""
+
+
+def test_canonical_product_url_preserves_unknown_identity_params():
+    first = canonicalize_product_url(
+        "https://www.postmall.com.tw/ProductDetail.aspx?uid=123&utm_source=test"
+    )
+    second = canonicalize_product_url(
+        "https://www.postmall.com.tw/ProductDetail.aspx?uid=456&utm_source=test"
+    )
+
+    assert first.endswith("?uid=123")
+    assert second.endswith("?uid=456")
+    assert first != second
+
+    service = _make_service()
+    first_product = ProductResult(
+        platform="external_product",
+        product_name="商品一",
+        product_url="https://www.postmall.com.tw/ProductDetail.aspx?uid=123",
+        final_url="https://www.postmall.com.tw/ProductDetail.aspx?uid=123",
+    )
+    second_product = ProductResult(
+        platform="external_product",
+        product_name="商品二",
+        product_url="https://www.postmall.com.tw/ProductDetail.aspx?uid=456",
+        final_url="https://www.postmall.com.tw/ProductDetail.aspx?uid=456",
+    )
+    assert service._product_dedupe_key(first_product) != service._product_dedupe_key(second_product)
 
 
 def test_xiaomi_crowdfunding_payload_renders_real_product_page():
@@ -183,6 +214,350 @@ def test_parser_prefers_lazy_product_images_over_placeholders():
     """
     parsed = parse_product_page(html, "https://you.163.com/item/detail?id=1690003", "https://you.163.com/item/detail?id=1690003")
     assert parsed.picture[0].startswith("https://yanxuan-item.nosdn.127.net/98e71265")
+
+
+def test_parser_extracts_jd_lazy_srcset_and_background_images():
+    html = """
+    <html><head><title>穿戴音响蓝牙音箱</title></head><body>
+      <h1>穿戴音响蓝牙音箱</h1>
+      <div class="sku-image">
+        <img data-lazy-img="//img10.360buyimg.com/n1/s450x450_jfs/t1/product-main.jpg"
+             src="//misc.360buyimg.com/lib/img/e/blank.gif" />
+      </div>
+      <picture>
+        <source srcset="//img11.360buyimg.com/n0/jfs/t1/product-detail.webp 1x, //img12.360buyimg.com/n0/jfs/t1/product-detail-2.webp 2x" />
+      </picture>
+      <div class="detail-content" style="background-image:url('//img13.360buyimg.com/n0/jfs/t1/product-scene.jpg')">
+        商品详情展示佩戴、蓝牙连接、扬声器和户外使用场景。
+      </div>
+    </body></html>
+    """
+    url = "https://item.jd.com/100005207111.html"
+    parsed = parse_product_page(html, url, url)
+
+    assert "https://img10.360buyimg.com/n1/s450x450_jfs/t1/product-main.jpg" in parsed.picture
+    assert "https://img11.360buyimg.com/n0/jfs/t1/product-detail.webp" in parsed.picture
+    assert "https://img12.360buyimg.com/n0/jfs/t1/product-detail-2.webp" in parsed.picture
+    assert "https://img13.360buyimg.com/n0/jfs/t1/product-scene.jpg" in parsed.picture
+
+
+def test_parser_does_not_truncate_product_gallery_at_eighteen_images():
+    images = "".join(
+        f'<img class="product-image" src="https://cdn.example.com/product/gallery-{index}.jpg" />'
+        for index in range(1, 33)
+    )
+    html = f"""
+    <html><head><title>完整图库测试商品</title></head><body>
+      <main class="product-detail"><h1>完整图库测试商品</h1>{images}</main>
+    </body></html>
+    """
+    url = "https://example.com/products/full-gallery"
+    parsed = parse_product_page(html, url, url)
+
+    assert len(parsed.picture) == 32
+    assert parsed.picture[-1].endswith("gallery-32.jpg")
+
+
+def test_parser_extracts_taobao_script_gallery_urls():
+    html = """
+    <html><head><title>淘宝完整图库测试商品</title></head><body>
+      <main class="product-detail"><h1>淘宝完整图库测试商品</h1>
+        商品详情包含尺寸、颜色、材质、包装、使用说明、售后服务和完整的商品展示信息。
+      </main>
+      <script>
+        window.__ITEM_DATA__ = {"images":[
+          "//gw.alicdn.com/imgextra/i1/123/O1CN-main.jpg",
+          "//gw.alicdn.com/imgextra/i2/123/O1CN-side.jpg_640x640q90",
+          "//img.alicdn.com/imgextra/i3/123/O1CN-detail"
+        ]};
+      </script>
+    </body></html>
+    """
+    url = "https://item.taobao.com/item.htm?id=123456789"
+    parsed = parse_product_page(html, url, url)
+
+    assert "https://gw.alicdn.com/imgextra/i1/123/O1CN-main.jpg" in parsed.picture
+    assert "https://gw.alicdn.com/imgextra/i2/123/O1CN-side.jpg" in parsed.picture
+    assert "https://img.alicdn.com/imgextra/i3/123/O1CN-detail" in parsed.picture
+
+
+def test_incomplete_accepted_page_still_requires_render_until_browser_stable():
+    service = ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=True,
+            render_fallback_enabled=True,
+            render_retry_attempts=1,
+            user_agent="test",
+            browser_fallback_enabled=True,
+            incomplete_image_threshold=6,
+        )
+    )
+    url = "https://item.jd.com/100005207111.html"
+    html = """
+    <html><head><title>测试商品完整名称</title></head><body>
+      <main class="product-detail">
+        商品详情包含参数、材质、尺寸、功能、使用说明、包装、配送和售后服务。
+        产品支持多种使用场景，页面同时介绍安装步骤、操作方式、注意事项、保养方法、
+        规格型号、颜色选择、包装清单、质量保障、退换货规则以及生产厂商信息。
+        本页展示的是一个可直接购买的完整商品，不是搜索列表、配件页面或宣传首页。
+      </main>
+      <img src="https://img10.360buyimg.com/n1/jfs/only-one.jpg" />
+    </body></html>
+    """
+    fetch = FetchResult(ok=True, url=url, final_url=url, html=html, provider="direct_fetch")
+    parsed = parse_product_page(html, url, url)
+    decision = evaluate_product_detail(fetch, parsed)
+
+    assert decision.accepted
+    assert decision.flags["image_count"] == 1
+    assert service._should_retry_render(fetch, decision)
+
+    stable_fetch = fetch.model_copy(
+        update={
+            "provider": "local_browser_stable",
+            "capture_meta": {"stopped_because_stable": True},
+        }
+    )
+    stable_decision = evaluate_product_detail(stable_fetch, parsed)
+    assert not service._should_retry_render(stable_fetch, stable_decision)
+
+
+def test_browser_fetch_scrolls_until_lazy_images_stabilize():
+    from urllib.parse import quote
+
+    page_html = """
+    <html><head><title>Lazy gallery product</title></head><body style='height:3200px'>
+      <h1>Lazy gallery product</h1>
+      <div id='gallery'><img src='https://images.invalid/product/lazy-1.jpg'></div>
+      <script>
+        let added = false;
+        window.addEventListener('scroll', () => {
+          if (!added && window.scrollY > 500) {
+            added = true;
+            document.querySelector('#gallery').insertAdjacentHTML(
+              'beforeend', "<img src='https://images.invalid/product/lazy-2.jpg'><img src='https://images.invalid/product/lazy-3.jpg'>"
+            );
+          }
+        });
+      </script>
+    </body></html>
+    """
+    settings = Settings(
+        database_url="",
+        brightdata_api_key="",
+        brightdata_serp_zone="",
+        brightdata_unlocker_zone="",
+        brightdata_endpoint="",
+        request_timeout_seconds=5,
+        max_concurrency=1,
+        serp_url_limit=1,
+        allow_direct_fetch_fallback=True,
+        render_fallback_enabled=True,
+        render_retry_attempts=1,
+        user_agent="Mozilla/5.0 Chrome/126",
+        browser_fallback_enabled=True,
+        browser_timeout_seconds=15,
+        browser_stable_rounds=2,
+        browser_max_scroll_rounds=20,
+    )
+    result = asyncio.run(fetch_with_browser(f"data:text/html;charset=utf-8,{quote(page_html)}", settings))
+
+    if not result.ok and "browser has been closed" in result.error_message.lower():
+        pytest.skip("当前执行沙箱禁止启动本机 Chrome")
+    assert result.ok, result.error_message
+    assert result.provider == "local_browser_stable"
+    assert result.capture_meta["stopped_because_stable"] is True
+    assert result.capture_meta["image_url_count"] >= 3
+    assert "lazy-3.jpg" in result.html
+
+
+def test_parser_filters_logo_and_navigation_images_by_context():
+    html = """
+    <html><head>
+      <title>HALO 颈挂音响蓝牙音响</title>
+      <meta property="og:image" content="https://www.cleeraudio.cn/static/brand-logo.png" />
+    </head><body>
+      <header class="site-header">
+        <img class="main-logo" src="https://cdn.cleeraudio.cn/assets/cleer-mark.png" />
+      </header>
+      <main class="product-detail">
+        <h1>HALO 颈挂音响蓝牙音响</h1>
+        <img class="product-hero" src="https://cdn.cleeraudio.cn/products/halo-neck-speaker.jpg" />
+        <img alt="商品佩戴场景" src="https://cdn.cleeraudio.cn/products/halo-wearing-scene.jpg" />
+      </main>
+    </body></html>
+    """
+    url = "https://www.cleeraudio.cn/ProductDetails/18"
+    parsed = parse_product_page(html, url, url)
+
+    assert "https://cdn.cleeraudio.cn/products/halo-neck-speaker.jpg" in parsed.picture
+    assert "https://cdn.cleeraudio.cn/products/halo-wearing-scene.jpg" in parsed.picture
+    assert all("logo" not in image.lower() for image in parsed.picture)
+    assert all("cleer-mark" not in image.lower() for image in parsed.picture)
+
+
+def test_parser_extracts_product_images_from_nuxt_scripts_without_ui_assets():
+    html = """
+    <html><head>
+      <title>HALO 颈挂音响蓝牙音响</title>
+    </head><body>
+      <main class="product-detail">
+        <h1>HALO 颈挂音响蓝牙音响</h1>
+        <img src="https://www.cleeraudio.cn/_nuxt/img/search.054b125.png" />
+        <img src="https://www.cleeraudio.cn/_nuxt/img/cart.32c59b3.png" />
+        <img src="https://www.cleeraudio.cn/_nuxt/img/qrcode.9a95fa5.png" />
+      </main>
+      <script>
+        window.__NUXT__ = {
+          gallery: [
+            "/_nuxt/img/halo-neck-speaker-main.webp",
+            "_nuxt/img/halo-neck-speaker-side.jpg",
+            "https://www.cleeraudio.cn/_nuxt/img/brand-logo.png"
+          ]
+        }
+      </script>
+    </body></html>
+    """
+    url = "https://www.cleeraudio.cn/ProductDetails/18"
+    parsed = parse_product_page(html, url, url)
+
+    assert "https://www.cleeraudio.cn/_nuxt/img/halo-neck-speaker-main.webp" in parsed.picture
+    assert "https://www.cleeraudio.cn/_nuxt/img/halo-neck-speaker-side.jpg" in parsed.picture
+    assert all("search" not in image.lower() for image in parsed.picture)
+    assert all("cart" not in image.lower() for image in parsed.picture)
+    assert all("qrcode" not in image.lower() for image in parsed.picture)
+    assert all("logo" not in image.lower() for image in parsed.picture)
+
+
+def test_parser_filters_suning_layout_assets():
+    html = """
+    <html><head><title>联想无线蓝牙耳机颈挂脖运动耳机</title></head><body>
+      <main class="product-detail">
+        <h1>联想无线蓝牙耳机颈挂脖运动耳机</h1>
+        <img src="https://imgservice.suning.cn/uimg1/b2c/image/6JZmXiIrL3viHnoLyfI0iQ.jpg_800w_800h_4e" />
+        <img src="https://res.suning.cn/project/cmsWeb/suning/public/base/public/v3/images/snms.png?v=2021012601" />
+        <img src="https://res.suning.cn/project/pdsWeb/csspc2021/images/new_people.png" />
+        <img src="https://product.suning.com/pds-web/project/pds/csspc2021/images/gend-finish.gif" />
+        <img src="https://res.suning.cn/project/pdsWeb/csspc2017/images/TMreturn-process.jpg?v=2026051922" />
+        <img src="https://product.suning.com/images/blank_pic_60.png" />
+        <img src="https://product.suning.com/uimg/b2c/newcatentries/{{sku.vendorId}}-{{sku.sugGoodsCode}}_1_100x100.jpg" />
+        <img src="https://res.suning.cn/project/pdsWeb//images/trend.png" />
+      </main>
+    </body></html>
+    """
+    url = "https://product.suning.com/0070893940/11538453672.html"
+    parsed = parse_product_page(html, url, url)
+
+    assert parsed.picture == [
+        "https://imgservice.suning.cn/uimg1/b2c/image/6JZmXiIrL3viHnoLyfI0iQ.jpg_800w_800h_4e"
+    ]
+
+
+def test_direct_suning_search_extracts_unique_detail_links():
+    html = """
+    <html><body>
+      <a href="//product.suning.com/0000000000/12450943438.html" title="科沃斯扫地机器人"></a>
+      <a href="//product.suning.com/0000000000/12450943438.html">重复链接</a>
+      <a href="//product.suning.com/0070893940/11538453672.html">联想蓝牙耳机</a>
+      <a href="https://search.suning.com/test/">列表页</a>
+    </body></html>
+    """
+    plan = SearchQueryPlan(
+        keyword="扫地机器人",
+        original_keyword="扫地机器人",
+        platform="suning",
+        query="site:product.suning.com 扫地机器人",
+        serp_url="",
+    )
+
+    candidates = parse_suning_search_results(html, plan, 10)
+
+    assert [item.candidate_url for item in candidates] == [
+        "https://product.suning.com/0000000000/12450943438.html",
+        "https://product.suning.com/0070893940/11538453672.html",
+    ]
+
+
+def test_parser_filters_footer_qr_images_by_url_path():
+    html = """
+    <html><head><title>AW86927FCR 有刷直流电机驱动芯片</title></head><body>
+      <main class="product-detail">
+        <h1>AW86927FCR 有刷直流电机驱动芯片</h1>
+        <img src="https://static.szlcsc.com/upload/public/product/source/20240612/AW86927FCR.jpg" />
+      </main>
+      <footer>
+        <img src="https://static.szlcsc.com/ecp/assets/newWeb/footer/gh.png" />
+      </footer>
+    </body></html>
+    """
+    url = "https://item.szlcsc.com/5787307.html"
+    parsed = parse_product_page(html, url, url)
+
+    assert parsed.picture == ["https://static.szlcsc.com/upload/public/product/source/20240612/AW86927FCR.jpg"]
+
+
+def test_parser_filters_theme_qr_assets():
+    html = """
+    <html><head><title>输液接头消毒帽</title></head><body>
+      <main class="product-detail">
+        <h1>输液接头消毒帽</h1>
+        <img src="https://www.andemed.com/upload/storage/35df6aef5c93a4f06cd006b56acc6580.jpg" />
+        <img src="https://www.andemed.com/themes/default/assets/img/d12.jpg" />
+        <img src="https://www.andemed.com/themes/default/assets/img/er.png" />
+      </main>
+    </body></html>
+    """
+    url = "https://www.andemed.com/product/disinfecting-cap"
+    parsed = parse_product_page(html, url, url)
+
+    assert parsed.picture == [
+        "https://www.andemed.com/upload/storage/35df6aef5c93a4f06cd006b56acc6580.jpg"
+    ]
+
+
+def test_parser_does_not_treat_border_class_or_style_as_order_context():
+    html = """
+    <html><head><title>边框展示的商品图片</title></head><body>
+      <main class="product-detail border-card">
+        <h1>边框展示的商品图片</h1>
+        <img class="product-image border" style="border: 1px solid #ddd"
+             src="https://cdn.example.com/products/main.jpg" />
+      </main>
+    </body></html>
+    """
+    url = "https://example.com/products/123"
+    parsed = parse_product_page(html, url, url)
+
+    assert parsed.picture == ["https://cdn.example.com/products/main.jpg"]
+
+
+def test_historical_fallback_rejects_obvious_placeholder_titles():
+    service = _make_service()
+
+    assert service._is_obvious_invalid_historical_product(
+        ProductResult(
+            platform="external_product",
+            product_name="产品找不到？ 直接发需求试试！",
+            product_url="https://www.iotku.com/Product/862349076807548928.html",
+            final_url="https://www.iotku.com/Product/862349076807548928.html",
+        )
+    )
+    assert service._is_obvious_invalid_historical_product(
+        ProductResult(
+            platform="external_product",
+            product_name="Amazon.com",
+            product_url="https://www.amazon.com/example/dp/B000000000",
+            final_url="https://www.amazon.com/example/dp/B000000000",
+        )
+    )
 
 
 def test_quality_rejects_captcha_page():
@@ -1410,3 +1785,266 @@ def test_service_uses_historical_products_when_live_search_has_no_accepted_resul
     assert output.products[0].product_name == "石头扫地机器人扫拖一体 G30"
     assert output.candidates_preview[-1].status == "accepted"
     assert output.candidates_preview[-1].raw_payload["historical_fallback"] is True
+
+
+def test_historical_fallback_does_not_reuse_product_for_unrelated_keyword(monkeypatch):
+    fallback = ProductResult(
+        platform="jd",
+        product_name="儿童自律时间管理翻转电子计时器",
+        product_url="https://item.jd.com/100080783793.html",
+        final_url="https://item.jd.com/100080783793.html",
+        description="电子倒计时器，支持翻转计时、时间提醒、学习管理和静音模式。" * 8,
+        picture=["https://img11.360buyimg.com/n1/timer.jpg"],
+        matched_keywords=["多边形计时器"],
+        quality_score=85,
+        quality_flags={"historical_fallback": True},
+    )
+
+    class FakeClient:
+        async def search(self, _plan, _limit):
+            return [], {"provider": "direct_bing", "ok": False}
+
+    monkeypatch.setattr("product_search.service.fetch_recent_products_for_record", lambda _record_id, _limit: [fallback])
+    service = _make_service()
+    service.client = FakeClient()
+    payload = ProductSearchInput(
+        patent_record_id=99,
+        input_keywords=["扫地机器人"],
+        platforms=["jd"],
+        max_products=1,
+        persist=False,
+    )
+
+    output = asyncio.run(service.run(payload))
+
+    assert output.accepted_products_count == 0
+    assert output.products == []
+
+
+def test_refresh_historical_products_skips_stale_jd_one_image_after_risk_redirect():
+    fallback = ProductResult(
+        platform="jd",
+        product_name="奥粘 颈挂蓝牙音箱",
+        product_url="https://item.jd.com/10166086752695.html",
+        final_url="https://item.jd.com/10166086752695.html",
+        picture=["https://img10.360buyimg.com/n1/s720x720_jfs/t1/main.jpg"],
+        matched_keywords=["颈挂蓝牙音箱"],
+        quality_score=85,
+        quality_flags={"historical_fallback": True},
+    )
+
+    class FakeClient:
+        async def fetch_detail_page(self, _url):
+            return FetchResult(
+                ok=True,
+                url="https://item.jd.com/10166086752695.html",
+                final_url="https://cfe.m.jd.com/privatedomain/risk_handler/03101900/?returnurl=https%3A%2F%2Fitem.jd.com%2F10166086752695.html",
+                html="<html><title>京东验证</title></html>",
+                provider="direct_fetch",
+            )
+
+    service = ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    service.client = FakeClient()
+
+    refreshed = asyncio.run(service._refresh_historical_products([fallback]))
+
+    assert refreshed == []
+
+
+def test_refresh_historical_products_skips_aggregate_external_history():
+    fallback = ProductResult(
+        platform="external_product",
+        product_name="工商业-深圳龙电埃瑞斯新能源有限公司",
+        product_url="https://www.areswatt.com/cn/product/c-i/",
+        final_url="https://www.areswatt.com/cn/product/c-i/",
+        picture=["https://www.areswatt.com/cn/category.jpg"],
+        matched_keywords=["移动式充电站"],
+        quality_score=85,
+        quality_flags={"historical_fallback": True},
+    )
+
+    class FakeClient:
+        async def fetch_detail_page(self, _url):
+            raise AssertionError("aggregate historical URLs should be skipped before refresh")
+
+    service = ProductSearchService(
+        Settings(
+            database_url="postgresql://unused",
+            brightdata_api_key="",
+            brightdata_serp_zone="",
+            brightdata_unlocker_zone="",
+            brightdata_endpoint="https://api.brightdata.com/request",
+            request_timeout_seconds=1,
+            max_concurrency=1,
+            serp_url_limit=1,
+            allow_direct_fetch_fallback=False,
+            render_fallback_enabled=False,
+            render_retry_attempts=0,
+            user_agent="test",
+        )
+    )
+    service.client = FakeClient()
+
+    refreshed = asyncio.run(service._refresh_historical_products([fallback]))
+
+    assert refreshed == []
+
+
+def test_refresh_historical_products_rejects_http_200_empty_shell():
+    fallback = ProductResult(
+        platform="external_product",
+        product_name="历史商品名称",
+        product_url="https://example.com/products/123",
+        final_url="https://example.com/products/123",
+        description="历史商品详情" * 30,
+        picture=["https://example.com/products/old.jpg"],
+        quality_score=90,
+    )
+
+    class FakeClient:
+        async def fetch_detail_page(self, url):
+            return FetchResult(
+                ok=True,
+                url=url,
+                final_url=url,
+                html="<html><head><title>页面加载中</title></head><body></body></html>",
+                provider="direct_fetch",
+            )
+
+    service = _make_service()
+    service.client = FakeClient()
+
+    refreshed = asyncio.run(service._refresh_historical_products([fallback]))
+
+    assert refreshed == []
+
+
+def test_historical_refresh_is_limited_and_bounded_concurrent():
+    active = 0
+    peak_active = 0
+    calls = 0
+
+    products = [
+        ProductResult(
+            platform="external_product",
+            product_name=f"历史商品 {index}",
+            product_url=f"https://example.com/products/{index}",
+            final_url=f"https://example.com/products/{index}",
+            description="历史商品详情" * 30,
+            picture=[f"https://example.com/products/{index}.jpg"],
+            quality_score=80,
+        )
+        for index in range(20)
+    ]
+
+    class FakeClient:
+        async def fetch_detail_page(self, _url):
+            nonlocal active, peak_active, calls
+            calls += 1
+            active += 1
+            peak_active = max(peak_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            raise RuntimeError("temporary fetch failure")
+
+    service = _make_service()
+    service.client = FakeClient()
+
+    refreshed = asyncio.run(service._refresh_historical_products(products, max_products=20))
+
+    assert calls == service.settings.historical_refresh_limit == 8
+    assert 1 < peak_active <= service.settings.historical_refresh_concurrency
+    assert len(refreshed) == 8
+
+
+def test_historical_fallback_prefers_older_rich_product_over_recent_stale_jd(monkeypatch):
+    stale_products = [
+        ProductResult(
+            platform="jd",
+            product_name=f"失效京东计时器 {index}",
+            product_url=f"https://item.jd.com/10000000000{index}.html",
+            final_url=f"https://item.jd.com/10000000000{index}.html",
+            picture=[f"https://img10.360buyimg.com/n1/stale-{index}.jpg"],
+            matched_keywords=["立方计时器"],
+            quality_score=85,
+            quality_flags={"historical_product_row_id": 100 + index},
+        )
+        for index in range(3)
+    ]
+    rich_product = ProductResult(
+        platform="external_product",
+        product_name="Kitchen Cube Timer",
+        product_url="https://www.amazon.com/LZTGFT-Kitchen-15-20-30-60-Management-Exercise/dp/B09BMQFZS5",
+        final_url="https://www.amazon.com/LZTGFT-Kitchen-15-20-30-60-Management-Exercise/dp/B09BMQFZS5",
+        picture=[f"https://m.media-amazon.com/images/I/timer-{index}.jpg" for index in range(14)],
+        matched_keywords=["立方计时器"],
+        description="Kitchen cube timer with gravity sensor.",
+        quality_score=90,
+        quality_flags={"historical_product_row_id": 10},
+    )
+
+    class FakeClient:
+        async def search(self, _plan, _limit):
+            return [], {"provider": "direct_bing", "ok": False}
+
+        async def fetch_detail_page(self, url):
+            if "item.jd.com" in url:
+                return FetchResult(
+                    ok=True,
+                    url=url,
+                    final_url="https://cfe.m.jd.com/privatedomain/risk_handler/03101900/",
+                    html="<html><title>京东验证</title></html>",
+                    provider="direct_fetch",
+                )
+            return FetchResult(
+                ok=True,
+                url=url,
+                final_url=url,
+                html="""
+                <html><head>
+                  <title>Kitchen Cube Timer</title>
+                  <meta property="og:image" content="https://m.media-amazon.com/images/I/timer-main.jpg" />
+                  <meta name="description" content="Kitchen cube timer with gravity sensor and flip countdown modes." />
+                </head><body>
+                  <h1>Kitchen Cube Timer</h1>
+                  <div id="feature-bullets">15-20-30-60 minute cube timer for kitchen, classroom and exercise.</div>
+                  <img src="https://m.media-amazon.com/images/I/timer-detail.jpg" />
+                </body></html>
+                """,
+                provider="direct_fetch",
+            )
+
+    monkeypatch.setattr(
+        "product_search.service.fetch_recent_products_for_record",
+        lambda _record_id, _limit: stale_products + [rich_product],
+    )
+    service = _make_service()
+    service.client = FakeClient()
+    payload = ProductSearchInput(
+        patent_record_id=99,
+        input_keywords=["立方计时器"],
+        platforms=["jd"],
+        max_products=1,
+        persist=False,
+    )
+
+    output = asyncio.run(service.run(payload))
+
+    assert output.accepted_products_count == 1
+    assert output.products[0].product_name == "Kitchen Cube Timer"
+    assert output.products[0].final_url == rich_product.final_url

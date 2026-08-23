@@ -1,0 +1,71 @@
+{
+  "case_id": "gas-stove-decision-2016110150593",
+  "comparison_reasoning_imported": false,
+  "conclusions_imported": false,
+  "documents": [
+    {
+      "byte_size": 441807,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-01",
+      "file_name": "source_documents/CN2519162Y.pdf",
+      "page_count": 11,
+      "publication_date": "2002-10-30",
+      "publication_number": "CN2519162Y",
+      "sha256": "57ede6f3ebf2df562fc8e8c58647cd992152357cd42906470fa82dce295f23a2",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/f7/15/9d/e12f1297e35101/CN2519162Y.pdf",
+      "text_char_count": 0,
+      "title": "Gas furnace switch timing device that can be assembled by itself"
+    },
+    {
+      "byte_size": 749780,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-02",
+      "file_name": "source_documents/CN106091032A.pdf",
+      "page_count": 12,
+      "publication_date": "2016-11-09",
+      "publication_number": "CN106091032A",
+      "sha256": "879b12c239051689c1cdffa78cfd6c29e5c8c9a9c844131e285609b88a3f58cb",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/106091032/A/fullimage?Range=1-12",
+      "text_char_count": 0,
+      "title": "Gas stove switch capable of adjusting in multiple sections"
+    },
+    {
+      "byte_size": 2901260,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-03",
+      "file_name": "source_documents/CN104508377A.pdf",
+      "page_count": 53,
+      "publication_date": "2015-04-08",
+      "publication_number": "CN104508377A",
+      "sha256": "35dc4a6c08a65e4133dd5e03a7c85183dec55105a7b1053acb8749b3dafa13d2",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/104508377/A/fullimage?Range=1-53",
+      "text_char_count": 0,
+      "title": "Control device for gas taps"
+    }
+  ],
+  "fixture_version": "decision-benchmark-source-v1",
+  "non_patent_documents": [],
+  "runtime_visibility": "source_inputs_only",
+  "target": {
+    "application_number": "201611015059.3",
+    "publication_number": "CN106338092B",
+    "title": "一种燃气灶调节装置及燃气灶"
+  },
+  "target_document": {
+    "byte_size": 870431,
+    "decision_date_qualified": false,
+    "evidence_label": "target",
+    "file_name": "target_document/CN106338092B.pdf",
+    "page_count": 16,
+    "publication_date": "2019-09-03",
+    "publication_number": "CN106338092B",
+    "sha256": "0310b1052947f7dc504d15ee945e05835757fb910fb87cf8411eb775869af1f3",
+    "source_provider": "google_patents_pdf",
+    "source_url": "https://patentimages.storage.googleapis.com/2e/eb/aa/096fcefd966a13/CN106338092B.pdf",
+    "text_char_count": 12061,
+    "title": "A kind of gas-cooker regulating device and gas-cooker"
+  }
+}

@@ -26,7 +26,7 @@ export async function POST(
   const { id } = await params;
   const session = await getSessionAsync(id);
 
-  if (!session) {
+  if (!session || session.analysisKind !== 'infringement') {
     return NextResponse.json({ error: '分析会话不存在' }, { status: 404 });
   }
 

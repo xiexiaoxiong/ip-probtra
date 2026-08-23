@@ -1,0 +1,135 @@
+{
+  "closest_document_id": "CN216649931U",
+  "feature_groups": [
+    {
+      "feature_group_id": "G01",
+      "feature_ids": ["1-f-7aa8b300feca"],
+      "feature_texts": ["耳机本体对应喇叭设置有出音孔"],
+      "objective_technical_problem": "使喇叭产生的声音能够由耳机本体向外传播",
+      "d1_teaching": {
+        "status": "not_supported",
+        "evidence_quote": "",
+        "evidence_location": "",
+        "reasoning": "D1冻结全文未直接记载该出音孔，仍保持为区别特征。",
+        "confidence": 0.92
+      },
+      "d1_teaching_path_complete": false,
+      "routine_means": {
+        "status": "preliminary_candidate",
+        "evidence_quote": "",
+        "evidence_location": "",
+        "reasoning": "在对应发声器件的位置设置供声音传出的孔属于耳机壳体的惯用布置候选；正式引用前仅需补充公知常识证据，不应重复检索同一结构。",
+        "confidence": 0.88
+      },
+      "modification_motivation": {
+        "status": "supported",
+        "evidence_quote": "",
+        "evidence_location": "基于发声器件向外传声的直接功能需要",
+        "reasoning": "技术人员为使喇叭声音输出至耳道，有直接动机在对应位置形成出音通道。",
+        "confidence": 0.9
+      },
+      "teaching_away": {
+        "status": "absent",
+        "evidence_quote": "",
+        "evidence_location": "D1全文复核",
+        "reasoning": "未见D1要求封闭喇叭对应位置或排斥声音输出孔。",
+        "confidence": 0.82
+      },
+      "technical_effect": {
+        "status": "predictable",
+        "evidence_quote": "",
+        "evidence_location": "结构与功能直接对应",
+        "reasoning": "对应喇叭开孔所产生的传声效果是该结构的通常、可预期结果。",
+        "confidence": 0.9
+      },
+      "modification_path": "在耳机本体上与喇叭相对的位置设置声音输出孔。",
+      "search_route": "search_common_knowledge_evidence",
+      "ordinary_structural_search_required": false,
+      "common_knowledge_confirmation_required": true,
+      "evidence_complete": false,
+      "lawyer_confirmation_required": true,
+      "reasoning": "该特征作为D1区别特征保留，但下一步只补检其属于惯用手段的可引用依据。"
+    },
+    {
+      "feature_group_id": "G02",
+      "feature_ids": ["1-f-2950ea34063b", "1-f-83716834f960"],
+      "feature_texts": [
+        "套圈上沿套圈延伸方向间距设置有若干个定位卡槽",
+        "耳机本体内于圆形凸台的一侧设置有和定位卡槽适配的定位卡凸"
+      ],
+      "objective_technical_problem": "使耳机本体相对耳挂转动后能够实现多角度、多档位定位",
+      "d1_teaching": {
+        "status": "supported",
+        "evidence_quote": "卡紧组件包括多个卡槽71和用于卡入卡槽71中的弹性卡接部72",
+        "evidence_location": "CN216649931U说明书[0031]；结合[0021]的耳机本体相对耳挂转动关系",
+        "reasoning": "D1明确以多个卡槽和卡入卡槽的弹性卡接部实现耳机本体与环形转体之间的转动定位，已经给出多角度、多档位调节方向的技术启示。",
+        "confidence": 0.97
+      },
+      "d1_teaching_path_complete": false,
+      "routine_means": {
+        "status": "preliminary_candidate",
+        "evidence_quote": "",
+        "evidence_location": "",
+        "reasoning": "用定位卡槽与定位卡凸配合实现两个部件的多角度、多档位定位属于常见机械定位结构候选；正式引用前需补公知常识证据。",
+        "confidence": 0.9
+      },
+      "modification_motivation": {
+        "status": "supported",
+        "evidence_quote": "耳机本体1与环形转体21之间设置有卡紧组件用于实现耳机本体1与环形转体21之间转动的定位",
+        "evidence_location": "CN216649931U说明书[0031]",
+        "reasoning": "D1已经要求在相对转动的耳机本体与耳挂环形转体之间实现转动定位，技术人员有动机采用惯用的卡槽—卡凸结构并布置在两侧固定结构件上。",
+        "confidence": 0.96
+      },
+      "teaching_away": {
+        "status": "absent",
+        "evidence_quote": "卡紧组件可以有多种设置形式",
+        "evidence_location": "CN216649931U说明书[0031]",
+        "reasoning": "D1允许卡紧组件采用多种形式，并未排斥卡槽与卡凸的替换或具体布置。",
+        "confidence": 0.93
+      },
+      "technical_effect": {
+        "status": "predictable",
+        "evidence_quote": "卡紧组件产生的阻尼能够使耳机本体1与耳挂2之间的相对位置关系保持稳定",
+        "evidence_location": "CN216649931U说明书[0031]",
+        "reasoning": "把D1的卡槽和弹性卡接部具体化为定位卡槽与定位卡凸，所得多档定位及保持相对位置的效果可以预期。",
+        "confidence": 0.94
+      },
+      "modification_path": "将多个定位卡槽设置在耳挂套圈上，将适配定位卡凸设置在与耳机本体固定的圆形凸台一侧，使两者在相对转动时逐档卡合定位。",
+      "search_route": "search_common_knowledge_evidence",
+      "ordinary_structural_search_required": false,
+      "common_knowledge_confirmation_required": true,
+      "evidence_complete": false,
+      "lawyer_confirmation_required": true,
+      "reasoning": "D1已经给出转动定位和卡槽—卡接部启示；下一步只补强卡槽—卡凸属于公知惯用定位结构的可引用证据。"
+    }
+  ],
+  "resolved_feature_ids": [],
+  "unresolved_feature_ids": [
+    "1-f-7aa8b300feca",
+    "1-f-2950ea34063b",
+    "1-f-83716834f960"
+  ],
+  "search_targets": [
+    {
+      "feature_group_id": "G01",
+      "feature_ids": ["1-f-7aa8b300feca"],
+      "route": "search_common_knowledge_evidence",
+      "target_gap_type": "evidence_gap",
+      "search_anchor": "耳机 喇叭 对应 出音孔 惯用结构 教科书 手册",
+      "rationale": "仅补充出音孔属于惯用传声结构的可引用公知常识证据。"
+    },
+    {
+      "feature_group_id": "G02",
+      "feature_ids": ["1-f-2950ea34063b", "1-f-83716834f960"],
+      "route": "search_common_knowledge_evidence",
+      "target_gap_type": "evidence_gap",
+      "search_anchor": "定位卡槽 定位卡凸 多角度 多档位 定位 公知常识",
+      "rationale": "仅补充卡槽—卡凸用于多档定位属于惯用机械手段的可引用证据。"
+    }
+  ],
+  "ordinary_structural_search_required": false,
+  "evidence_complete": false,
+  "model": "five-case-source-review-r1",
+  "used_target_images": 1,
+  "used_document_images": 2
+}

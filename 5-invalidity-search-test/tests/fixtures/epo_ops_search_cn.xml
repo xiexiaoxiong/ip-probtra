@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic CN publication-window fixture used to test local filing-date filtering. -->
+<ops:world-patent-data
+    xmlns:ops="http://ops.epo.org"
+    xmlns="http://www.epo.org/exchange">
+  <ops:biblio-search total-result-count="3">
+    <ops:query syntax="CQL">ta all "robot cleaner lifting pad" and pn=CN and pd &gt; 20200615 and pd &lt; 20210601</ops:query>
+    <ops:range begin="1" end="3"/>
+    <ops:search-result>
+      <exchange-documents>
+        <exchange-document system="ops.epo.org" family-id="fixture-family-cn-early" country="CN" doc-number="111234567" kind="A">
+          <bibliographic-data>
+            <publication-reference>
+              <document-id document-id-type="docdb">
+                <country>CN</country><doc-number>111234567</doc-number><kind>A</kind><date>20201201</date>
+              </document-id>
+            </publication-reference>
+            <application-reference>
+              <document-id document-id-type="docdb">
+                <country>CN</country><doc-number>201911234567</doc-number><kind>A</kind><date>20191220</date>
+              </document-id>
+            </application-reference>
+            <priority-claims>
+              <priority-claim sequence="1" kind="national">
+                <document-id document-id-type="docdb">
+                  <country>CN</country><doc-number>201911234567</doc-number><kind>A</kind><date>20191220</date>
+                </document-id>
+              </priority-claim>
+            </priority-claims>
+            <invention-title lang="zh">具有升降清洁垫的清洁机器人</invention-title>
+            <invention-title lang="en">Cleaning robot having a lifting cleaning pad</invention-title>
+          </bibliographic-data>
+          <abstract lang="en"><p>The cleaning pad is lifted by an actuator controlled by a floor sensor.</p></abstract>
+        </exchange-document>
+
+        <exchange-document system="ops.epo.org" family-id="fixture-family-cn-late" country="CN" doc-number="111999999" kind="A">
+          <bibliographic-data>
+            <publication-reference>
+              <document-id document-id-type="docdb">
+                <country>CN</country><doc-number>111999999</doc-number><kind>A</kind><date>20210110</date>
+              </document-id>
+            </publication-reference>
+            <application-reference>
+              <document-id document-id-type="docdb">
+                <country>CN</country><doc-number>202011999999</doc-number><kind>A</kind><date>20200801</date>
+              </document-id>
+            </application-reference>
+            <priority-claims>
+              <priority-claim sequence="1" kind="national">
+                <document-id document-id-type="docdb">
+                  <country>CN</country><doc-number>202011999999</doc-number><kind>A</kind><date>20200801</date>
+                </document-id>
+              </priority-claim>
+            </priority-claims>
+            <invention-title lang="en">Late-filed cleaning robot fixture</invention-title>
+          </bibliographic-data>
+        </exchange-document>
+
+        <exchange-document system="ops.epo.org" family-id="fixture-family-cn-unknown" country="CN" doc-number="111888888" kind="A">
+          <bibliographic-data>
+            <publication-reference>
+              <document-id document-id-type="docdb">
+                <country>CN</country><doc-number>111888888</doc-number><kind>A</kind><date>20210201</date>
+              </document-id>
+            </publication-reference>
+            <invention-title lang="en">Cleaning robot with filing date pending verification</invention-title>
+          </bibliographic-data>
+        </exchange-document>
+      </exchange-documents>
+    </ops:search-result>
+  </ops:biblio-search>
+</ops:world-patent-data>

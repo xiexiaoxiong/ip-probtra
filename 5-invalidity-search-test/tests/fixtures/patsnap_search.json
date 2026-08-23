@@ -1,0 +1,22 @@
+{
+  "data": {
+    "results": [
+      {
+        "pn": "US20190300001A1",
+        "apdt": 20180102,
+        "apno": "US16/000001",
+        "pbdt": 20191231,
+        "title": "Optical sensor with a sealed switch chamber",
+        "inventor": "ALICE EXAMPLE | BOB EXAMPLE",
+        "authority": "US",
+        "patent_id": "718ead9c-4f3c-4674-8f5a-24e126827269",
+        "current_assignee": "EXAMPLE LABS INC",
+        "original_assignee": "EXAMPLE LABS INC"
+      }
+    ],
+    "result_count": 1,
+    "total_search_result_count": 42
+  },
+  "status": true,
+  "error_code": 0
+}

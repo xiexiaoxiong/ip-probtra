@@ -73,10 +73,9 @@ def resolve_local_model_alias(model_name: Optional[str]) -> str:
     import os
 
     requested = str(model_name or "").strip()
-    # 使用 BigModel 可直接调用的稳定模型作为默认值，避免别名落到无效模型名。
-    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4-air-250414").strip() or "glm-4-air-250414"
-    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4-air-250414").strip() or default_model
-    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4v-plus-0111").strip() or default_model
+    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.6v").strip() or "glm-4.6v"
+    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.6v").strip() or default_model
+    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.6v").strip() or default_model
 
     if not requested:
         return default_model

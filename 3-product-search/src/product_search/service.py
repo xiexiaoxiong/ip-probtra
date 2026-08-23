@@ -20,13 +20,16 @@ from product_search.discovery import extract_detail_candidates_from_discovery_pa
 from product_search.models import (
     CandidateDiagnostic,
     CandidateLink,
+    ParsedProductPage,
     ProductResult,
     ProductSearchInput,
     ProductSearchOutput,
+    QualityDecision,
 )
 from product_search.parser import parse_product_page
 from product_search.platforms import (
     build_search_query_plans,
+    canonicalize_product_url,
     dedupe_candidate_links,
     detect_platform,
     is_aggregate_url,
@@ -469,7 +472,21 @@ class ProductSearchService:
             products, detail_diagnostics = await self._fetch_and_filter_candidates(payload, detail_candidates)
             fallback_diagnostics: list[CandidateDiagnostic] = []
             if not products:
-                products = fetch_recent_products_for_record(payload.patent_record_id, payload.max_products)
+                refresh_limit = min(payload.max_products, self.settings.historical_refresh_limit)
+                historical_products = fetch_recent_products_for_record(
+                    payload.patent_record_id,
+                    max(refresh_limit * 3, refresh_limit),
+                )
+                historical_products = self._filter_historical_products_by_keywords(
+                    historical_products, keywords
+                )
+                historical_products = self._rank_historical_fallback_products(historical_products)
+                products = await self._refresh_historical_products(
+                    historical_products[:refresh_limit],
+                    max_products=refresh_limit,
+                )
+                products = self._filter_historical_products_by_keywords(products, keywords)
+                products = self._rank_historical_fallback_products(products)
                 if products:
                     fallback_diagnostics.append(
                         CandidateDiagnostic(
@@ -488,6 +505,7 @@ class ProductSearchService:
                         )
                     )
             diagnostics = search_diagnostics + candidate_filter_diagnostics + detail_diagnostics + fallback_diagnostics
+            products = self._dedupe_products(products)
             accepted = products[: payload.max_products]
             rejected_count = sum(1 for item in diagnostics if item.status != "accepted")
 
@@ -773,17 +791,45 @@ class ProductSearchService:
             best_fetch = fetch
             best_parsed = parsed
             best_decision = decision
+            render_attempts: list[dict[str, object]] = []
             for _attempt in range(self.settings.render_retry_attempts + 1):
                 if not self._should_retry_render(best_fetch, best_decision):
                     break
                 render_fetch = await self.client.fetch_detail_page(candidate.candidate_url, force_render=True)
                 render_parsed = parse_product_page(render_fetch.html, candidate.candidate_url, render_fetch.final_url)
                 render_decision = evaluate_product_detail(render_fetch, render_parsed)
-                if render_decision.score >= best_decision.score:
+                render_attempts.append(
+                    {
+                        "provider": render_fetch.provider,
+                        "final_url": render_fetch.final_url,
+                        "ok": render_fetch.ok,
+                        "image_count": len(render_parsed.picture),
+                        "quality_score": render_decision.score,
+                        "accepted": render_decision.accepted,
+                        "capture_meta": render_fetch.capture_meta,
+                        "error_message": render_fetch.error_message,
+                    }
+                )
+                render_rank = (
+                    1 if render_decision.accepted else 0,
+                    len(render_parsed.picture),
+                    render_decision.score,
+                    len(render_parsed.description),
+                )
+                best_rank = (
+                    1 if best_decision.accepted else 0,
+                    len(best_parsed.picture),
+                    best_decision.score,
+                    len(best_parsed.description),
+                )
+                if render_rank > best_rank:
                     best_fetch = render_fetch
                     best_parsed = render_parsed
                     best_decision = render_decision
-                if render_decision.accepted:
+                if render_fetch.provider == "local_browser_stable" or (
+                    render_decision.accepted
+                    and len(render_parsed.picture) >= self.settings.incomplete_image_threshold
+                ):
                     break
                 await asyncio.sleep(0.8)
             fetch = best_fetch
@@ -809,13 +855,14 @@ class ProductSearchService:
                         "candidate": candidate.model_dump(),
                         "fetch": fetch.model_dump(exclude={"html"}),
                         "quality": decision.model_dump(),
+                        "render_attempts": render_attempts,
                     },
                 )
             )
-            if not decision.accepted or final_url in accepted_by_url:
+            if not decision.accepted:
                 return
 
-            accepted_by_url[final_url] = ProductResult(
+            product = ProductResult(
                 product_id=parsed.product_id,
                 platform=parsed.platform or candidate.platform,
                 product_name=parsed.product_name,
@@ -836,8 +883,14 @@ class ProductSearchService:
                     "fetch_provider": fetch.provider,
                     "page": parsed.raw_payload,
                     "quality": decision.model_dump(),
+                    "render_attempts": render_attempts,
                 },
             )
+            product_key = self._product_dedupe_key(product) or final_url
+            if product_key in accepted_by_url:
+                accepted_by_url[product_key] = self._merge_duplicate_products(accepted_by_url[product_key], product)
+                return
+            accepted_by_url[product_key] = product
 
         for group in self._candidate_fetch_groups(candidates):
             if len(accepted_by_url) >= payload.max_products:
@@ -899,6 +952,443 @@ class ProductSearchService:
 
         return list(accepted_by_url.values()), diagnostics
 
+    def _rank_historical_fallback_products(self, products: list[ProductResult]) -> list[ProductResult]:
+        return sorted(products, key=self._historical_fallback_rank_key, reverse=True)
+
+    def _filter_historical_products_by_keywords(
+        self,
+        products: list[ProductResult],
+        keywords: list[str],
+    ) -> list[ProductResult]:
+        matched_products: list[ProductResult] = []
+        for product in products:
+            prior_keywords = {
+                _normalize_relevance_text(keyword)
+                for keyword in product.matched_keywords
+                if _normalize_relevance_text(keyword)
+            }
+            parsed = ParsedProductPage(
+                product_id=product.product_id,
+                platform=product.platform,
+                product_name=product.product_name,
+                product_url=product.product_url,
+                final_url=product.final_url,
+                description=product.description,
+                detail_text=product.detail_text,
+                picture=product.picture,
+            )
+            matched_keywords: list[str] = []
+            for keyword in keywords:
+                if _normalize_relevance_text(keyword) in prior_keywords:
+                    matched_keywords.append(keyword)
+                    continue
+                decision = QualityDecision(
+                    accepted=True,
+                    score=product.quality_score,
+                    status="accepted",
+                    flags={},
+                )
+                decision = self._apply_keyword_relevance(keyword, parsed, decision, keyword)
+                if decision.accepted:
+                    matched_keywords.append(keyword)
+            if not matched_keywords:
+                continue
+            copied = product.model_copy(deep=True)
+            copied.matched_keywords = matched_keywords
+            copied.quality_flags = {
+                **dict(copied.quality_flags),
+                "historical_keyword_revalidated": True,
+                "historical_matched_keywords": matched_keywords,
+            }
+            matched_products.append(copied)
+        return matched_products
+
+    def _historical_fallback_rank_key(self, product: ProductResult) -> tuple[int, int, int, int, int, int]:
+        pictures = self._filter_obvious_non_product_pictures(product.picture)
+        url = product.final_url or product.product_url
+        platform = product.platform or detect_platform(url)
+        try:
+            historical_row_id = int((product.quality_flags or {}).get("historical_product_row_id") or 0)
+        except (TypeError, ValueError):
+            historical_row_id = 0
+        return (
+            1 if len(pictures) >= 2 else 0,
+            min(len(pictures), 20),
+            1 if is_detail_url(url, platform) else 0,
+            int(product.quality_score or 0),
+            1 if (product.description or product.detail_text) else 0,
+            historical_row_id,
+        )
+
+    async def _refresh_historical_products(
+        self,
+        products: list[ProductResult],
+        max_products: int | None = None,
+    ) -> list[ProductResult]:
+        target_count = max(1, max_products or len(products) or 1)
+        candidates = products[: min(len(products), self.settings.historical_refresh_limit)]
+        semaphore = asyncio.Semaphore(self.settings.historical_refresh_concurrency)
+
+        async def refresh_one(product: ProductResult) -> ProductResult | None:
+            async with semaphore:
+                return await self._refresh_historical_product(product)
+
+        results = await asyncio.gather(
+            *(refresh_one(product) for product in candidates),
+            return_exceptions=True,
+        )
+        refreshed: list[ProductResult] = []
+        for result in results:
+            if isinstance(result, ProductResult):
+                refreshed.append(result)
+                if len(refreshed) >= target_count:
+                    break
+        return refreshed
+
+    async def _refresh_historical_product(self, product: ProductResult) -> ProductResult | None:
+        refreshed_product = product.model_copy(deep=True)
+        refreshed_product.picture = self._filter_obvious_non_product_pictures(refreshed_product.picture)
+        url = refreshed_product.final_url or refreshed_product.product_url
+        if not url:
+            if self._is_obvious_invalid_historical_product(refreshed_product):
+                return None
+            return refreshed_product
+
+        raw_payload = dict(refreshed_product.raw_payload)
+        if self._is_non_detail_or_aggregate_historical_product(refreshed_product):
+            raw_payload["historical_refresh"] = {
+                "status": "skipped",
+                "reason": "历史商品 URL 不是可接受的商品详情页",
+            }
+            refreshed_product.raw_payload = raw_payload
+            return None
+        try:
+            fetch = await self.client.fetch_detail_page(url)
+        except Exception as exc:
+            raw_payload["historical_refresh"] = {
+                "status": "error",
+                "reason": _error_message(exc),
+            }
+            refreshed_product.raw_payload = raw_payload
+            if self._is_obvious_invalid_historical_product(refreshed_product):
+                return None
+            if self._is_non_detail_or_aggregate_historical_product(refreshed_product):
+                return None
+            return refreshed_product
+
+        if not fetch.ok:
+            raw_payload["historical_refresh"] = {
+                "status": "error",
+                "reason": fetch.error_message or "详情页抓取失败",
+                "provider": fetch.provider,
+            }
+            refreshed_product.raw_payload = raw_payload
+            if self._is_obvious_invalid_historical_product(refreshed_product):
+                return None
+            if self._is_non_detail_or_aggregate_historical_product(refreshed_product):
+                return None
+            return refreshed_product
+
+        parsed = parse_product_page(fetch.html, url, fetch.final_url)
+        quality = evaluate_product_detail(fetch, parsed)
+        if self._should_retry_render(fetch, quality):
+            try:
+                render_fetch = await self.client.fetch_detail_page(url, force_render=True)
+                render_parsed = parse_product_page(
+                    render_fetch.html, url, render_fetch.final_url
+                )
+                render_quality = evaluate_product_detail(render_fetch, render_parsed)
+                current_rank = (
+                    1 if quality.accepted else 0,
+                    len(parsed.picture),
+                    quality.score,
+                    len(parsed.description),
+                )
+                render_rank = (
+                    1 if render_quality.accepted else 0,
+                    len(render_parsed.picture),
+                    render_quality.score,
+                    len(render_parsed.description),
+                )
+                if render_rank > current_rank:
+                    fetch, parsed, quality = render_fetch, render_parsed, render_quality
+            except Exception as exc:
+                raw_payload["historical_render_error"] = _error_message(exc)
+        refreshed_final_url = parsed.final_url or fetch.final_url or refreshed_product.final_url
+        refreshed_platform = parsed.platform or refreshed_product.platform
+        if not is_detail_url(refreshed_final_url, refreshed_platform):
+            raw_payload["historical_refresh"] = {
+                "status": "skipped",
+                "reason": "刷新结果不是商品详情页，保留历史商品 URL 和已净化图片",
+                "provider": fetch.provider,
+                "final_url": refreshed_final_url,
+            }
+            refreshed_product.raw_payload = raw_payload
+            if self._is_obvious_invalid_historical_product(refreshed_product):
+                return None
+            if self._is_non_detail_or_aggregate_historical_product(refreshed_product):
+                return None
+            if self._is_stale_incomplete_jd_historical_product(refreshed_product):
+                return None
+            return refreshed_product
+
+        refreshed_product.final_url = refreshed_final_url
+        refreshed_product.product_url = refreshed_product.product_url or refreshed_product.final_url
+        if parsed.product_id:
+            refreshed_product.product_id = parsed.product_id
+        if parsed.platform:
+            refreshed_product.platform = parsed.platform
+        if parsed.product_name:
+            refreshed_product.product_name = parsed.product_name
+        if parsed.price:
+            refreshed_product.price = parsed.price
+        if parsed.sales:
+            refreshed_product.sales = parsed.sales
+        if parsed.brand:
+            refreshed_product.brand = parsed.brand
+        if parsed.manufacturer:
+            refreshed_product.manufacturer = parsed.manufacturer
+        if parsed.description:
+            refreshed_product.description = parsed.description
+        if parsed.detail_text:
+            refreshed_product.detail_text = parsed.detail_text
+        refreshed_product.picture = parsed.picture
+        raw_payload["historical_refresh"] = {
+            "status": "ok" if quality.accepted else "rejected",
+            "provider": fetch.provider,
+            "picture_count_before": len(product.picture),
+            "picture_count_after": len(refreshed_product.picture),
+            "quality": quality.model_dump(),
+        }
+        refreshed_product.raw_payload = raw_payload
+        if not quality.accepted:
+            return None
+        refreshed_product.quality_score = quality.score
+        refreshed_product.quality_flags = {
+            **dict(refreshed_product.quality_flags),
+            **quality.flags,
+            "historical_fallback": True,
+            "historical_refresh_validated": True,
+        }
+        if self._is_obvious_invalid_historical_product(refreshed_product):
+            return None
+        return refreshed_product
+
+    def _filter_obvious_non_product_pictures(self, pictures: list[str]) -> list[str]:
+        filtered: list[str] = []
+        blocked_url_tokens = (
+            "sprite",
+            "icon",
+            "logo",
+            "avatar",
+            "qrcode",
+            "qr-code",
+            "wechat",
+            "weixin",
+            "jcm.jd.com/pre",
+            "/etc/designs/",
+            "/footer/",
+            "/themes/default/assets/",
+            "/theme/default/assets/",
+            "/public/base/public/",
+            "/project/cmsweb/suning/public/base/",
+            "/project/pdsweb/",
+            "/pdsweb/csspc",
+            "/pds-web/project/",
+            "about-sony-close",
+        )
+        blocked_file_prefixes = (
+            "search.",
+            "search-",
+            "search_",
+            "cart.",
+            "cart-",
+            "cart_",
+            "nav.",
+            "nav-",
+            "menu.",
+            "menu-",
+            "user.",
+            "user-",
+            "order.",
+            "order-",
+            "coupon.",
+            "coupon-",
+            "chat.",
+            "chat-",
+            "chat2.",
+            "service.",
+            "service-",
+            "snms.",
+            "snms-",
+            "blank.",
+            "blank-",
+            "blank_pic",
+            "loading.",
+            "loading-",
+            "placeholder.",
+            "placeholder-",
+            "trend.",
+            "trend-",
+        )
+        blocked_file_exact = (
+            "er.png",
+            "er.jpg",
+            "er.jpeg",
+            "er.webp",
+            "ewm.png",
+            "ewm.jpg",
+            "ewm.jpeg",
+            "ewm.webp",
+        )
+        blocked_file_substrings = (
+            "shopping-cart",
+            "kefu",
+            "nationalemblem",
+            "erweima",
+            "ewm",
+            "about-sony-close",
+            "new_people",
+            "gend-finish",
+            "return-process",
+            "tmreturn-process",
+            "\u70b9\u8d5e",
+        )
+        for picture in pictures:
+            cleaned = str(picture or "").strip()
+            if not cleaned:
+                continue
+            lower = cleaned.lower()
+            if "{" in lower or "}" in lower:
+                continue
+            lower_file = lower.split("?", 1)[0].rsplit("/", 1)[-1]
+            if any(token in lower for token in blocked_url_tokens):
+                continue
+            if lower_file in blocked_file_exact:
+                continue
+            if lower_file.startswith(blocked_file_prefixes) or any(
+                token in lower_file for token in blocked_file_substrings
+            ):
+                continue
+            if cleaned not in filtered:
+                filtered.append(cleaned)
+        return filtered
+
+    def _is_stale_incomplete_jd_historical_product(self, product: ProductResult) -> bool:
+        url = (product.final_url or product.product_url or "").lower()
+        platform = (product.platform or detect_platform(url)).lower()
+        if platform != "jd" and "item.jd.com/" not in url and "item.m.jd.com/product/" not in url:
+            return False
+        pictures = self._filter_obvious_non_product_pictures(product.picture)
+        if len(pictures) >= 2:
+            return False
+        return True
+
+    def _is_non_detail_or_aggregate_historical_product(self, product: ProductResult) -> bool:
+        url = (product.final_url or product.product_url or "").strip()
+        if not url:
+            return False
+        platform = product.platform or detect_platform(url)
+        return is_aggregate_url(url) or not is_detail_url(url, platform)
+
+    def _is_obvious_invalid_historical_product(self, product: ProductResult) -> bool:
+        title = (product.product_name or "").strip()
+        if not title:
+            return False
+        raw_title = title.lower().replace(" ", "")
+        if raw_title in {"amazon.com", "amazoncom", "amazon"}:
+            return True
+        normalized_title = _normalize_relevance_text(title).lower()
+        if normalized_title in {"amazoncom", "amazon"}:
+            return True
+        invalid_title_tokens = (
+            "产品找不到",
+            "商品找不到",
+            "直接发需求",
+            "提交需求",
+            "notfound",
+            "pagenotfound",
+        )
+        return any(token in normalized_title for token in invalid_title_tokens)
+
+    def _dedupe_products(self, products: list[ProductResult]) -> list[ProductResult]:
+        merged_by_key: dict[str, ProductResult] = {}
+        order: list[str] = []
+        for product in products:
+            key = self._product_dedupe_key(product)
+            if not key:
+                key = f"row:{len(order)}"
+            if key not in merged_by_key:
+                merged_by_key[key] = product
+                order.append(key)
+                continue
+            merged_by_key[key] = self._merge_duplicate_products(merged_by_key[key], product)
+        return [merged_by_key[key] for key in order]
+
+    def _product_dedupe_key(self, product: ProductResult) -> str:
+        platform = (product.platform or "").strip().lower()
+        product_id = (product.product_id or "").strip()
+        if platform and product_id:
+            return f"id:{platform}:{product_id}"
+        for url in (product.final_url, product.product_url):
+            canonical_url = canonicalize_product_url(url)
+            if canonical_url:
+                return f"url:{canonical_url}"
+        title = _normalize_relevance_text(product.product_name)
+        if title:
+            return f"title:{platform}:{title}"
+        return ""
+
+    def _merge_duplicate_products(self, existing: ProductResult, incoming: ProductResult) -> ProductResult:
+        primary = existing if existing.quality_score >= incoming.quality_score else incoming
+        secondary = incoming if primary is existing else existing
+
+        keywords: list[str] = []
+        for keyword in [*existing.matched_keywords, *incoming.matched_keywords]:
+            cleaned = " ".join(str(keyword or "").split())
+            if cleaned and cleaned not in keywords:
+                keywords.append(cleaned)
+
+        pictures: list[str] = []
+        for picture in [*existing.picture, *incoming.picture]:
+            cleaned = str(picture or "").strip()
+            if cleaned and cleaned not in pictures:
+                pictures.append(cleaned)
+
+        flags = dict(primary.quality_flags)
+        deduped_variants = list(flags.get("deduped_variants") or [])
+        deduped_variants.append(
+            {
+                "product_name": secondary.product_name,
+                "product_url": secondary.product_url,
+                "final_url": secondary.final_url,
+                "matched_keywords": secondary.matched_keywords,
+                "quality_score": secondary.quality_score,
+            }
+        )
+        flags["deduped_variants"] = deduped_variants[:20]
+
+        raw_payload = dict(primary.raw_payload)
+        deduped_sources = list(raw_payload.get("deduped_sources") or [])
+        deduped_sources.append(
+            {
+                "product_name": secondary.product_name,
+                "product_url": secondary.product_url,
+                "final_url": secondary.final_url,
+                "matched_keywords": secondary.matched_keywords,
+            }
+        )
+        raw_payload["deduped_sources"] = deduped_sources[:20]
+
+        return primary.model_copy(
+            update={
+                "matched_keywords": keywords,
+                "picture": pictures or primary.picture,
+                "quality_flags": flags,
+                "raw_payload": raw_payload,
+            }
+        )
+
     def _candidate_fetch_groups(self, candidates: list[CandidateLink]) -> list[list[CandidateLink]]:
         marketplace: list[CandidateLink] = []
         external: list[CandidateLink] = []
@@ -921,17 +1411,36 @@ class ProductSearchService:
         self.client = BrightDataClient(self.settings)
 
     def _should_retry_render(self, fetch, decision) -> bool:
-        if not self.settings.brightdata_api_key or not self.settings.render_fallback_enabled:
+        render_available = (
+            self.settings.browser_fallback_enabled
+            or (self.settings.brightdata_api_key and self.settings.render_fallback_enabled)
+        )
+        if not render_available:
             return False
-        if fetch.provider == "brightdata_unlocker_render":
+        if fetch.provider == "local_browser_stable":
             return False
-        if not fetch.provider.startswith("brightdata_unlocker"):
+        if fetch.provider == "brightdata_unlocker_render" and (fetch.capture_meta or {}).get("local_browser_attempted"):
             return False
+        platform = str((getattr(decision, "flags", {}) or {}).get("platform") or "")
+        if platform in {"jd", "taobao", "tmall", "1688", "pdd", "suning"}:
+            return True
+        page_image_count = 0
+        try:
+            page_image_count = int((getattr(decision, "flags", {}) or {}).get("image_count") or 0)
+        except (TypeError, ValueError):
+            page_image_count = 0
         reasons = " ".join(decision.reasons)
-        return any(token in reasons for token in ("未提取到商品标题", "商品详情文本过短", "未提取到商品图片"))
+        incomplete = page_image_count < self.settings.incomplete_image_threshold
+        return incomplete or any(
+            token in reasons for token in ("未提取到商品标题", "商品详情文本过短", "未提取到商品图片")
+        )
 
     def _should_retry_fetch_error(self, fetch) -> bool:
-        if not self.settings.brightdata_api_key or not self.settings.render_fallback_enabled:
+        render_available = (
+            self.settings.browser_fallback_enabled
+            or (self.settings.brightdata_api_key and self.settings.render_fallback_enabled)
+        )
+        if not render_available:
             return False
         provider = str(getattr(fetch, "provider", "") or "")
         if provider == "brightdata_unlocker_render":

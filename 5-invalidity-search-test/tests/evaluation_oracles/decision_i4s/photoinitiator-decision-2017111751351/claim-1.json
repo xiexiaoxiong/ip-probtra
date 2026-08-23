@@ -1,0 +1,23 @@
+{
+  "case_id": "photoinitiator-decision-2017111751351",
+  "claim_id": "1",
+  "decision_source": {"file_name": "无效决定（华鸿）.pdf", "pages": [6, 7, 8], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {
+      "publication_number": "CN107272336A",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "closest_prior_art",
+      "legal_reasoning": {"type": "inventive_step", "outcome": "claim_lacks_inventive_step", "note": "目标具体光引发剂与证据1化合物28存在取代基区别，但证据1通式及衍生物教导产生选择动机；这不是单篇完全相同公开。"},
+      "concepts": [
+        {"concept_id": "curable_composition", "label": "光固化组合物", "feature_ids": ["1-f-59e313fdf4e2"], "feature_selector_groups": [["光固化组合物"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "unsaturated_compound", "label": "可光聚合碳碳双键式不饱和化合物", "feature_ids": ["1-f-2713c2e6289e"], "feature_selector_groups": [["碳碳双键", "不饱和化合物"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "specific_formula", "label": "权利要求所示具体光引发剂化合物", "feature_ids": ["1-f-c93bb146a3f1"], "feature_selector_groups": [["下式", "光引发剂化合物"]], "expected_disclosure": "not_disclosed"},
+        {"concept_id": "weight_range", "label": "光引发剂占组合物0.5-10%", "feature_ids": ["1-f-252b93e09270"], "feature_selector_groups": [["0.5-10", "0.5～10", "重量"]], "expected_disclosure": "disclosed"}
+      ]
+    },
+    {"publication_number": "CN106883114A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "决定最终论证采用证据1，未对本文件形成可直接评分的逐项映射。"},
+    {"publication_number": "CN104004395A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "主要用于从属权利要求的组合。"},
+    {"publication_number": "CN106010144A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "主要用于从属权利要求的组合。"},
+    {"publication_number": "CN102766045A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "主要用于从属权利要求的组合。"}
+  ]
+}

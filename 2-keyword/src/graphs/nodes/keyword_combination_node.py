@@ -212,6 +212,25 @@ def _feature_texts(features: list[dict]) -> list[str]:
     return texts
 
 
+def _object_texts(
+    primary_object: str,
+    search_objects: list[str],
+    product_objects: list[str],
+) -> list[str]:
+    selected = _select_holder_keyword_object(primary_object, search_objects, product_objects)
+    candidates = [selected, *search_objects, *product_objects, primary_object]
+    texts: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = _clean_object_text(str(candidate or ""))
+        normalized = _normalize_keyword_text(text)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        texts.append(text)
+    return texts
+
+
 def _keyword_contains_any(keyword_text: str, terms: list[str]) -> bool:
     normalized = _normalize_keyword_text(keyword_text)
     return any(_normalize_keyword_text(term) in normalized for term in terms if term)
@@ -224,6 +243,7 @@ def _build_required_feature_keywords(
     product_objects: list[str],
 ) -> list[dict]:
     object_text = _select_holder_keyword_object(primary_object, search_objects, product_objects)
+    object_terms = _object_texts(primary_object, search_objects, product_objects)
     required_texts = _feature_texts(required_features)
     keywords: list[dict] = []
 
@@ -234,25 +254,29 @@ def _build_required_feature_keywords(
                 "keyword_type": "object_base",
                 "combination_pattern": "主客体基础词",
                 "confidence": 0.91,
+                "query_role": "executable_search",
+                "object_terms": object_terms,
+                "feature_terms": [],
             }
         )
 
     for text in required_texts:
-        keywords.append(
-            {
-                "keyword_text": text,
-                "keyword_type": "required_feature",
-                "combination_pattern": "必要特征基础词",
-                "confidence": 0.9,
-            }
-        )
         if object_text and _normalize_keyword_text(text) not in _normalize_keyword_text(object_text):
+            source_tiers = [
+                str(feature.get("source_tier", "unknown"))
+                for feature in required_features
+                if isinstance(feature, dict) and str(feature.get("text", "")).strip() == text
+            ]
             keywords.append(
                 {
                     "keyword_text": f"{text}{object_text}",
                     "keyword_type": "required_feature",
                     "combination_pattern": "必要特征+主客体",
                     "confidence": 0.91,
+                    "query_role": "executable_search",
+                    "object_terms": object_terms,
+                    "feature_terms": [text],
+                    "feature_source_tiers": source_tiers or ["unknown"],
                 }
             )
 
@@ -264,6 +288,14 @@ def _build_required_feature_keywords(
                 "keyword_type": "required_feature",
                 "combination_pattern": "多必要特征+主客体",
                 "confidence": 0.93,
+                "query_role": "executable_search",
+                "object_terms": object_terms,
+                "feature_terms": required_texts[:3],
+                "feature_source_tiers": [
+                    str(feature.get("source_tier", "unknown"))
+                    for feature in required_features[:3]
+                    if isinstance(feature, dict)
+                ],
             }
         )
 
@@ -313,18 +345,28 @@ def _apply_guardrails(
     combined_keywords: list[dict],
     required_features: list[dict] | None = None,
     excluded_generic_terms: list[str] | None = None,
+    object_terms: list[str] | None = None,
 ) -> list[dict]:
     processed: list[dict] = []
     seen: set[str] = set()
     required_texts = _feature_texts(required_features or [])
+    grounded_object_terms = [term for term in (object_terms or []) if _normalize_keyword_text(term)]
     excluded_norms = {_normalize_keyword_text(term) for term in (excluded_generic_terms or []) if term}
 
     for item in combined_keywords:
         keyword_text = str(item.get("keyword_text", "")).strip()
         keyword_type = str(item.get("keyword_type", "")).lower()
         pattern = str(item.get("combination_pattern", "")).lower()
-        allow_short = keyword_type in {"required_feature", "object_base"}
+        allow_short = keyword_type == "object_base"
         if _violates_quality_guardrail(keyword_text, allow_short=allow_short):
+            continue
+
+        matched_object_terms = [
+            term
+            for term in grounded_object_terms
+            if _normalize_keyword_text(term) in _normalize_keyword_text(keyword_text)
+        ]
+        if not matched_object_terms:
             continue
 
         normalized = _normalize_keyword_text(keyword_text)
@@ -341,7 +383,16 @@ def _apply_guardrails(
         if normalized in seen:
             continue
         seen.add(normalized)
-        processed.append({**item, "keyword_text": keyword_text})
+        processed.append(
+            {
+                **item,
+                "keyword_text": keyword_text,
+                "query_role": "executable_search",
+                "guard_status": "passed",
+                "guard_reason": "contains_product_object",
+                "object_terms": item.get("object_terms") or matched_object_terms,
+            }
+        )
 
     return processed
 
@@ -367,7 +418,12 @@ def keyword_combination_node(
 
     llm_config = _cfg.get("config", {})
     sp = _cfg.get("sp", "")
-    up = _cfg.get("up", "")
+    up = (
+        "硬性输出规则：每个最终商品检索词必须包含主客体或检索落地客体；"
+        "禁止输出不含商品客体的单独结构词、动作词、模式词或技术效果词。"
+        "特征概念只能与商品客体组合后输出。\n\n"
+        + _cfg.get("up", "")
+    )
 
     core_term_texts = [term.get("text", "") for term in state.filtered_core_terms if term.get("text")]
 
@@ -385,6 +441,10 @@ def keyword_combination_node(
         "scenario_words": "、".join(state.scenario_words) if state.scenario_words else "无",
         "audience_words": "、".join(state.audience_words) if state.audience_words else "无",
     })
+    user_prompt = user_prompt.replace(
+        "至少覆盖：主客体基础词、每个必要特征基础词、每个必要特征+主客体、多必要特征+主客体。",
+        "至少覆盖：主客体基础词、每个必要特征+主客体、多必要特征+主客体；禁止必要特征裸词。",
+    )
 
     client = LLMClient(ctx=ctx)
     response = client.invoke(
@@ -425,6 +485,11 @@ def keyword_combination_node(
         parsed_keywords,
         required_features=state.required_features,
         excluded_generic_terms=state.excluded_generic_terms,
+        object_terms=_object_texts(
+            state.primary_product_object,
+            state.search_product_objects,
+            state.product_object,
+        ),
     )
 
     return KeywordCombinationOutput(combined_keywords=combined_keywords)

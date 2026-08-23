@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import { execFile } from 'child_process';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUploadsDir } from '@/lib/runtime-paths';
+import { canonicalServiceUrl, requireTestUser } from '@/lib/test-route-guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,8 +56,8 @@ type FigureExtractResult = {
 
 function getModule1Config(): { url: string; token?: string } {
   return {
-    url: process.env.MODULE1_API_URL || 'http://127.0.0.1:5101/run',
-    token: process.env.MODULE1_API_TOKEN || undefined,
+    url: canonicalServiceUrl('PATENT_ANALYSIS_MODULE1_API_URL', ['TEST_MODULE1_API_URL', 'MODULE1_API_URL'], 'http://127.0.0.1:5101/run'),
+    token: process.env.PATENT_ANALYSIS_MODULE1_API_TOKEN || process.env.TEST_MODULE1_API_TOKEN || process.env.MODULE1_API_TOKEN || undefined,
   };
 }
 
@@ -198,6 +199,8 @@ async function extractFiguresLocally(
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const unauthorized = await requireTestUser(request);
+  if (unauthorized) return unauthorized;
   try {
     const body = (await request.json()) as Module1TestInput;
     const { type, url, fileUrl, text } = body;

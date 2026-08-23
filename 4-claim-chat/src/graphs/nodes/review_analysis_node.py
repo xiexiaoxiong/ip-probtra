@@ -154,6 +154,11 @@ def _review_with_llm(
 ) -> List[Dict[str, Any]]:
     if not raw_analysis:
         return []
+    use_llm_review = (os.getenv("MODULE4_REVIEW_USE_LLM") or "0").strip().lower()
+    if use_llm_review not in {"1", "true", "yes", "on"}:
+        return []
+    if any(isinstance(item, dict) and item.get("analysis_source") == "rule_fallback" for item in raw_analysis):
+        return []
 
     cfg = _load_review_llm_cfg()
     if not cfg:
@@ -173,7 +178,7 @@ def _review_with_llm(
         "raw_analysis_json": json.dumps(raw_analysis, ensure_ascii=False, indent=2),
     })
 
-    model = llm_config.get("model", "doubao-seed-1-8-251228")
+    model = llm_config.get("model", "glm-4.6v")
     temperature = float(llm_config.get("temperature", 0.0))
     max_tokens = int(llm_config.get("max_completion_tokens", 12000))
 

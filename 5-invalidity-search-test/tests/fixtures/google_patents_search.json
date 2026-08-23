@@ -1,0 +1,38 @@
+{
+  "results": {
+    "total_num_results": 2,
+    "cluster": [
+      {
+        "result": [
+          {
+            "id": "patent/CN112345678A/en",
+            "rank": 0,
+            "patent": {
+              "title": "Robot cleaner with <b>lifting mop</b>",
+              "snippet": "A robot cleaner having a lifting cleaning member.",
+              "priority_date": "2019-03-01",
+              "filing_date": "2020-02-10",
+              "publication_date": "2021-01-02",
+              "publication_number": "CN112345678A",
+              "language": "en",
+              "thumbnail": "https://patentimages.storage.googleapis.com/example/thumb.png"
+            }
+          },
+          {
+            "id": "patent/US20190000001A1/en",
+            "rank": 1,
+            "patent": {
+              "title": "Autonomous floor cleaning apparatus",
+              "snippet": "A cleaning apparatus with an adjustable pad.",
+              "priority_date": "2017-01-01",
+              "filing_date": "2018-01-02",
+              "publication_date": "2019-01-03",
+              "publication_number": "US20190000001A1",
+              "language": "en"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

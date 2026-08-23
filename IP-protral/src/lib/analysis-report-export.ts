@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import type { PoolClient } from 'pg';
 import { buildFallbackTokenUnits, computeClaimScores, computeProductScore } from '@/lib/claim-score';
-import { PRODUCT_RISK_CONFIG, SCORE_BAND_CONFIG, scoreToBand, scoreToRiskLevel } from '@/lib/types';
+import { PRODUCT_RISK_CONFIG, scoreToBand } from '@/lib/types';
 import type { AnalysisSession, ClaimElementComparison, ProductComparison, ProductInfo } from '@/lib/types';
 
 type JsonRecord = Record<string, unknown>;
@@ -64,6 +64,11 @@ interface EmbeddedImage {
   buffer: Buffer;
   extension: 'jpeg' | 'png' | 'gif';
 }
+
+const IMAGE_FETCH_CONCURRENCY = 8;
+const IMAGE_FETCH_TIMEOUT_MS = 4_000;
+const IMAGE_PREFETCH_BUDGET_MS = 12_000;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function toText(value: unknown): string {
   if (typeof value === 'string') return value.trim();
@@ -401,6 +406,32 @@ function getImageExtension(contentType: string | null, buffer: Buffer): Embedded
 
 class ImageFetcher {
   private readonly cache = new Map<string, Promise<EmbeddedImage | null>>();
+  private deadlineAt = Number.POSITIVE_INFINITY;
+
+  async preload(urls: Iterable<string>): Promise<void> {
+    const uniqueUrls = Array.from(new Set(urls)).filter((url) => /^https?:\/\//i.test(url));
+    if (uniqueUrls.length === 0) return;
+
+    this.deadlineAt = Date.now() + IMAGE_PREFETCH_BUDGET_MS;
+    let nextIndex = 0;
+    const workerCount = Math.min(IMAGE_FETCH_CONCURRENCY, uniqueUrls.length);
+
+    const worker = async () => {
+      while (nextIndex < uniqueUrls.length && Date.now() < this.deadlineAt) {
+        const url = uniqueUrls[nextIndex];
+        nextIndex += 1;
+        await this.get(url);
+      }
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    // 未能在总预算内开始下载的图片也写入缓存，后续生成单元格时直接跳过，
+    // 避免导出阶段再次触发网络等待。
+    for (let index = nextIndex; index < uniqueUrls.length; index += 1) {
+      this.cache.set(uniqueUrls[index], Promise.resolve(null));
+    }
+  }
 
   get(url: string): Promise<EmbeddedImage | null> {
     if (!this.cache.has(url)) {
@@ -414,8 +445,16 @@ class ImageFetcher {
       return null;
     }
 
+    const remainingBudget = this.deadlineAt - Date.now();
+    if (remainingBudget <= 0) {
+      return null;
+    }
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Math.min(IMAGE_FETCH_TIMEOUT_MS, remainingBudget),
+    );
 
     try {
       const response = await fetch(url, {
@@ -429,8 +468,16 @@ class ImageFetcher {
         return null;
       }
 
+      const contentLength = Number(response.headers.get('content-length') || 0);
+      if (contentLength > MAX_IMAGE_BYTES) {
+        return null;
+      }
+
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+      if (buffer.length > MAX_IMAGE_BYTES) {
+        return null;
+      }
       const extension = getImageExtension(response.headers.get('content-type'), buffer);
       if (!extension) {
         return null;
@@ -650,6 +697,18 @@ export async function buildAnalysisReportWorkbook(
   });
 
   const imageFetcher = new ImageFetcher();
+  const embeddedImageUrls = new Set<string>();
+  for (const product of products) {
+    for (const imageUrl of product.pictures.slice(0, 4)) {
+      embeddedImageUrls.add(imageUrl);
+    }
+    for (const element of product.comparison?.claimElements || []) {
+      const evidenceImage = element.evidenceImages?.[0];
+      if (evidenceImage) embeddedImageUrls.add(evidenceImage);
+    }
+  }
+  await imageFetcher.preload(embeddedImageUrls);
+
   const headerRowNumber = addSummaryHeader(summarySheet, session, keywords.length > 0 ? keywords : session.results?.keywords || []);
   const headerRow = summarySheet.getRow(headerRowNumber);
   headerRow.values = [
@@ -715,12 +774,13 @@ export async function buildAnalysisReportWorkbook(
       { width: 28 },
       { width: 28 },
       { width: 14 },
+      { width: 16 },
       { width: 36 },
       { width: 16 },
       { width: 34 },
     ];
 
-    sheet.mergeCells('A1:H1');
+    sheet.mergeCells('A1:I1');
     sheet.getCell('A1').value = `${product.name} 比对表`;
     sheet.getCell('A1').font = { bold: true, size: 15 };
     sheet.getCell('A1').alignment = { vertical: 'middle' };
@@ -750,17 +810,17 @@ export async function buildAnalysisReportWorkbook(
     sheet.getCell('C5').value = product.url
       ? { text: product.url, hyperlink: product.url, tooltip: product.url }
       : '—';
-    sheet.mergeCells('C5:H5');
+    sheet.mergeCells('C5:I5');
 
     sheet.getCell('B6').value = '商品描述';
     sheet.getCell('C6').value = product.description || '—';
-    sheet.mergeCells('C6:H7');
+    sheet.mergeCells('C6:I7');
     sheet.getRow(6).height = 28;
     sheet.getRow(7).height = 28;
 
     sheet.getCell('A9').value = '商品图片';
     sheet.getCell('A9').font = { bold: true };
-    sheet.mergeCells('B9:H9');
+    sheet.mergeCells('B9:I9');
     sheet.getCell('B9').value = product.pictures.length > 0 ? product.pictures.join('\n') : '—';
     sheet.getRow(9).height = 42;
 
@@ -782,8 +842,8 @@ export async function buildAnalysisReportWorkbook(
       '权利要求',
       '特征内容',
       '商品特征',
-        '相似度',
-        '命中比例',
+      '相似度',
+      '命中比例',
       '比对分析',
       '证据图片',
       '证据图片链接',
@@ -823,7 +883,7 @@ export async function buildAnalysisReportWorkbook(
         ];
         row.height = evidenceImages.length > 0 ? 80 : 44;
         setBorder(row);
-        await addImageToCell(workbook, sheet, imageFetcher, evidenceImages[0], 7, currentRowNumber, 72, 56);
+        await addImageToCell(workbook, sheet, imageFetcher, evidenceImages[0], 8, currentRowNumber, 72, 56);
         currentRowNumber += 1;
       }
     }

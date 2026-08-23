@@ -134,3 +134,21 @@ PM2 统一启动后端时，本模块端口是 `5107`。
 - 后续模块4异步联调使用同批示例记录和新模块3结果，输出 `/tmp/product-pipeline-examples-module4-async-20260706.json`，13 个示例全部 completed，说明 `product_detail_search_products` 可被模块4 fallback 消费。
 - 注意：示例脚本使用固定 `*_product_detail_test` session，重复跑会在同一 session 中累积历史商品；Portal 测试页选择示例专利时会创建新的 `analysisSessionId`，更适合观察单次运行结果。
 - 测试状态：`PYTHONPATH=src uv run --with pytest pytest -q` 为 `45 passed`。不要用不带 `--with pytest` 的全新 uv 环境跑测试，除非先把 pytest 安装进环境。
+
+## 2026-07-12 安全回归修复
+
+- 图片上下文过滤必须按完整 class/id/style token 判断；禁止用无边界子串匹配，否则 `border` 会误命中 `order`。连字符/下划线 class 同时拆组件，因此 `main-logo` 仍会命中 `logo`。
+- 商品 URL 去重只删除明确的追踪参数；未知参数默认视为可能承载商品身份并保留，例如 `ProductDetail.aspx?uid=123` 与 `uid=456` 必须得到不同去重键。
+- 历史回退刷新默认最多 8 条、最多 4 并发，可用 `PRODUCT_SEARCH_HISTORICAL_REFRESH_LIMIT` 和 `PRODUCT_SEARCH_HISTORICAL_REFRESH_CONCURRENCY` 调整，但代码硬上限为 32 条/8 并发。
+- 历史详情刷新返回 HTTP 200 后必须重新执行 `evaluate_product_detail`；只有标题、正文、图片和 URL 质量门禁全部通过才更新质量分并标记 `historical_refresh_validated=true`。
+- `tests/test_quality.py` 已扩展到 59 个用例，新增 border/order、外部 uid 身份参数、刷新数量/并发、HTTP 200 空壳页拒绝等回归覆盖。
+
+## 2026-07-12 商品图片完整抓取改造
+
+- 新增 `browser_fetch.py`：详情页进入浏览器后持续滚动、触发国内电商缩略图库、收集懒加载图片；只有页面高度和图片 URL 集合连续多轮不变才结束。默认最多等待 60 秒/80 轮，可通过 `PRODUCT_SEARCH_BROWSER_*` 环境变量调整。
+- 国内电商详情页即使静态 HTML 已满足标题/正文/至少一图质量门禁，也必须尝试稳定渲染；渲染若进入登录/验证页或图片更少，则保留同 URL 的有效静态详情，并在 `raw_payload.render_attempts` 留下完整诊断。
+- 图片解析不再保留 18 张硬上限；补充 `src-large/src-medium/data-src-large/data-zoom-image`、JD `jfs`、淘宝/天猫 `alicdn` 脚本图库、背景图和 `srcset`，并按原始图片身份去除京东/苏宁/阿里不同尺寸的重复 URL。
+- 无 Bright Data 时新增苏宁公开搜索页直搜，作为可用的国内电商商品发现通道；历史商品回退必须重新匹配本次关键词，禁止“扫地机器人”复用同专利旧的“计时器”商品。
+- 新增 `scripts/verify_image_capture.py`，把落库图片与商品页主图库逐张对照，缺任一图库图片即返回非零。
+- 最终 5 关键词回归：`扫地机器人` run=346（页面图库 9/9，落库 11）、`蓝牙耳机` run=347（5/5，落库 8）、`跑步机` run=348（5/5，落库 6）、`电饭煲` run=349（9/9，落库 14）、`机械键盘` run=350（5/5，落库 7）；全部实时命中苏宁真实详情页、无历史回退，合计页面图库 33/33、缺失 0。
+- 测试状态：普通回归 `64 passed, 1 skipped`；跳过项仅因普通沙箱禁止启动 Chrome，宿主权限下单独运行真实 Chrome 懒加载稳定性用例 `1 passed`。PM2 `patent-3-product-search` 已重启并在线。

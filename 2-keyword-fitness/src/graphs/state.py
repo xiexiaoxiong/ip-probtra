@@ -278,6 +278,7 @@ class InventionPointExtractionOutput(BaseModel):
 class RequiredFeatureExtractionInput(BaseModel):
     """必要检索特征识别节点的输入"""
     claim_text: str = Field(default="", description="独立权利要求原文")
+    claim_type: str = Field(default="INDEPENDENT", description="当前权利要求类型")
     abstract_text: str = Field(default="", description="专利摘要")
     invention_content: str = Field(default="", description="发明或实用新型内容")
     background_tech: str = Field(default="", description="背景技术")

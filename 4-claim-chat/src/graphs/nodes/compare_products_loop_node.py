@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_core.runnables import RunnableConfig
@@ -156,7 +157,17 @@ def compare_products_loop_node(
     # 统计独立权利要求数量
     claim_ids: set = set(str(f.get("claim_id", "")) for f in features)
     total: int = len(products)
-    worker_count: int = min(total, MAX_PARALLEL_WORKERS)
+    configured_workers = (os.getenv("CLAIM_COMPARE_PARALLEL_WORKERS") or "").strip()
+    if configured_workers:
+        try:
+            worker_limit = max(1, int(configured_workers))
+        except ValueError:
+            worker_limit = MAX_PARALLEL_WORKERS
+    else:
+        llm_base_url = (os.getenv("LOCAL_LLM_BASE_URL") or "").lower()
+        llm_provider = (os.getenv("LOCAL_LLM_TEXT_PROVIDER") or "").lower()
+        worker_limit = 1 if "bigmodel.cn" in llm_base_url or llm_provider == "glm" else MAX_PARALLEL_WORKERS
+    worker_count: int = min(total, worker_limit)
     duplicate_count = max(0, len(raw_features) - len(features))
     logger.info(
         f"开始并行比对 {total} 个商品，{len(claim_ids)} 个独立权利要求，"

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="html">ArXiv Query: search_query=robot cleaner lifting mop</title>
+  <id>https://arxiv.org/api/example</id>
+  <updated>2018-03-02T00:00:00Z</updated>
+  <entry>
+    <id>http://arxiv.org/abs/1803.00001v2</id>
+    <updated>2018-03-02T10:00:00Z</updated>
+    <published>2018-03-01T09:30:00Z</published>
+    <title>Adaptive cleaning mechanisms for autonomous mobile robots</title>
+    <summary>
+      This paper describes a mobile cleaning robot whose cleaning pad is raised
+      and lowered in response to a detected floor condition.
+    </summary>
+    <author><name>Ada Example</name></author>
+    <link href="http://arxiv.org/abs/1803.00001v2" rel="alternate" type="text/html"/>
+    <link title="pdf" href="https://arxiv.org/pdf/1803.00001v2" rel="related" type="application/pdf"/>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+</feed>

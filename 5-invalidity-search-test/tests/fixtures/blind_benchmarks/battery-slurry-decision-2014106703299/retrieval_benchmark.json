@@ -1,0 +1,12 @@
+{
+  "benchmark_version": "blind-retrieval-v2",
+  "case_id": "battery-slurry-decision-2014106703299",
+  "runtime_visibility": "forbidden_until_search_results_frozen",
+  "expected_documents": [
+    {"label": "D1-primary", "publication_number": "CN103633269A", "required": true, "maximum_cumulative_rank": 10},
+    {"label": "D1-alternative", "publication_number": "CN103915594A", "required": true, "maximum_cumulative_rank": 10},
+    {"label": "supporting-6", "publication_number": "CN103647034A", "required": false, "maximum_cumulative_rank": 10},
+    {"label": "supporting-7", "publication_number": "CN103915595A", "required": false, "maximum_cumulative_rank": 10},
+    {"label": "supporting-8", "publication_number": "CN103396710A", "required": false, "maximum_cumulative_rank": 10}
+  ]
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import base64
 from dataclasses import dataclass
-from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, quote_plus, unquote, urlencode, urljoin, urlparse, urlunparse
 
 from product_search.models import CandidateLink, SearchQueryPlan
 
@@ -232,12 +232,17 @@ def normalize_url(url: str, base_url: str = "") -> str:
 def canonicalize_product_url(url: str) -> str:
     normalized = normalize_url(url)
     parsed = urlparse(normalized)
-    query = parse_qs(parsed.query)
-    keep_params: list[tuple[str, str]] = []
-    for key in ("id", "goods_id", "skuId"):
-        if key in query and query[key]:
-            keep_params.append((key, query[key][0]))
-    query_string = "&".join(f"{key}={value}" for key, value in keep_params)
+    tracking_keys = {
+        "spm", "scm", "source", "ref", "ref_", "from", "pvid", "clickid",
+        "campaign", "campaignid", "adid", "affiliate", "affid",
+    }
+    keep_params = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in tracking_keys
+    ]
+    keep_params.sort(key=lambda item: (item[0].lower(), item[1]))
+    query_string = urlencode(keep_params, doseq=True)
     return urlunparse((parsed.scheme, parsed.netloc.lower(), parsed.path, "", query_string, ""))
 
 

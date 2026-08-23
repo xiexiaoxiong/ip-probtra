@@ -4,6 +4,7 @@ import type { QueryResultRow } from 'pg';
 import type {
   AuthUser,
   AnalysisInput,
+  AnalysisKind,
   AnalysisResults,
   AnalysisSession,
   AnalysisStatus,
@@ -12,7 +13,7 @@ import type {
 } from './types';
 import { ensureDatabaseReady } from './db-init';
 import { pgQuery } from './postgres';
-import { WORKFLOW_MODULES } from './types';
+import { INVALIDITY_WORKFLOW_MODULES, WORKFLOW_MODULES } from './types';
 import { getSessionsDir } from './runtime-paths';
 
 const memoryStore = new Map<string, AnalysisSession>();
@@ -21,6 +22,8 @@ interface SessionRow extends QueryResultRow {
   id: string;
   user_id: number;
   user_name: string;
+  analysis_kind: AnalysisKind;
+  pipeline_version: string | null;
   status: AnalysisStatus;
   input_type: AnalysisInput['type'];
   input_value: string | null;
@@ -43,8 +46,12 @@ interface StepRow extends QueryResultRow {
   completed_at: string | null;
 }
 
-function createDefaultSteps(): AnalysisStep[] {
-  return WORKFLOW_MODULES.map((module) => ({
+function modulesForKind(kind: AnalysisKind) {
+  return kind === 'invalidity' ? INVALIDITY_WORKFLOW_MODULES : WORKFLOW_MODULES;
+}
+
+function createDefaultSteps(kind: AnalysisKind): AnalysisStep[] {
+  return modulesForKind(kind).map((module) => ({
     id: module.id,
     name: module.name,
     description: module.description,
@@ -60,15 +67,15 @@ function toTimestamp(value?: string | null): number {
   return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
-function getStepDescription(stepId: number): string {
-  return WORKFLOW_MODULES.find((module) => module.id === stepId)?.description || '';
+function getStepDescription(stepId: number, kind: AnalysisKind): string {
+  return modulesForKind(kind).find((module) => module.id === stepId)?.description || '';
 }
 
-function mapStepRow(row: StepRow): AnalysisStep {
+function mapStepRow(row: StepRow, kind: AnalysisKind): AnalysisStep {
   return {
     id: row.step_id,
     name: row.step_name,
-    description: getStepDescription(row.step_id),
+    description: getStepDescription(row.step_id, kind),
     status: row.status,
     error: row.error || undefined,
     startedAt: row.started_at ? toTimestamp(row.started_at) : undefined,
@@ -81,6 +88,8 @@ function mapDbSession(row: SessionRow, steps: AnalysisStep[]): AnalysisSession {
     id: row.id,
     userId: row.user_id,
     userName: row.user_name,
+    analysisKind: row.analysis_kind || 'infringement',
+    pipelineVersion: row.pipeline_version,
     status: row.status,
     input: {
       type: row.input_type,
@@ -114,6 +123,8 @@ async function loadSessionFromDb(sessionId: string): Promise<AnalysisSession | n
         s.id,
         s.user_id,
         u.name as user_name,
+        s.analysis_kind,
+        s.pipeline_version,
         s.status,
         s.input_type,
         s.input_value,
@@ -147,12 +158,17 @@ async function loadSessionFromDb(sessionId: string): Promise<AnalysisSession | n
     [sessionId],
   );
 
-  const session = mapDbSession(row, stepsResult.rows.map(mapStepRow));
+  const kind = row.analysis_kind || 'infringement';
+  const session = mapDbSession(row, stepsResult.rows.map((step) => mapStepRow(step, kind)));
   cacheSession(session);
   return session;
 }
 
-export async function createSession(input: AnalysisInput, user: AuthUser): Promise<AnalysisSession> {
+export async function createSession(
+  input: AnalysisInput,
+  user: AuthUser,
+  options: { analysisKind?: AnalysisKind; pipelineVersion?: string } = {},
+): Promise<AnalysisSession> {
   await ensureDatabaseReady();
   const now = Date.now();
   const id = `analysis_${now}_${Math.random().toString(36).slice(2, 8)}`;
@@ -161,9 +177,11 @@ export async function createSession(input: AnalysisInput, user: AuthUser): Promi
     id,
     userId: user.id,
     userName: user.name,
+    analysisKind: options.analysisKind || 'infringement',
+    pipelineVersion: options.pipelineVersion || null,
     status: 'idle',
     input,
-    steps: createDefaultSteps(),
+    steps: createDefaultSteps(options.analysisKind || 'infringement'),
     results: null,
     createdAt: now,
     updatedAt: now,
@@ -172,13 +190,16 @@ export async function createSession(input: AnalysisInput, user: AuthUser): Promi
   await pgQuery(
     `
       insert into analysis_sessions (
-        id, user_id, status, input_type, input_value, file_name, file_url, text_content, results
+        id, user_id, analysis_kind, pipeline_version, status,
+        input_type, input_value, file_name, file_url, text_content, results
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
     `,
     [
       id,
       user.id,
+      session.analysisKind,
+      session.pipelineVersion,
       session.status,
       input.type,
       input.value || null,
@@ -370,6 +391,8 @@ export async function listSessionsForUser(user: AuthUser): Promise<AnalysisSessi
         s.id,
         s.user_id,
         u.name as user_name,
+        s.analysis_kind,
+        s.pipeline_version,
         s.status,
         s.input_type,
         s.input_value,

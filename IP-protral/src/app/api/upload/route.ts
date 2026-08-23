@@ -3,6 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUploadsDir } from '@/lib/runtime-paths';
+import { createUnauthorizedResponse, getCurrentUserFromRequest } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,6 +24,11 @@ function sanitizeFileName(fileName: string): string {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const user = await getCurrentUserFromRequest(request);
+  if (!user) return createUnauthorizedResponse(request);
+  if (user.status !== 'approved') {
+    return NextResponse.json({ error: '账号尚未获准上传文件' }, { status: 403 });
+  }
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;

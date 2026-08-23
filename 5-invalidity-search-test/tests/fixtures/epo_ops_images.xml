@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic OPS images-inquiry fixture. -->
+<ops:world-patent-data
+    xmlns:ops="http://ops.epo.org"
+    xmlns="http://www.epo.org/exchange">
+  <ops:document-inquiry>
+    <ops:publication-reference>
+      <document-id document-id-type="epodoc"><doc-number>EP3456789</doc-number><kind>A1</kind></document-id>
+    </ops:publication-reference>
+    <ops:inquiry-result>
+      <publication-reference>
+        <document-id document-id-type="docdb"><country>EP</country><doc-number>3456789</doc-number><kind>A1</kind></document-id>
+      </publication-reference>
+      <ops:document-instance system="ops.epo.org" link="EP/3456789/A1/thumbnail" number-of-pages="1" desc="Drawing">
+        <ops:document-format-options>
+          <ops:document-format>application/pdf</ops:document-format>
+          <ops:document-format>image/tiff</ops:document-format>
+        </ops:document-format-options>
+        <ops:document-section name="DRAWINGS" start-page="1"/>
+      </ops:document-instance>
+      <ops:document-instance system="ops.epo.org" link="published-data/images/EP/3456789/A1/fullimage" number-of-pages="3" desc="FullDocument">
+        <ops:document-format-options>
+          <ops:document-format>application/pdf</ops:document-format>
+          <ops:document-format>application/tiff</ops:document-format>
+        </ops:document-format-options>
+        <ops:document-section name="ABSTRACT" start-page="1"/>
+        <ops:document-section name="BIBLIOGRAPHY" start-page="1"/>
+        <ops:document-section name="DESCRIPTION" start-page="2"/>
+        <ops:document-section name="CLAIMS" start-page="3"/>
+      </ops:document-instance>
+    </ops:inquiry-result>
+  </ops:document-inquiry>
+</ops:world-patent-data>

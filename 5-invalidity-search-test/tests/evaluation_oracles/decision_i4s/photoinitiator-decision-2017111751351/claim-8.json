@@ -1,0 +1,21 @@
+{
+  "case_id": "photoinitiator-decision-2017111751351",
+  "claim_id": "8",
+  "decision_source": {"file_name": "无效决定（华鸿）.pdf", "pages": [8, 9], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {
+      "publication_number": "CN107272336A",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "closest_prior_art",
+      "legal_reasoning": {"type": "inventive_step", "outcome": "claim_lacks_inventive_step", "note": "决定还依赖权利要求1-7组合物本身的创造性结论和应用范围属于常规应用。"},
+      "concepts": [
+        {"concept_id": "composition", "label": "光固化组合物", "feature_selector_groups": [["光固化组合物"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "film_use", "label": "湿膜、干膜等膜材料用途", "feature_selector_groups": [["膜材料", "湿膜", "干膜"]], "expected_disclosure": "disclosed"}
+      ]
+    },
+    {"publication_number": "CN106883114A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"},
+    {"publication_number": "CN104004395A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"},
+    {"publication_number": "CN106010144A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"},
+    {"publication_number": "CN102766045A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"}
+  ]
+}

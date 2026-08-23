@@ -1,0 +1,22 @@
+{
+  "case_id": "photoinitiator-decision-2017111751351",
+  "claim_id": "9",
+  "decision_source": {"file_name": "无效决定（华鸿）.pdf", "pages": [9], "usage": "post_freeze_evaluation_only"},
+  "documents": [
+    {
+      "publication_number": "CN107272336A",
+      "human_evaluation_scope": "feature_mapping_available",
+      "human_reference_role": "closest_prior_art",
+      "legal_reasoning": {"type": "inventive_step", "outcome": "claim_lacks_inventive_step"},
+      "concepts": [
+        {"concept_id": "coating", "label": "将组合物涂布于基材", "feature_selector_groups": [["涂布"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "irradiation", "label": "用光照射固化", "feature_selector_groups": [["照射"]], "expected_disclosure": "disclosed"},
+        {"concept_id": "wavelength", "label": "150-600nm波长范围（证据1的370-420nm落入）", "feature_selector_groups": [["150-600", "150～600", "波长"]], "expected_disclosure": "disclosed"}
+      ]
+    },
+    {"publication_number": "CN106883114A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"},
+    {"publication_number": "CN104004395A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"},
+    {"publication_number": "CN106010144A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"},
+    {"publication_number": "CN102766045A", "human_evaluation_scope": "not_evaluated_by_decision_for_this_claim", "note": "未形成最终逐项映射。"}
+  ]
+}

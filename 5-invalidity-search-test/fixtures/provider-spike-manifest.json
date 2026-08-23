@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "recorded_at": "2026-07-19",
+  "environment": "local_test",
+  "requests": [
+    {
+      "provider": "google_patents",
+      "operation": "target_detail",
+      "method": "GET",
+      "url": "https://patents.google.com/patent/CN215310006U/zh",
+      "http_status": 200,
+      "content_type": "text/html",
+      "byte_size": 205653,
+      "verified_fields": [
+        "publication_number",
+        "filing_date",
+        "priority_date",
+        "publication_date",
+        "pdf_url",
+        "claims",
+        "description",
+        "citations"
+      ],
+      "replay_fixture": "tests/fixtures/google_patents_search.json"
+    },
+    {
+      "provider": "google_patents",
+      "operation": "candidate_pdf",
+      "method": "GET",
+      "url": "https://patentimages.storage.googleapis.com/5d/62/f4/55a45e786fbeaa/TWM311443U.pdf",
+      "http_status": 200,
+      "content_type": "application/pdf",
+      "byte_size": 1503716,
+      "page_count": 25,
+      "sha256": "ab8e71202680015da7a81fa7f9f55af07766579d060222d7344fb9d58a858393",
+      "canonical_id": "TWM311443U",
+      "publication_date": "2007-05-11"
+    },
+    {
+      "provider": "arxiv",
+      "operation": "atom_search",
+      "method": "GET",
+      "url": "https://export.arxiv.org/api/query",
+      "http_status": 200,
+      "content_type": "application/atom+xml",
+      "replay_fixture": "tests/fixtures/arxiv_atom.xml"
+    },
+    {
+      "provider": "arxiv",
+      "operation": "paper_pdf",
+      "method": "GET",
+      "url": "https://arxiv.org/pdf/1404.6756v1",
+      "http_status": 200,
+      "content_type": "application/pdf",
+      "byte_size": 91980,
+      "page_count": 7,
+      "sha256": "2226612750864866cdebae526f133c281dc2fdc7b02f1950df1a0803f3643c73",
+      "canonical_id": "arXiv:1404.6756v1",
+      "publication_date": "2014-04-27"
+    },
+    {
+      "provider": "openalex",
+      "operation": "works_search",
+      "method": "GET",
+      "url": "https://api.openalex.org/works",
+      "http_status": 200,
+      "content_type": "application/json",
+      "decision": "lead_only_until_source_document_is_retrieved"
+    },
+    {
+      "provider": "openalex_source",
+      "operation": "pdf_fetch_negative_path",
+      "method": "GET",
+      "url": "https://www.jneurosci.org/content/jneuro/25/38/8680.full.pdf",
+      "http_status": 403,
+      "content_type": "text/html",
+      "decision": "must_not_promote_to_retrieved_document"
+    },
+    {
+      "provider": "crossref",
+      "operation": "works_search",
+      "method": "GET",
+      "url": "https://api.crossref.org/works",
+      "http_status": 200,
+      "content_type": "application/json",
+      "decision": "lead_only_without_full_text"
+    }
+  ]
+}

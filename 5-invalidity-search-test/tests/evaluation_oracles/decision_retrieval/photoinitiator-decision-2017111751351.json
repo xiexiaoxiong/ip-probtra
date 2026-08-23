@@ -1,0 +1,12 @@
+{
+  "benchmark_version": "decision-retrieval-v1",
+  "case_id": "photoinitiator-decision-2017111751351",
+  "runtime_visibility": "forbidden",
+  "expected_documents": [
+    {"label": "D1", "publication_number": "CN107272336A", "required": true, "maximum_cumulative_rank": 10},
+    {"label": "D2", "publication_number": "CN106883114A", "required": false, "maximum_cumulative_rank": 10},
+    {"label": "D3", "publication_number": "CN104004395A", "required": false, "maximum_cumulative_rank": 10},
+    {"label": "D4", "publication_number": "CN106010144A", "required": false, "maximum_cumulative_rank": 10},
+    {"label": "D6", "publication_number": "CN102766045A", "required": false, "maximum_cumulative_rank": 10}
+  ]
+}

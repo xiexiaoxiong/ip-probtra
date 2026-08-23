@@ -93,9 +93,9 @@ def resolve_local_model_alias(model_name: Optional[str]) -> str:
     import os
 
     requested = str(model_name or "").strip()
-    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.7").strip() or "glm-4.7"
-    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.5-air").strip() or default_model
-    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.5v").strip() or default_model
+    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.6v").strip() or "glm-4.6v"
+    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.6v").strip() or default_model
+    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.6v").strip() or default_model
 
     if not requested:
         return default_model

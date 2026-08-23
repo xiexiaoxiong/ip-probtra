@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import datetime
 import json
+import os
 import threading
 import traceback
 import logging
@@ -142,13 +143,24 @@ def ensure_claim_compare_async_columns() -> None:
         logger.warning("Module4 async schema migration skipped: %s", error, exc_info=True)
 
 
+def looks_like_vision_model_name(model_name: str) -> bool:
+    lower = str(model_name or "").strip().lower()
+    if not lower:
+        return False
+    if "vision" in lower:
+        return True
+    if not lower.startswith("glm-"):
+        return False
+    return lower.endswith("v") or any(segment.endswith("v") for segment in lower.split("-"))
+
+
 def resolve_local_model_alias(model_name: Optional[str]) -> str:
     import os
 
     requested = str(model_name or "").strip()
-    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.7").strip() or "glm-4.7"
-    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.5-air").strip() or default_model
-    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.5v").strip() or default_model
+    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.6v").strip() or "glm-4.6v"
+    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.6v").strip() or default_model
+    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.6v").strip() or default_model
 
     if not requested:
         return default_model
@@ -156,22 +168,24 @@ def resolve_local_model_alias(model_name: Optional[str]) -> str:
     lower = requested.lower()
     last_segment = lower.rsplit("-", 1)[-1]
 
-    if lower.startswith("glm-") and "." in lower:
-        return fast_model
-    if lower.startswith("glm-") and any(tag in lower for tag in ("plus", "air", "airx", "flash", "flashx", "v")):
-        return requested
-    if lower.startswith("glm-") and not last_segment.isdigit():
-        return requested
     if "vision" in lower:
         return vision_model
+    if looks_like_vision_model_name(requested):
+        return requested
+    if lower.startswith("glm-") and any(tag in lower for tag in ("plus", "air", "airx", "flash", "flashx")):
+        return requested
+    if lower.startswith("glm-5-0-"):
+        return fast_model
+    if lower.startswith("glm-") and "." in lower:
+        return fast_model
+    if lower.startswith("glm-") and not last_segment.isdigit():
+        return requested
     if lower.startswith("doubao-"):
         if "pro" in lower:
             return default_model
         if "mini" in lower or "lite" in lower:
             return fast_model
         return default_model
-    if lower.startswith("glm-5-0-"):
-        return fast_model
     if "mini" in lower or "lite" in lower or "flash" in lower or "air" in lower:
         return fast_model
     return default_model
@@ -263,6 +277,39 @@ def convert_message_content_for_openai(content: Any) -> Any:
     return converted
 
 
+def flatten_message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+
+    text_parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            if item.strip():
+                text_parts.append(item.strip())
+            continue
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type == "text" or "text" in item:
+                text_value = str(item.get("text", "")).strip()
+                if text_value:
+                    text_parts.append(text_value)
+                continue
+            if item_type == "image_url":
+                image_url = item.get("image_url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                image_url_text = str(image_url or "").strip()
+                if image_url_text:
+                    text_parts.append(f"图片链接: {image_url_text}")
+                continue
+        text_value = str(item).strip()
+        if text_value:
+            text_parts.append(text_value)
+    return "\n".join(text_parts).strip()
+
+
 def convert_message_role_for_openai(message: Any) -> str:
     role = str(getattr(message, "type", "user") or "user").lower()
     if role == "human":
@@ -283,6 +330,10 @@ def should_use_bigmodel_direct_route(request_url: str) -> bool:
 
     disable_flag = (os.getenv("LOCAL_LLM_DISABLE_DIRECT_ROUTE") or "").strip().lower()
     if disable_flag in {"1", "true", "yes", "on"}:
+        return False
+
+    route_mode = (os.getenv("LOCAL_LLM_DIRECT_ROUTE_MODE") or "off").strip().lower()
+    if route_mode not in {"auto", "1", "true", "yes", "on"}:
         return False
 
     host = (urlparse(request_url).hostname or "").strip().lower()
@@ -390,7 +441,7 @@ def resolve_fallback_model_alias(model_name: str) -> str:
     fallback_vision = (os.getenv("LOCAL_LLM_FALLBACK_VISION_MODEL") or "").strip()
 
     requested = str(model_name or "").strip().lower()
-    if "vision" in requested:
+    if "vision" in requested or looks_like_vision_model_name(requested):
         return fallback_vision
     if requested.startswith("glm-5-0-") or any(tag in requested for tag in ("mini", "lite", "flash", "air")):
         return fallback_fast
@@ -436,6 +487,8 @@ def invoke_openai_compatible_via_urllib(
             last_error = RuntimeError(
                 f"HTTP {error.code}: {(body or str(error.reason)).strip()[:1000]}"
             )
+            if 400 <= error.code < 500 and error.code != 429:
+                break
         except Exception as error:
             last_error = error
 
@@ -477,7 +530,7 @@ def invoke_local_llm_via_http(
         raise RuntimeError("本地模型调用失败: 缺少 LOCAL_LLM_API_KEY")
 
     payload: Dict[str, Any] = {
-        "model": resolve_local_model_alias("vision"),
+        "model": resolve_local_model_alias(model),
         "messages": [
             {
                 "role": convert_message_role_for_openai(message),
@@ -487,6 +540,15 @@ def invoke_local_llm_via_http(
         ],
         "stream": False,
     }
+    if payload_uses_image_inputs(payload):
+        vision_model = resolve_local_model_alias(os.getenv("LOCAL_LLM_VISION_MODEL", "vision") or "vision")
+        if vision_model and str(payload.get("model") or "") != vision_model:
+            logger.info(
+                "Switching local LLM request to vision model for image inputs: %s -> %s",
+                payload.get("model"),
+                vision_model,
+            )
+            payload["model"] = vision_model
 
     if temperature is not None:
         payload["temperature"] = temperature
@@ -513,8 +575,8 @@ def invoke_local_llm_via_http(
             token_limit = max_allowed
         payload["max_tokens"] = token_limit
 
-    timeout_seconds = float(os.getenv("LOCAL_LLM_HTTP_TIMEOUT_SECONDS", "300") or "300")
-    max_attempts = max(1, int(os.getenv("LOCAL_LLM_HTTP_RETRIES", "3") or "3"))
+    timeout_seconds = float(os.getenv("LOCAL_LLM_HTTP_TIMEOUT_SECONDS", "240") or "240")
+    max_attempts = max(1, int(os.getenv("LOCAL_LLM_HTTP_RETRIES", "1") or "1"))
     retry_interval = float(os.getenv("LOCAL_LLM_HTTP_RETRY_INTERVAL_SECONDS", "2") or "2")
     request_url = f"{base_url}/chat/completions"
 
@@ -619,7 +681,7 @@ from coze_coding_utils.log.loop_trace import init_run_config, init_agent_config
 
 
 # 超时配置常量
-TIMEOUT_SECONDS = 900  # 15分钟
+TIMEOUT_SECONDS = int(os.getenv("MODULE4_WORKFLOW_TIMEOUT_SECONDS", "14400") or "14400")
 
 CLAIM_COMPARE_TERMINAL_STATUSES = {"completed", "error", "cancelled", "timeout"}
 

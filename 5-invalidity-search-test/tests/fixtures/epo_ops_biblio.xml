@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic, credential-free bibliographic retrieval fixture. -->
+<ops:world-patent-data
+    xmlns:ops="http://ops.epo.org"
+    xmlns="http://www.epo.org/exchange">
+  <ops:publication-reference>
+    <document-id document-id-type="epodoc">
+      <doc-number>EP3456789</doc-number><kind>A1</kind>
+    </document-id>
+  </ops:publication-reference>
+  <exchange-documents>
+    <exchange-document
+        system="ops.epo.org"
+        family-id="fixture-family-1001"
+        country="EP"
+        doc-number="3456789"
+        kind="A1">
+      <bibliographic-data>
+        <publication-reference>
+          <document-id document-id-type="docdb">
+            <country>EP</country><doc-number>3456789</doc-number><kind>A1</kind><date>20191120</date>
+          </document-id>
+          <document-id document-id-type="epodoc">
+            <doc-number>EP3456789</doc-number><date>20191120</date>
+          </document-id>
+        </publication-reference>
+        <application-reference doc-id="fixture-application-1001">
+          <document-id document-id-type="docdb">
+            <country>EP</country><doc-number>18700001</doc-number><kind>A</kind><date>20180115</date>
+          </document-id>
+        </application-reference>
+        <priority-claims>
+          <priority-claim sequence="1" kind="national">
+            <document-id document-id-type="docdb">
+              <country>EP</country><doc-number>17700001</doc-number><kind>A</kind><date>20170116</date>
+            </document-id>
+          </priority-claim>
+        </priority-claims>
+        <parties>
+          <applicants>
+            <applicant sequence="1" data-format="epodoc">
+              <applicant-name><name>FIXTURE ROBOTICS [ZZ]</name></applicant-name>
+            </applicant>
+          </applicants>
+        </parties>
+        <invention-title lang="de">Bodenreinigungsroboter mit anhebbarem Reinigungselement</invention-title>
+        <invention-title lang="en">Robot floor cleaner with a lifting cleaning pad</invention-title>
+      </bibliographic-data>
+      <abstract lang="en">
+        <p>A mobile floor cleaner raises a cleaning pad when a surface sensor detects carpet.</p>
+      </abstract>
+    </exchange-document>
+  </exchange-documents>
+</ops:world-patent-data>

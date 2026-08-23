@@ -57,6 +57,13 @@ class Settings:
     render_fallback_enabled: bool
     render_retry_attempts: int
     user_agent: str
+    historical_refresh_limit: int = 8
+    historical_refresh_concurrency: int = 4
+    browser_fallback_enabled: bool = True
+    browser_timeout_seconds: int = 60
+    browser_stable_rounds: int = 4
+    browser_max_scroll_rounds: int = 80
+    incomplete_image_threshold: int = 6
 
 
 def get_settings() -> Settings:
@@ -85,4 +92,11 @@ def get_settings() -> Settings:
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         ),
+        historical_refresh_limit=min(32, max(1, _int_env("PRODUCT_SEARCH_HISTORICAL_REFRESH_LIMIT", 8))),
+        historical_refresh_concurrency=min(8, max(1, _int_env("PRODUCT_SEARCH_HISTORICAL_REFRESH_CONCURRENCY", 4))),
+        browser_fallback_enabled=_truthy(os.getenv("PRODUCT_SEARCH_BROWSER_FALLBACK"), True),
+        browser_timeout_seconds=min(180, max(15, _int_env("PRODUCT_SEARCH_BROWSER_TIMEOUT_SECONDS", 60))),
+        browser_stable_rounds=min(10, max(2, _int_env("PRODUCT_SEARCH_BROWSER_STABLE_ROUNDS", 4))),
+        browser_max_scroll_rounds=min(200, max(10, _int_env("PRODUCT_SEARCH_BROWSER_MAX_SCROLL_ROUNDS", 80))),
+        incomplete_image_threshold=min(30, max(2, _int_env("PRODUCT_SEARCH_INCOMPLETE_IMAGE_THRESHOLD", 6))),
     )

@@ -41,15 +41,20 @@ export function HistoryList({
                       {showUser && session.userName ? ` · 用户: ${session.userName}` : ''}
                     </div>
                   </div>
-                  <Badge variant="outline">{session.status}</Badge>
+                  <div className="flex gap-2">
+                    <Badge variant="secondary">{session.analysisKind === 'invalidity' ? '无效检索' : '侵权分析'}</Badge>
+                    <Badge variant="outline">{session.status}</Badge>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link href={`/results?session=${session.id}`}>
+                  <Link href={session.analysisKind === 'invalidity' ? `/invalidity/results?session=${session.id}` : `/results?session=${session.id}`}>
                     <Button size="sm">查看结果</Button>
                   </Link>
-                  <Link href={`/database?session=${session.id}`}>
-                    <Button size="sm" variant="outline">查看数据库</Button>
-                  </Link>
+                  {session.analysisKind !== 'invalidity' ? (
+                    <Link href={`/database?session=${session.id}`}>
+                      <Button size="sm" variant="outline">查看数据库</Button>
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             );

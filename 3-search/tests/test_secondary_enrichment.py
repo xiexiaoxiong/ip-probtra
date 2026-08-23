@@ -8,6 +8,10 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from src.graphs.nodes.get_keywords_node import get_keywords_node
+from src.graphs.nodes.coze_search_node import (
+    _expanded_object_terms,
+    _product_matches_object_terms,
+)
 from src.graphs.nodes.secondary_enrichment_node import (
     _classify_supplement_evidence,
     _extract_accepted_text,
@@ -52,14 +56,35 @@ def test_get_keywords_explicit_list_is_trimmed_and_deduplicated() -> None:
         GetKeywordsInput(
             patent_record_id=91,
             analysis_session_id="analysis_test",
-            input_keywords=[" 扫地机器人 ", "", "拖地", "扫地机器人"],
+            input_keywords=[" 扫地机器人 ", "", "拖地", "拖地扫地机器人", "扫地机器人"],
+            input_object_terms=[" 扫地机器人 ", "扫地机器人"],
         ),
         config=None,
         runtime=None,
     )
 
-    assert output.keywords == ["扫地机器人", "拖地"]
+    assert output.keywords == ["扫地机器人", "拖地扫地机器人"]
+    assert output.object_terms == ["扫地机器人"]
     assert output.error_message == ""
+
+
+def test_object_category_guard_rejects_hollow_board_for_headphone_query() -> None:
+    object_terms = ["开放式头戴耳机"]
+    assert "耳机" in _expanded_object_terms(object_terms)
+    assert _product_matches_object_terms(
+        {
+            "product_name": "开放式蓝牙头戴耳机运动耳麦",
+            "description": "头戴式音频设备",
+        },
+        object_terms,
+    )
+    assert not _product_matches_object_terms(
+        {
+            "product_name": "PP中空空心板塑料板中空格子板",
+            "description": "用于车间周转和运输包装",
+        },
+        object_terms,
+    )
 
 
 def test_same_product_accepts_exact_url() -> None:

@@ -1,0 +1,6 @@
+/.env.prod.local
+/.data/
+/.logs/
+/releases/
+/CURRENT_RELEASE
+/.CURRENT_RELEASE.*.tmp

@@ -2,6 +2,7 @@ import path from 'path';
 import { readFile } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUploadsDir } from '@/lib/runtime-paths';
+import { requireTestUser } from '@/lib/test-route-guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,9 +25,11 @@ function isSafeSegment(value: string): boolean {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ runId: string; fileName: string }> },
 ): Promise<NextResponse> {
+  const unauthorized = await requireTestUser(request);
+  if (unauthorized) return unauthorized;
   const { runId, fileName } = await params;
 
   if (!isSafeSegment(runId) || !isSafeSegment(fileName)) {

@@ -1,0 +1,157 @@
+{
+  "schema_version": "1.0",
+  "patents": {
+    "CN103025390B.pdf": {
+      "publication_number": "CN103025390B",
+      "title": "一种具备车座的摆角调整装置的健身脚踏车",
+      "application_date": "2011-07-22",
+      "critical_date": "2010-07-23",
+      "publication_date": "2016-09-28",
+      "claim_count": 2,
+      "independent_claim_ids": ["1"],
+      "requires_ocr": true
+    },
+    "CN107786922B电器示例专利.pdf": {
+      "publication_number": "CN107786922B",
+      "title": "便携式音响设备",
+      "critical_date": "2016-08-26",
+      "publication_date": "2020-12-04",
+      "claim_count": 12,
+      "independent_claim_ids": ["1"]
+    },
+    "CN109121449B-示例专利，运动器材.pdf": {
+      "publication_number": "CN109121449B",
+      "title": "移动式充电站以及用于确定球类运动器材位置的系统",
+      "critical_date": "2016-01-22",
+      "publication_date": "2022-07-19",
+      "claim_count": 30,
+      "independent_claim_ids": ["1", "23", "24"]
+    },
+    "CN111249616B医疗器械示例专利.pdf": {
+      "publication_number": "CN111249616B",
+      "title": "药物转移套件的医疗器械帽",
+      "critical_date": "2014-09-29",
+      "publication_date": "2022-09-23",
+      "claim_count": 11,
+      "independent_claim_ids": ["1", "9"]
+    },
+    "CN204260680U.pdf": {
+      "publication_number": "CN204260680U",
+      "title": "扫地机器人系统及扫地机器人",
+      "critical_date": "2014-11-25",
+      "publication_date": "2015-04-15",
+      "claim_count": 10,
+      "independent_claim_ids": ["1", "7"],
+      "requires_ocr": true
+    },
+    "CN210244097U多边形计时器.pdf": {
+      "publication_number": "CN210244097U",
+      "title": "一种多边形计时器",
+      "critical_date": "2018-05-30",
+      "publication_date": "2020-04-03",
+      "claim_count": 12,
+      "independent_claim_ids": ["1"]
+    },
+    "CN212879151U.pdf": {
+      "publication_number": "CN212879151U",
+      "title": "扫地机器人及扫地机器人系统",
+      "critical_date": "2020-05-06",
+      "publication_date": "2021-04-06",
+      "claim_count": 10,
+      "independent_claim_ids": ["1", "6", "7"]
+    },
+    "CN214387347U扫地机器人示例.pdf": {
+      "publication_number": "CN214387347U",
+      "title": "具备拖地功能的扫地机器人和扫地机器人系统",
+      "critical_date": "2020-10-29",
+      "publication_date": "2021-10-15",
+      "claim_count": 10,
+      "independent_claim_ids": ["1", "10"]
+    },
+    "CN215310006U（运动器材示例）.pdf": {
+      "publication_number": "CN215310006U",
+      "title": "具有影像显示装置的运动器材",
+      "critical_date": "2021-05-31",
+      "publication_date": "2021-12-28",
+      "claim_count": 10,
+      "independent_claim_ids": ["1"]
+    },
+    "CN216086819U-化妆镜.pdf": {
+      "publication_number": "CN216086819U",
+      "title": "一种便携式紫外摄像电子设备",
+      "application_date": "2021-11-08",
+      "priority_date": null,
+      "critical_date": "2021-11-08",
+      "publication_date": "2022-03-18",
+      "claim_count": 10,
+      "independent_claim_ids": ["1"],
+      "requires_ocr": false
+    },
+    "CN216205649U-水枪-公开.PDF": {
+      "publication_number": "CN216205649U",
+      "title": "水枪",
+      "critical_date": "2020-04-22",
+      "publication_date": "2022-04-05",
+      "claim_count": 17,
+      "independent_claim_ids": ["1"]
+    },
+    "CN217770321U.pdf": {
+      "publication_number": "CN217770321U",
+      "title": "一种适配于不同耳朵的无线耳机",
+      "application_date": "2022-06-17",
+      "priority_date": null,
+      "critical_date": "2022-06-17",
+      "publication_date": "2022-11-08",
+      "claim_count": 8,
+      "independent_claim_ids": ["1"],
+      "requires_ocr": false
+    },
+    "CN218484462U扫地机器人示例.pdf": {
+      "publication_number": "CN218484462U",
+      "title": "一种扫地机器人以及扫地机器人系统",
+      "critical_date": "2022-07-01",
+      "publication_date": "2023-02-17",
+      "claim_count": 10,
+      "independent_claim_ids": ["1", "8"]
+    },
+    "CN222278451U 灯具结构测试.pdf": {
+      "publication_number": "CN222278451U",
+      "title": "灯具装置",
+      "critical_date": "2024-04-08",
+      "publication_date": "2024-12-31",
+      "claim_count": 11,
+      "independent_claim_ids": ["1"]
+    },
+    "CN222356540U.pdf": {
+      "publication_number": "CN222356540U",
+      "title": "一种开放式头戴耳机",
+      "application_date": "2024-04-29",
+      "priority_date": null,
+      "critical_date": "2024-04-29",
+      "publication_date": "2025-01-14",
+      "claim_count": 13,
+      "independent_claim_ids": ["1"],
+      "requires_ocr": false
+    },
+    "CN223261634U.pdf": {
+      "publication_number": "CN223261634U",
+      "title": "一种开放式头戴耳机",
+      "application_date": "2024-09-13",
+      "priority_date": null,
+      "critical_date": "2024-09-13",
+      "publication_date": "2025-08-22",
+      "claim_count": 10,
+      "independent_claim_ids": ["1"],
+      "requires_ocr": false
+    },
+    "CN_108181988_B.pdf": {
+      "publication_number": "CN108181988B",
+      "title": "一种LRA马达驱动芯片的控制方法以及装置",
+      "critical_date": "2017-12-29",
+      "publication_date": "2020-12-11",
+      "claim_count": 10,
+      "independent_claim_ids": ["1", "6"]
+    }
+  },
+  "auxiliary_extensions": [".xlsx"]
+}

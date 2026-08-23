@@ -15,6 +15,45 @@ from langchain_core.messages import AIMessage
 
 logger = logging.getLogger(__name__)
 
+_LLM_COOLDOWN_UNTIL = 0.0
+_LLM_COOLDOWN_REASON = ""
+
+
+def _cooldown_seconds_for_error(error: Exception | None) -> float:
+    detail = str(error or "")
+    lower = detail.lower()
+    if not detail:
+        return 0.0
+    is_rate_limit = "HTTP 429" in detail or "速率限制" in detail
+    is_timeout = "timed out" in lower or "timeout" in lower
+    if not is_rate_limit and not is_timeout:
+        return 0.0
+    env_key = "LOCAL_LLM_FAILURE_COOLDOWN_SECONDS" if is_rate_limit else "LOCAL_LLM_TIMEOUT_COOLDOWN_SECONDS"
+    default_seconds = "300" if is_rate_limit else "0"
+    try:
+        return max(0.0, float(os.getenv(env_key, default_seconds) or default_seconds))
+    except ValueError:
+        return float(default_seconds)
+
+
+def _raise_if_llm_in_cooldown() -> None:
+    if _LLM_COOLDOWN_UNTIL <= 0:
+        return
+    remaining = _LLM_COOLDOWN_UNTIL - time.monotonic()
+    if remaining <= 0:
+        return
+    reason = _LLM_COOLDOWN_REASON or "recent transient failure"
+    raise RuntimeError(f"LLM provider cooling down for {int(remaining)}s after {reason}")
+
+
+def _record_llm_failure_for_cooldown(error: Exception | None) -> None:
+    global _LLM_COOLDOWN_UNTIL, _LLM_COOLDOWN_REASON
+    seconds = _cooldown_seconds_for_error(error)
+    if seconds <= 0:
+        return
+    _LLM_COOLDOWN_UNTIL = max(_LLM_COOLDOWN_UNTIL, time.monotonic() + seconds)
+    _LLM_COOLDOWN_REASON = str(error or "transient failure").strip()[:180]
+
 
 def bootstrap_local_env() -> None:
     try:
@@ -36,11 +75,22 @@ def bootstrap_local_env() -> None:
         os.environ["PGDATABASE_URL"] = os.getenv("DATABASE_URL", "")
 
 
+def looks_like_vision_model_name(model_name: str) -> bool:
+    lower = str(model_name or "").strip().lower()
+    if not lower:
+        return False
+    if "vision" in lower:
+        return True
+    if not lower.startswith("glm-"):
+        return False
+    return lower.endswith("v") or any(segment.endswith("v") for segment in lower.split("-"))
+
+
 def resolve_local_model_alias(model_name: Optional[str]) -> str:
     requested = str(model_name or "").strip()
-    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.7").strip() or "glm-4.7"
-    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.5-air").strip() or default_model
-    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.5v").strip() or default_model
+    default_model = os.getenv("LOCAL_LLM_DEFAULT_MODEL", "glm-4.6v").strip() or "glm-4.6v"
+    fast_model = os.getenv("LOCAL_LLM_FAST_MODEL", "glm-4.6v").strip() or default_model
+    vision_model = os.getenv("LOCAL_LLM_VISION_MODEL", "glm-4.6v").strip() or default_model
 
     if not requested:
         return default_model
@@ -48,22 +98,24 @@ def resolve_local_model_alias(model_name: Optional[str]) -> str:
     lower = requested.lower()
     last_segment = lower.rsplit("-", 1)[-1]
 
-    if lower.startswith("glm-") and "." in lower:
-        return fast_model
-    if lower.startswith("glm-") and any(tag in lower for tag in ("plus", "air", "airx", "flash", "flashx", "v")):
-        return requested
-    if lower.startswith("glm-") and not last_segment.isdigit():
-        return requested
     if "vision" in lower:
         return vision_model
+    if looks_like_vision_model_name(requested):
+        return requested
+    if lower.startswith("glm-") and any(tag in lower for tag in ("plus", "air", "airx", "flash", "flashx")):
+        return requested
+    if lower.startswith("glm-5-0-"):
+        return fast_model
+    if lower.startswith("glm-") and "." in lower:
+        return fast_model
+    if lower.startswith("glm-") and not last_segment.isdigit():
+        return requested
     if lower.startswith("doubao-"):
         if "pro" in lower:
             return default_model
         if "mini" in lower or "lite" in lower:
             return fast_model
         return default_model
-    if lower.startswith("glm-5-0-"):
-        return fast_model
     if "mini" in lower or "lite" in lower or "flash" in lower or "air" in lower:
         return fast_model
     return default_model
@@ -76,6 +128,10 @@ def should_use_bigmodel_direct_route(request_url: str) -> bool:
 
     disable_flag = (os.getenv("LOCAL_LLM_DISABLE_DIRECT_ROUTE") or "").strip().lower()
     if disable_flag in {"1", "true", "yes", "on"}:
+        return False
+
+    route_mode = (os.getenv("LOCAL_LLM_DIRECT_ROUTE_MODE") or "off").strip().lower()
+    if route_mode not in {"auto", "1", "true", "yes", "on"}:
         return False
 
     host = (urlparse(request_url).hostname or "").strip().lower()
@@ -209,6 +265,39 @@ def convert_message_content_for_openai(content: Any) -> Any:
     return converted
 
 
+def flatten_message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+
+    text_parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            if item.strip():
+                text_parts.append(item.strip())
+            continue
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type == "text" or "text" in item:
+                text_value = str(item.get("text", "")).strip()
+                if text_value:
+                    text_parts.append(text_value)
+                continue
+            if item_type == "image_url":
+                image_url = item.get("image_url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                image_url_text = str(image_url or "").strip()
+                if image_url_text:
+                    text_parts.append(f"图片链接: {image_url_text}")
+                continue
+        text_value = str(item).strip()
+        if text_value:
+            text_parts.append(text_value)
+    return "\n".join(text_parts).strip()
+
+
 def convert_message_role_for_openai(message: Any) -> str:
     role = str(getattr(message, "type", "user") or "user").lower()
     if role == "human":
@@ -229,6 +318,46 @@ def payload_uses_image_inputs(payload: Dict[str, Any]) -> bool:
     return False
 
 
+def extract_response_message_content(response: Dict[str, Any] | None) -> Any:
+    if not isinstance(response, dict):
+        return ""
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return ""
+    message = first_choice.get("message") or {}
+    if not isinstance(message, dict):
+        return ""
+    return message.get("content", "")
+
+
+def response_content_is_empty(response: Dict[str, Any] | None) -> bool:
+    content = extract_response_message_content(response)
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        return not flatten_message_content_to_text(content).strip()
+    if content is None:
+        return True
+    return not str(content).strip()
+
+
+def build_empty_response_error(response: Dict[str, Any] | None) -> RuntimeError:
+    choice: Dict[str, Any] = {}
+    if isinstance(response, dict):
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            choice = choices[0]
+    finish_reason = str(choice.get("finish_reason", "") or "unknown")
+    response_model = str((response or {}).get("model", "") or "unknown")
+    response_id = str((response or {}).get("id", "") or "unknown")
+    return RuntimeError(
+        f"LLM返回空内容: model={response_model}, finish_reason={finish_reason}, id={response_id}"
+    )
+
+
 def should_prefer_fallback_for_text(payload: Dict[str, Any]) -> bool:
     provider = (os.getenv("LOCAL_LLM_TEXT_PROVIDER") or "").strip().lower()
     return provider == "fallback" and not payload_uses_image_inputs(payload)
@@ -245,7 +374,7 @@ def resolve_fallback_model_alias(model_name: str) -> str:
     fallback_vision = (os.getenv("LOCAL_LLM_FALLBACK_VISION_MODEL") or "").strip()
 
     requested = str(model_name or "").strip().lower()
-    if "vision" in requested:
+    if "vision" in requested or looks_like_vision_model_name(requested):
         return fallback_vision
     if requested.startswith("glm-5-0-") or any(tag in requested for tag in ("mini", "lite", "flash", "air")):
         return fallback_fast
@@ -283,6 +412,8 @@ def invoke_openai_compatible_via_urllib(
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="ignore")
             last_error = RuntimeError(f"HTTP {error.code}: {(body or str(error.reason)).strip()[:1000]}")
+            if 400 <= error.code < 500 and error.code != 429:
+                break
         except Exception as error:
             last_error = error
 
@@ -309,6 +440,7 @@ def invoke_local_llm(
         raise RuntimeError("本地模型调用失败: 缺少 LOCAL_LLM_BASE_URL")
     if not api_key:
         raise RuntimeError("本地模型调用失败: 缺少 LOCAL_LLM_API_KEY")
+    _raise_if_llm_in_cooldown()
 
     resolved_model = resolve_local_model_alias(model)
     payload: Dict[str, Any] = {
@@ -322,6 +454,15 @@ def invoke_local_llm(
         ],
         "stream": False,
     }
+    if payload_uses_image_inputs(payload):
+        vision_model = resolve_local_model_alias(os.getenv("LOCAL_LLM_VISION_MODEL", "vision") or "vision")
+        if vision_model and str(payload.get("model") or "") != vision_model:
+            logger.info(
+                "Switching local LLM request to vision model for image inputs: %s -> %s",
+                payload.get("model"),
+                vision_model,
+            )
+            payload["model"] = vision_model
 
     if temperature is not None:
         payload["temperature"] = temperature
@@ -348,8 +489,8 @@ def invoke_local_llm(
             token_limit = max_allowed
         payload["max_tokens"] = token_limit
 
-    timeout_seconds = float(os.getenv("LOCAL_LLM_HTTP_TIMEOUT_SECONDS", "300") or "300")
-    max_attempts = max(1, int(os.getenv("LOCAL_LLM_HTTP_RETRIES", "3") or "3"))
+    timeout_seconds = float(os.getenv("LOCAL_LLM_HTTP_TIMEOUT_SECONDS", "240") or "240")
+    max_attempts = max(1, int(os.getenv("LOCAL_LLM_HTTP_RETRIES", "1") or "1"))
     retry_interval = float(os.getenv("LOCAL_LLM_HTTP_RETRY_INTERVAL_SECONDS", "2") or "2")
     request_url = f"{base_url}/chat/completions"
 
@@ -404,6 +545,11 @@ def invoke_local_llm(
         except Exception as error:
             last_error = error
 
+    if response is not None and response_content_is_empty(response):
+        last_error = build_empty_response_error(response)
+        logger.warning("%s; will try fallback provider if configured", last_error)
+        response = None
+
     if response is None and fallback_base_url and fallback_api_key and fallback_model:
         try:
             logger.warning("Primary LLM failed, fallback to secondary provider model=%s", fallback_model)
@@ -420,13 +566,19 @@ def invoke_local_llm(
         except Exception as error:
             last_error = error
 
+    if response is not None and response_content_is_empty(response):
+        last_error = build_empty_response_error(response)
+        logger.warning("%s", last_error)
+        response = None
+
     if response is None:
+        _record_llm_failure_for_cooldown(last_error)
         detail = str(last_error).strip()[:1000] if last_error else "未知错误"
         raise RuntimeError(f"本地模型 HTTP 调用失败: {detail}")
 
     choice = (response.get("choices") or [{}])[0]
     message = choice.get("message") or {}
-    content = message.get("content", "")
+    content = extract_response_message_content(response)
 
     return AIMessage(
         content=content,

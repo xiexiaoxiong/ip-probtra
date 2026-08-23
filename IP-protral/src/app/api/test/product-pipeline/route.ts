@@ -1,6 +1,12 @@
+import { randomUUID } from 'crypto';
+import { mkdir, writeFile } from 'fs/promises';
+import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { module2ConfigKeyForIndustry } from '@/lib/industry-keyword-flow';
+import { postJsonWithTimeout } from '@/lib/long-running-http';
 import { pgQuery } from '@/lib/postgres';
+import { getUploadsDir } from '@/lib/runtime-paths';
+import { canonicalServiceUrl, requireTestUser } from '@/lib/test-route-guard';
 import type { IndustryType } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -8,11 +14,20 @@ export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 export const maxDuration = 1800;
 
-type PipelineAction = 'keywords' | 'productSearch' | 'claimCompare' | 'all';
+export type PipelineAction = 'patentParse' | 'keywords' | 'productSearch' | 'claimCompare' | 'all';
 type StepStatus = 'completed' | 'failed' | 'skipped';
 
-type PipelineRequest = {
+export type PatentInput = {
+  type?: 'url' | 'file' | 'text';
+  url?: string;
+  fileUrl?: string;
+  fileName?: string;
+  text?: string;
+};
+
+export type PipelineRequest = {
   action?: PipelineAction;
+  patentInput?: PatentInput;
   patentRecordId?: number;
   analysisSessionId?: string;
   industry?: IndustryType;
@@ -43,39 +58,71 @@ const KEYWORD_PRIORITY: Record<string, number> = {
   COMBINED: 3,
 };
 
-function getWorkflowBaseUrl(port: number): string {
-  return `http://127.0.0.1:${port}/run`;
-}
-
-function getModuleConfigs(): Record<'module2' | 'module2Fitness' | 'module2HomeAppliances' | 'productDetail' | 'module4', ModuleConfig> {
+function getModuleConfigs(): Record<'module1' | 'module2' | 'module2Fitness' | 'module2HomeAppliances' | 'productDetail' | 'module4', ModuleConfig> {
   return {
+    module1: {
+      url: canonicalServiceUrl('PATENT_ANALYSIS_MODULE1_API_URL', ['TEST_MODULE1_API_URL', 'MODULE1_API_URL'], 'http://127.0.0.1:5101/run'),
+      token: process.env.PATENT_ANALYSIS_MODULE1_API_TOKEN || process.env.TEST_MODULE1_API_TOKEN || process.env.MODULE1_API_TOKEN || undefined,
+    },
     module2: {
-      url: process.env.MODULE2_API_URL || getWorkflowBaseUrl(5102),
-      token: process.env.MODULE2_API_TOKEN || undefined,
+      url: canonicalServiceUrl('PATENT_ANALYSIS_MODULE2_API_URL', ['TEST_MODULE2_API_URL', 'MODULE2_API_URL'], 'http://127.0.0.1:5102/run'),
+      token: process.env.PATENT_ANALYSIS_MODULE2_API_TOKEN || process.env.TEST_MODULE2_API_TOKEN || process.env.MODULE2_API_TOKEN || undefined,
     },
     module2Fitness: {
-      url: process.env.MODULE2_FITNESS_API_URL || getWorkflowBaseUrl(5103),
-      token: process.env.MODULE2_FITNESS_API_TOKEN || undefined,
+      url: canonicalServiceUrl('PATENT_ANALYSIS_MODULE2_FITNESS_API_URL', ['TEST_MODULE2_FITNESS_API_URL', 'MODULE2_FITNESS_API_URL'], 'http://127.0.0.1:5103/run'),
+      token: process.env.PATENT_ANALYSIS_MODULE2_FITNESS_API_TOKEN || process.env.TEST_MODULE2_FITNESS_API_TOKEN || process.env.MODULE2_FITNESS_API_TOKEN || undefined,
     },
     module2HomeAppliances: {
-      url: process.env.MODULE2_HOME_APPLIANCES_API_URL || getWorkflowBaseUrl(5104),
-      token: process.env.MODULE2_HOME_APPLIANCES_API_TOKEN || undefined,
+      url: canonicalServiceUrl('PATENT_ANALYSIS_MODULE2_HOME_APPLIANCES_API_URL', ['TEST_MODULE2_HOME_APPLIANCES_API_URL', 'MODULE2_HOME_APPLIANCES_API_URL'], 'http://127.0.0.1:5104/run'),
+      token: process.env.PATENT_ANALYSIS_MODULE2_HOME_APPLIANCES_API_TOKEN || process.env.TEST_MODULE2_HOME_APPLIANCES_API_TOKEN || process.env.MODULE2_HOME_APPLIANCES_API_TOKEN || undefined,
     },
     productDetail: {
-      url:
-        process.env.PRODUCT_DETAIL_MODULE3_API_URL ||
-        process.env.PRODUCT_SEARCH_API_URL ||
-        'http://127.0.0.1:5107/run',
-      token: process.env.PRODUCT_DETAIL_MODULE3_API_TOKEN || undefined,
+      url: canonicalServiceUrl('PATENT_ANALYSIS_PRODUCT_SEARCH_API_URL', ['TEST_PRODUCT_DETAIL_MODULE3_API_URL', 'PRODUCT_DETAIL_MODULE3_API_URL', 'PRODUCT_SEARCH_API_URL'], 'http://127.0.0.1:5107/run'),
+      token: process.env.PATENT_ANALYSIS_PRODUCT_SEARCH_API_TOKEN || process.env.TEST_PRODUCT_DETAIL_MODULE3_API_TOKEN || process.env.PRODUCT_DETAIL_MODULE3_API_TOKEN || process.env.PRODUCT_SEARCH_API_TOKEN || undefined,
     },
     module4: {
-      url: process.env.MODULE4_API_URL || getWorkflowBaseUrl(5106),
-      token: process.env.MODULE4_API_TOKEN || undefined,
+      url: canonicalServiceUrl('PATENT_ANALYSIS_MODULE4_API_URL', ['TEST_MODULE4_API_URL', 'MODULE4_API_URL'], 'http://127.0.0.1:5106/run'),
+      token: process.env.PATENT_ANALYSIS_MODULE4_API_TOKEN || process.env.TEST_MODULE4_API_TOKEN || process.env.MODULE4_API_TOKEN || undefined,
     },
   };
 }
 
-function createHeaders(token?: string): HeadersInit {
+async function resolvePatentInput(input: PatentInput | undefined): Promise<{
+  patentFileUrl: string;
+  inputType: 'url' | 'file' | 'text';
+  inputLabel: string;
+}> {
+  const inputType = input?.type;
+  if (inputType === 'url') {
+    const patentFileUrl = readText(input?.url);
+    if (!patentFileUrl) throw new Error('缺少专利 URL');
+    return { patentFileUrl, inputType, inputLabel: patentFileUrl };
+  }
+  if (inputType === 'file') {
+    const patentFileUrl = readText(input?.fileUrl);
+    if (!patentFileUrl) throw new Error('缺少上传后的专利文件路径');
+    return { patentFileUrl, inputType, inputLabel: readText(input?.fileName) || '已上传专利文件' };
+  }
+  if (inputType === 'text') {
+    const patentText = readText(input?.text);
+    if (!patentText) throw new Error('缺少专利文本');
+    const uploadsDir = getUploadsDir();
+    await mkdir(uploadsDir, { recursive: true });
+    const patentFileUrl = path.join(
+      uploadsDir,
+      `product-pipeline-${Date.now()}-${randomUUID()}.txt`,
+    );
+    await writeFile(patentFileUrl, patentText, 'utf-8');
+    return {
+      patentFileUrl,
+      inputType,
+      inputLabel: `粘贴文本（${patentText.length} 字）`,
+    };
+  }
+  throw new Error('请选择上传文件、输入网址或粘贴专利文本');
+}
+
+function createHeaders(token?: string): Record<string, string> {
   return token
     ? {
         Authorization: `Bearer ${token}`,
@@ -109,6 +156,56 @@ function readText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
 }
 
+function normalizeProductUrlKey(value: unknown): string {
+  const text = readText(value);
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    const trackingKeys = new Set([
+      'spm', 'scm', 'source', 'ref', 'ref_', 'from', 'pvid', 'clickid',
+      'campaign', 'campaignid', 'adid', 'affiliate', 'affid',
+    ]);
+    const keepParams = new URLSearchParams();
+    const entries = [...url.searchParams.entries()]
+      .filter(([key]) => !key.toLowerCase().startsWith('utm_') && !trackingKeys.has(key.toLowerCase()))
+      .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+        leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue),
+      );
+    for (const [key, item] of entries) {
+      keepParams.append(key, item);
+    }
+    url.hash = '';
+    url.search = keepParams.toString();
+    url.hostname = url.hostname.toLowerCase();
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return text.split('#', 1)[0].trim().toLowerCase().replace(/\/$/, '');
+  }
+}
+
+function productDedupeKey(row: JsonObject): string {
+  const urlKey = normalizeProductUrlKey(row.final_url) || normalizeProductUrlKey(row.product_url);
+  if (urlKey) return `url:${urlKey}`;
+  const platform = readText(row.platform).toLowerCase();
+  const name = readText(row.product_name).replace(/\s+/g, '').toLowerCase();
+  return name ? `title:${platform}:${name}` : '';
+}
+
+function countDuplicateProductRows(rows: JsonObject[]): number {
+  const seen = new Set<string>();
+  let duplicates = 0;
+  for (const row of rows) {
+    const key = productDedupeKey(row);
+    if (!key) continue;
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+  }
+  return duplicates;
+}
+
 function moduleFailed(result: JsonObject): boolean {
   const status = readText(result.status).toLowerCase();
   return status === 'failed' || status === 'error';
@@ -119,18 +216,15 @@ function moduleErrorMessage(result: JsonObject): string {
 }
 
 async function callModule(config: ModuleConfig, payload: JsonObject, timeoutMs: number): Promise<JsonObject> {
-  const response = await fetch(config.url, {
-    method: 'POST',
+  const response = await postJsonWithTimeout(config.url, payload, {
     headers: createHeaders(config.token),
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
+    timeoutMs,
   });
-  const text = await response.text();
   let data: JsonObject;
   try {
-    data = JSON.parse(text) as JsonObject;
+    data = JSON.parse(response.text) as JsonObject;
   } catch {
-    data = { raw: text };
+    data = { raw: response.text };
   }
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${JSON.stringify(data).slice(0, 500)}`);
@@ -235,9 +329,10 @@ async function loadClaimCompareResults(claimCompareRunId?: number): Promise<{
   rows: JsonObject[];
   productCount: number;
   featureCount: number;
+  llmErrorCount: number;
 }> {
   if (!claimCompareRunId) {
-    return { rows: [], productCount: 0, featureCount: 0 };
+    return { rows: [], productCount: 0, featureCount: 0, llmErrorCount: 0 };
   }
   const [rowsResult, countResult] = await Promise.all([
     pgQuery(
@@ -255,18 +350,80 @@ async function loadClaimCompareResults(claimCompareRunId?: number): Promise<{
     pgQuery(
       `
         SELECT COUNT(DISTINCT product_id) AS product_count,
-               COUNT(*) AS feature_count
+               COUNT(*) AS feature_count,
+               COUNT(*) FILTER (
+                 WHERE COALESCE(reason, '') LIKE '%大模型调用失败%'
+                    OR COALESCE(reason, '') LIKE '%模型调用失败%'
+                    OR COALESCE(reason, '') LIKE '%规则兜底%'
+                    OR COALESCE(evidence, '') LIKE '%大模型调用失败%'
+                    OR COALESCE(evidence, '') LIKE '%规则兜底%'
+                    OR COALESCE(comparison_result, '') LIKE '%模型调用失败%'
+                    OR COALESCE(comparison_result, '') LIKE '%规则兜底%'
+               ) AS llm_error_count
         FROM claim_compare_results
         WHERE claim_compare_run_id = $1
       `,
       [claimCompareRunId],
     ),
   ]);
-  const counts = countResult.rows[0] as { product_count?: string; feature_count?: string } | undefined;
+  const counts =
+    countResult.rows[0] as
+      | { product_count?: string; feature_count?: string; llm_error_count?: string }
+      | undefined;
   return {
     rows: rowsResult.rows as JsonObject[],
     productCount: Number(counts?.product_count || 0),
     featureCount: Number(counts?.feature_count || 0),
+    llmErrorCount: Number(counts?.llm_error_count || 0),
+  };
+}
+
+async function runPatentParseStep(
+  body: PipelineRequest,
+  configs: ReturnType<typeof getModuleConfigs>,
+) {
+  const startedAt = Date.now();
+  const resolvedInput = await resolvePatentInput(body.patentInput);
+  const safeSessionId = readText(body.analysisSessionId)
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .slice(0, 80);
+  const taskId = `product_pipeline_${safeSessionId || Date.now()}_${Date.now()}`;
+  const result = await callModule(
+    configs.module1,
+    {
+      patent_file: {
+        url: resolvedInput.patentFileUrl,
+        file_type: 'image',
+      },
+      task_id: taskId,
+    },
+    30 * 60 * 1000,
+  );
+  const patentRecordId = Number(result.db_record_id || 0);
+  const finalOutput = result.final_output && typeof result.final_output === 'object'
+    ? result.final_output as JsonObject
+    : {};
+  const claims = Array.isArray(finalOutput.claims) ? finalOutput.claims : [];
+  const figures = Array.isArray(finalOutput.figures) ? finalOutput.figures : [];
+  const failed = moduleFailed(result) || !Number.isInteger(patentRecordId) || patentRecordId <= 0;
+  return {
+    status: failed ? 'failed' : 'completed',
+    elapsedMs: Date.now() - startedAt,
+    patentRecordId: patentRecordId > 0 ? patentRecordId : undefined,
+    taskId: readText(result.task_id) || taskId,
+    runId: readText(result.run_id),
+    inputType: resolvedInput.inputType,
+    inputLabel: resolvedInput.inputLabel,
+    claimsCount: claims.length,
+    figuresCount: figures.length,
+    metadata: finalOutput.metadata && typeof finalOutput.metadata === 'object'
+      ? finalOutput.metadata
+      : {},
+    finalOutput,
+    errorMessage: failed
+      ? moduleErrorMessage(result) || '模块1没有写入可供后续模块使用的 patent_record_id'
+      : '',
+    raw: result,
   };
 }
 
@@ -367,7 +524,8 @@ async function runProductSearchStep(
   const rejectedCandidatesCount = Number(result.rejected_candidates_count || 0);
   const candidateSummary = await loadCandidateSummary(productDetailSearchRunId);
   const errorMessage = moduleErrorMessage(result);
-  const failed = moduleFailed(result) || acceptedProductsCount === 0 || products.length === 0;
+  const duplicateProductRows = countDuplicateProductRows(products);
+  const failed = moduleFailed(result) || acceptedProductsCount === 0 || products.length === 0 || duplicateProductRows > 0;
   return {
     status: failed ? 'failed' : 'completed',
     elapsedMs: Date.now() - startedAt,
@@ -377,10 +535,16 @@ async function runProductSearchStep(
     rejectedCandidatesCount,
     keywords: Array.isArray(result.keywords) ? result.keywords : inputKeywords,
     products,
+    duplicateProductRows,
     candidateSummary,
     candidatesPreview: Array.isArray(result.candidates_preview) ? result.candidates_preview : [],
     errorMessage: failed
-      ? errorMessage || (totalCandidateLinksCount === 0 ? '新模块三没有找到候选详情页' : '新模块三没有 accepted 商品')
+      ? errorMessage ||
+        (duplicateProductRows > 0
+          ? `新模块三返回 ${duplicateProductRows} 条重复商品`
+          : totalCandidateLinksCount === 0
+            ? '新模块三没有找到候选详情页'
+            : '新模块三没有 accepted 商品')
       : '',
     raw: result,
   };
@@ -398,7 +562,11 @@ async function runClaimCompareStep(body: PipelineRequest, configs: ReturnType<ty
   );
   const claimCompareRunId = typeof result.claim_compare_run_id === 'number' ? result.claim_compare_run_id : undefined;
   const compareRows = await loadClaimCompareResults(claimCompareRunId);
-  const failed = moduleFailed(result) || compareRows.productCount === 0 || compareRows.featureCount === 0;
+  const failed =
+    moduleFailed(result) ||
+    compareRows.productCount === 0 ||
+    compareRows.featureCount === 0 ||
+    compareRows.llmErrorCount > 0;
   return {
     status: failed ? 'failed' : 'completed',
     elapsedMs: Date.now() - startedAt,
@@ -406,7 +574,13 @@ async function runClaimCompareStep(body: PipelineRequest, configs: ReturnType<ty
     resultSummary: String(result.result_summary || ''),
     productCount: compareRows.productCount,
     featureCount: compareRows.featureCount,
-    errorMessage: failed ? moduleErrorMessage(result) || '模块四没有生成有效比对结果' : '',
+    llmErrorCount: compareRows.llmErrorCount,
+    errorMessage: failed
+      ? moduleErrorMessage(result) ||
+        (compareRows.llmErrorCount > 0
+          ? `模块四存在 ${compareRows.llmErrorCount} 行模型调用失败兜底结果`
+          : '模块四没有生成有效比对结果')
+      : '',
     rows: compareRows.rows,
     raw: result,
   };
@@ -532,7 +706,9 @@ async function loadExamplePatents(): Promise<JsonObject[]> {
   return examples;
 }
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const unauthorized = await requireTestUser(request);
+  if (unauthorized) return unauthorized;
   try {
     const examples = await loadExamplePatents();
     return NextResponse.json({ ok: true, examples });
@@ -544,92 +720,114 @@ export async function GET(): Promise<NextResponse> {
   }
 }
 
+async function runCanonicalPatentAnalysisModules(body: PipelineRequest): Promise<JsonObject> {
+  const startedAt = Date.now();
+  const action: PipelineAction = body.action || 'all';
+  const analysisSessionId = String(body.analysisSessionId || '').trim() || `module_test_${Date.now()}`;
+  const patentRecordId = Number(body.patentRecordId);
+  if (action !== 'patentParse' && (!Number.isInteger(patentRecordId) || patentRecordId <= 0)) {
+    throw new Error('patentRecordId 必填且必须为正整数');
+  }
+  const normalizedBody: PipelineRequest = {
+    ...body,
+    action,
+    patentRecordId,
+    analysisSessionId,
+    industry: body.industry || 'general',
+  };
+  const configs = getModuleConfigs();
+  const response: JsonObject = {
+    ok: true,
+    action,
+    patentRecordId,
+    analysisSessionId,
+    startedAt: new Date(startedAt).toISOString(),
+  };
+
+  if (action === 'patentParse') {
+    const patentParseStep = await runPatentParseStep(normalizedBody, configs);
+    response.patentParseStep = patentParseStep;
+    response.patentRecordId = patentParseStep.patentRecordId;
+    const failure = collectStepFailure(patentParseStep, '模块1专利解析');
+    if (failure) {
+      response.ok = false;
+      response.error = failure;
+    }
+    response.finishedAt = new Date().toISOString();
+    response.elapsedMs = Date.now() - startedAt;
+    return response;
+  }
+
+  let generatedKeywords: string[] = [];
+  if (action === 'keywords' || action === 'all') {
+    const keywordStep = await runKeywordStep(normalizedBody, configs);
+    response.keywordStep = keywordStep;
+    generatedKeywords = keywordTexts(Array.isArray(keywordStep.keywords) ? keywordStep.keywords : [], 50);
+  } else {
+    response.keywords = await loadKeywords({ patentRecordId, analysisSessionId });
+  }
+
+  if (action === 'productSearch' || action === 'all') {
+    const keywordFailed = collectStepFailure(response.keywordStep, '模块2关键词');
+    if (action === 'all' && keywordFailed) {
+      response.productSearchStep = {
+        status: 'skipped',
+        elapsedMs: 0,
+        products: [],
+        errorMessage: '模块2没有生成关键词，已跳过新模块三。',
+      };
+    } else {
+      response.productSearchStep = await runProductSearchStep(normalizedBody, configs, generatedKeywords);
+    }
+  }
+
+  if (action === 'claimCompare' || action === 'all') {
+    const productStep = response.productSearchStep as JsonObject | undefined;
+    if (action === 'all' && productStep?.status !== 'completed') {
+      response.claimCompareStep = {
+        status: 'skipped',
+        elapsedMs: 0,
+        rows: [],
+        productCount: 0,
+        featureCount: 0,
+        errorMessage: '新模块三没有 accepted 商品，已跳过模块四。',
+      };
+    } else {
+      response.claimCompareStep = await runClaimCompareStep(normalizedBody, configs);
+    }
+  }
+
+  const failures = [
+    collectStepFailure(response.keywordStep, '模块2关键词'),
+    collectStepFailure(response.productSearchStep, '新模块三'),
+    collectStepFailure(response.claimCompareStep, '模块四'),
+  ].filter(Boolean);
+  if (failures.length > 0) {
+    response.ok = false;
+    response.error = failures.join('；');
+  }
+
+  response.finishedAt = new Date().toISOString();
+  response.elapsedMs = Date.now() - startedAt;
+  return response;
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const unauthorized = await requireTestUser(request);
+  if (unauthorized) return unauthorized;
   const startedAt = Date.now();
   try {
     const body = (await request.json()) as PipelineRequest;
-    const patentRecordId = Number(body.patentRecordId);
-    if (!Number.isInteger(patentRecordId) || patentRecordId <= 0) {
-      return NextResponse.json({ error: 'patentRecordId 必填且必须为正整数' }, { status: 400 });
-    }
-    const action: PipelineAction = body.action || 'all';
-    const analysisSessionId = String(body.analysisSessionId || '').trim() || `module_test_${Date.now()}`;
-    const normalizedBody: PipelineRequest = {
-      ...body,
-      action,
-      patentRecordId,
-      analysisSessionId,
-      industry: body.industry || 'general',
-    };
-    const configs = getModuleConfigs();
-    const response: JsonObject = {
-      ok: true,
-      action,
-      patentRecordId,
-      analysisSessionId,
-      startedAt: new Date(startedAt).toISOString(),
-    };
-
-    let generatedKeywords: string[] = [];
-    if (action === 'keywords' || action === 'all') {
-      const keywordStep = await runKeywordStep(normalizedBody, configs);
-      response.keywordStep = keywordStep;
-      generatedKeywords = keywordTexts(Array.isArray(keywordStep.keywords) ? keywordStep.keywords : [], 50);
-    } else {
-      response.keywords = await loadKeywords({ patentRecordId, analysisSessionId });
-    }
-
-    if (action === 'productSearch' || action === 'all') {
-      const keywordFailed = collectStepFailure(response.keywordStep, '模块2关键词');
-      if (action === 'all' && keywordFailed) {
-        response.productSearchStep = {
-          status: 'skipped',
-          elapsedMs: 0,
-          products: [],
-          errorMessage: '模块2没有生成关键词，已跳过新模块三。',
-        };
-      } else {
-        response.productSearchStep = await runProductSearchStep(normalizedBody, configs, generatedKeywords);
-      }
-    }
-
-    if (action === 'claimCompare' || action === 'all') {
-      const productStep = response.productSearchStep as JsonObject | undefined;
-      if (action === 'all' && productStep?.status !== 'completed') {
-        response.claimCompareStep = {
-          status: 'skipped',
-          elapsedMs: 0,
-          rows: [],
-          productCount: 0,
-          featureCount: 0,
-          errorMessage: '新模块三没有 accepted 商品，已跳过模块四。',
-        };
-      } else {
-        response.claimCompareStep = await runClaimCompareStep(normalizedBody, configs);
-      }
-    }
-
-    const failures = [
-      collectStepFailure(response.keywordStep, '模块2关键词'),
-      collectStepFailure(response.productSearchStep, '新模块三'),
-      collectStepFailure(response.claimCompareStep, '模块四'),
-    ].filter(Boolean);
-    if (failures.length > 0) {
-      response.ok = false;
-      response.error = failures.join('；');
-    }
-
-    response.finishedAt = new Date().toISOString();
-    response.elapsedMs = Date.now() - startedAt;
-    return NextResponse.json(response);
+    return NextResponse.json(await runCanonicalPatentAnalysisModules(body));
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
         elapsedMs: Date.now() - startedAt,
       },
-      { status: 500 },
+      { status: message.includes('patentRecordId 必填') ? 400 : 500 },
     );
   }
 }

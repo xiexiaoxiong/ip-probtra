@@ -272,7 +272,7 @@ function ResultsContent() {
               <Link href={`/module1?session=${sessionId}`}>
                 <Button variant="outline" size="sm" className="gap-1.5">
                   <FileSearch className="h-4 w-4" />
-                  模块1结果
+                  专利原文
                 </Button>
               </Link>
             )}

@@ -1,0 +1,7 @@
+/.env.test.local
+/.data/
+/.logs/
+/.pytest_cache/
+/.venv/
+**/__pycache__/
+*.py[cod]

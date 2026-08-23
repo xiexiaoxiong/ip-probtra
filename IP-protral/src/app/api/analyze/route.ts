@@ -6,7 +6,8 @@
 // 每个模块仅使用上游输出，不反向依赖
 // 当前主链路通过 Postgres + patent_record_id + analysis_session_id 传递数据
 // 飞书字段仅作为历史兼容/备选读取路径保留
-// 本地优先调用 127.0.0.1:510x 的 /run 端点
+// Agent 与 /test/product-pipeline 共用 runCanonicalPatentAnalysisModules；
+// 下方旧 executePipeline 仅保留迁移审计，不再接受新用户请求。
 // ============================================================
 
 import { mkdir, writeFile } from 'fs/promises';
@@ -49,12 +50,18 @@ import type {
   ProductComparison,
   ProductInfo,
 } from '@/lib/types';
-import { normalizeKeywordList } from '@/lib/keyword-utils';
+import {
+  extractKeywordObjectTerms,
+  filterExecutableKeywordRecords,
+  normalizeKeywordList,
+} from '@/lib/keyword-utils';
+import type { ExecutableKeywordRecord } from '@/lib/keyword-utils';
 import { getUploadsDir } from '@/lib/runtime-paths';
 import { pgQuery } from '@/lib/postgres';
 import { createErrorReport } from '@/lib/error-reports-store';
 import { isModule3Terminal, shouldTriggerInitialModule4 } from '@/lib/async-analysis-state';
 import { buildAutoConfirmedKeywordState } from '@/lib/industry-keyword-flow';
+import { POST as runCanonicalPatentAnalysisRoute } from '@/app/api/test/product-pipeline/route';
 
 // ============================================================
 // 数据映射工具函数
@@ -785,7 +792,7 @@ async function enrichProductsFromDb(
   patentRecordIdForDb: number,
 ): Promise<ProductInfo[]> {
   try {
-    const searchProductRows = await pgQuery<Record<string, unknown>>(
+    let searchProductRows = await pgQuery<Record<string, unknown>>(
       `SELECT id, product_id, product_name, product_url, product_source, price, brand, manufacturer, description, picture
        FROM search_products
        WHERE patent_record_id = $1
@@ -793,6 +800,17 @@ async function enrichProductsFromDb(
        ORDER BY id ASC`,
       [patentRecordIdForDb, sessionIdForDb],
     );
+    if (searchProductRows.rows.length === 0) {
+      searchProductRows = await pgQuery<Record<string, unknown>>(
+        `SELECT id, id::text AS product_id, product_name, COALESCE(final_url, product_url) AS product_url,
+                platform AS product_source, price, brand, manufacturer, description, picture
+         FROM product_detail_search_products
+         WHERE patent_record_id = $1
+           AND analysis_session_id = $2
+         ORDER BY created_at ASC, id ASC`,
+        [patentRecordIdForDb, sessionIdForDb],
+      );
+    }
     if (searchProductRows.rows.length === 0) return productsFromComparison;
 
     const enriched = new Map<string, ProductInfo>();
@@ -1066,7 +1084,17 @@ async function getPatentFromDb(patentRecordId: number): Promise<PatentInfo | und
   }
 }
 
-async function getKeywordTexts(patentRecordId: number, limit: number = 30): Promise<string[] | null> {
+interface ExecutableKeywordBundle {
+  keywords: string[];
+  objectTerms: string[];
+}
+
+async function getKeywordTexts(
+  patentRecordId: number,
+  analysisSessionId: string,
+  keywordRunId?: number,
+  limit: number = 30,
+): Promise<ExecutableKeywordBundle | null> {
   try {
     const exists = await pgQuery<{ exists: string | null }>(
       `select to_regclass('keyword_records') as exists`,
@@ -1074,18 +1102,20 @@ async function getKeywordTexts(patentRecordId: number, limit: number = 30): Prom
     if (!exists.rows[0]?.exists) {
       return null;
     }
-    const result = await pgQuery<{ keyword_text: string | null }>(
-      `select keyword_text
+    const result = await pgQuery<ExecutableKeywordRecord>(
+      `select keyword_text, keyword_type, source_location, raw_payload
        from keyword_records
        where patent_record_id = $1
+         and analysis_session_id = $2
+         and ($3::integer is null or keyword_run_id = $3)
        order by id asc
-       limit $2`,
-      [patentRecordId, limit],
+       limit $4`,
+      [patentRecordId, analysisSessionId, keywordRunId ?? null, limit],
     );
-    const keywords = result.rows
-      .map((r) => (r.keyword_text ? String(r.keyword_text).trim() : ''))
-      .filter((k) => k.length > 0);
-    return Array.from(new Set(keywords));
+    return {
+      keywords: filterExecutableKeywordRecords(result.rows),
+      objectTerms: extractKeywordObjectTerms(result.rows),
+    };
   } catch {
     return null;
   }
@@ -1212,6 +1242,236 @@ async function reportPipelineFailure(input: {
   } catch {}
 }
 
+function canonicalModuleStep(
+  response: Record<string, unknown>,
+  key: 'patentParseStep' | 'keywordStep' | 'productSearchStep' | 'claimCompareStep',
+): Record<string, unknown> {
+  const value = response[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function canonicalStepError(step: Record<string, unknown>, label: string): string | null {
+  if (step.status === 'completed') return null;
+  const detail = asNonEmptyString(step.errorMessage) || asNonEmptyString(step.error_message);
+  return `${label}${detail ? `：${detail}` : '未完成'}`;
+}
+
+function keywordTextsFromCanonicalStep(step: Record<string, unknown>): string[] {
+  if (!Array.isArray(step.keywords)) return [];
+  return normalizeKeywordList(step.keywords.map((item) => {
+    if (typeof item === 'string') return item;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return '';
+    const row = item as Record<string, unknown>;
+    return String(row.keyword_text || row.keywordText || '').trim();
+  }));
+}
+
+async function requestCanonicalPatentAnalysisModules(
+  body: Record<string, unknown>,
+  cookieHeader: string,
+): Promise<Record<string, unknown>> {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (cookieHeader) headers.set('cookie', cookieHeader);
+  const response = await runCanonicalPatentAnalysisRoute(new NextRequest(
+    'http://127.0.0.1/api/test/product-pipeline',
+    { method: 'POST', headers, body: JSON.stringify(body) },
+  ));
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(asNonEmptyString(payload.error) || `统一专利分析后端返回 HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+/**
+ * Agent-side automatic orchestration for the same four module executors used by
+ * /test/product-pipeline. The page boundary is different; the backend is not.
+ */
+async function executeCanonicalPatentAnalysis(
+  sessionId: string,
+  type: 'url' | 'file' | 'text',
+  params: { url?: string; fileKey?: string; fileName?: string; fileUrl?: string; text?: string },
+  cookieHeader: string,
+): Promise<void> {
+  const pipelineStart = Date.now();
+  let activeStep = 1;
+  let patent: PatentInfo | undefined;
+  let patentRecordId = 0;
+  try {
+    await updateSessionStatus(sessionId, 'running');
+    await updateStepStatus(sessionId, 1, 'running');
+    const patentInput = type === 'url'
+      ? { type, url: params.url }
+      : type === 'file'
+        ? { type, fileUrl: params.fileUrl, fileName: params.fileName }
+        : { type, text: params.text };
+    const parseResponse = await requestCanonicalPatentAnalysisModules({
+      action: 'patentParse',
+      analysisSessionId: sessionId,
+      patentInput,
+    }, cookieHeader);
+    const parseStep = canonicalModuleStep(parseResponse, 'patentParseStep');
+    const parseError = canonicalStepError(parseStep, '模块1专利解析');
+    if (parseError) throw new Error(parseError);
+    patentRecordId = Number(parseStep.patentRecordId || parseResponse.patentRecordId || 0);
+    if (!Number.isInteger(patentRecordId) || patentRecordId <= 0) {
+      throw new Error('模块1没有返回可供后续模块使用的 patent_record_id');
+    }
+    patent = await getPatentFromDb(patentRecordId);
+    await updateResults(sessionId, {
+      patent,
+      dbRecordId: patentRecordId,
+      module1RunId: asNonEmptyString(parseStep.runId),
+    }, {
+      patentTitle: patent?.title ?? null,
+      patentNumber: patent?.patentNumber ?? null,
+    });
+    await updateStepStatus(sessionId, 1, 'completed');
+
+    activeStep = 2;
+    await updateStepStatus(sessionId, 2, 'running');
+    const industryContext = [
+      patent?.title,
+      patent?.abstract,
+      patent?.specification,
+      ...(patent?.independentClaims || []),
+      ...(patent?.dependentClaims || []),
+    ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
+    const industry = await detectIndustry(industryContext);
+    await updateResults(sessionId, {
+      detectedIndustry: industry.industry,
+      industryReasoning: industry.reasoning,
+      industryUsed: industry.industry,
+    });
+    await updateStepStatus(sessionId, 2, 'completed');
+
+    activeStep = 3;
+    await updateStepStatus(sessionId, 3, 'running');
+    const keywordResponse = await requestCanonicalPatentAnalysisModules({
+      action: 'keywords',
+      analysisSessionId: sessionId,
+      patentRecordId,
+      industry: industry.industry,
+    }, cookieHeader);
+    const keywordStep = canonicalModuleStep(keywordResponse, 'keywordStep');
+    const keywordError = canonicalStepError(keywordStep, '模块2关键词生成');
+    if (keywordError) throw new Error(keywordError);
+    const keywords = keywordTextsFromCanonicalStep(keywordStep);
+    await updateResults(sessionId, {
+      keywords,
+      keywordRunId: Number(keywordStep.keywordRunId || 0) || undefined,
+      module2RunId: asNonEmptyString(
+        keywordStep.raw && typeof keywordStep.raw === 'object'
+          ? (keywordStep.raw as Record<string, unknown>).run_id
+          : undefined,
+      ),
+      keywordConfirmation: buildAutoConfirmedKeywordState(keywords),
+    });
+    await updateStepStatus(sessionId, 3, 'completed');
+
+    activeStep = 4;
+    await updateStepStatus(sessionId, 4, 'running');
+    const productResponse = await requestCanonicalPatentAnalysisModules({
+      action: 'productSearch',
+      analysisSessionId: sessionId,
+      patentRecordId,
+      manualKeywords: keywords,
+    }, cookieHeader);
+    const productStep = canonicalModuleStep(productResponse, 'productSearchStep');
+    const productError = canonicalStepError(productStep, '模块3商品详情检索');
+    if (productError) throw new Error(productError);
+    const productSearchRunId = Number(productStep.productDetailSearchRunId || 0) || undefined;
+    await updateResults(sessionId, {
+      searchRunId: productSearchRunId,
+      module3RunId: productSearchRunId ? String(productSearchRunId) : undefined,
+      module3TaskStatus: 'completed',
+      module3EnrichedProductsCount: Number(productStep.acceptedProductsCount || 0),
+      module3Exception: undefined,
+    });
+    await updateStepStatus(sessionId, 4, 'completed');
+
+    activeStep = 5;
+    await updateStepStatus(sessionId, 5, 'running');
+    const comparisonResponse = await requestCanonicalPatentAnalysisModules({
+      action: 'claimCompare',
+      analysisSessionId: sessionId,
+      patentRecordId,
+    }, cookieHeader);
+    const comparisonStep = canonicalModuleStep(comparisonResponse, 'claimCompareStep');
+    const comparisonError = canonicalStepError(comparisonStep, '模块4权利要求与商品比对');
+    if (comparisonError) throw new Error(comparisonError);
+    const claimCompareRunId = Number(comparisonStep.claimCompareRunId || 0) || undefined;
+    const artifacts = await loadComparisonArtifacts(
+      sessionId,
+      patentRecordId,
+      {
+        claimCompareRunId,
+        runId: asNonEmptyString(
+          comparisonStep.raw && typeof comparisonStep.raw === 'object'
+            ? (comparisonStep.raw as Record<string, unknown>).run_id
+            : undefined,
+        ) || '',
+        allComparisonResults: [],
+        resultSummary: asNonEmptyString(comparisonStep.resultSummary) || '',
+        tableUrls: [],
+      },
+    );
+    if (!artifacts.comparisons.length) {
+      throw new Error(artifacts.errorMessage || '模块4没有生成可用比对结果');
+    }
+    await updateResults(sessionId, {
+      products: artifacts.products,
+      comparisons: artifacts.comparisons,
+      claimCompareRunId: artifacts.claimCompareRunId,
+      initialClaimCompareRunId: artifacts.claimCompareRunId,
+      finalClaimCompareRunId: artifacts.claimCompareRunId,
+      module4RunId: asNonEmptyString(
+        comparisonStep.raw && typeof comparisonStep.raw === 'object'
+          ? (comparisonStep.raw as Record<string, unknown>).run_id
+          : undefined,
+      ),
+      module4TaskStatus: 'completed',
+      module4Exception: undefined,
+    });
+    await updateStepStatus(sessionId, 5, 'completed');
+
+    activeStep = 6;
+    await updateStepStatus(sessionId, 6, 'running');
+    await updateResults(sessionId, {
+      patent,
+      products: artifacts.products,
+      comparisons: artifacts.comparisons,
+      resultsCompleteness: 'final',
+      step5Phase: 'completed',
+      partialAnalysisAvailable: false,
+    });
+    await updateStepStatus(sessionId, 6, 'completed');
+    await updateSessionStatus(sessionId, 'completed');
+    console.log(`[Pipeline ${sessionId}] 统一专利分析后端完成 (${Date.now() - pipelineStart}ms)`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await updateStepStatus(sessionId, activeStep, 'error', message).catch(() => undefined);
+    await updateSessionStatus(sessionId, 'error');
+    await updateResults(sessionId, {
+      ...(activeStep <= 3 ? { module2Exception: message } : {}),
+      ...(activeStep === 4 ? { module3Exception: message } : {}),
+      ...(activeStep >= 5 ? { module4Exception: message } : {}),
+    });
+    await reportPipelineFailure({
+      sessionId,
+      error,
+      patentText: buildPatentTextSnippet(params, patent ?? null),
+      inputType: type,
+      inputValue: type === 'url' ? params.url ?? null : type === 'file' ? params.fileKey ?? null : params.text ?? null,
+      fileUrl: type === 'file' ? params.fileUrl ?? null : null,
+      meta: { pipeline: 'canonical-patent-analysis-modules', activeStep, totalTimeMs: Date.now() - pipelineStart },
+    });
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained only to replay pre-unification sessions during migration
 async function executePipeline(
   sessionId: string,
   type: 'url' | 'file' | 'text',
@@ -1430,11 +1690,16 @@ async function executePipeline(
       console.warn(`[Pipeline ${sessionId}] 模块2异常: ${module2Error}`);
     }
 
-    const keywordsFromDb =
+    const keywordBundleFromDb =
       module1Result.dbRecordId && !module2Error
-        ? await getKeywordTexts(module1Result.dbRecordId)
+        ? await getKeywordTexts(
+            module1Result.dbRecordId,
+            sessionId,
+            module2Result?.keywordRunId,
+          )
         : null;
-    const autoKeywordList = normalizeKeywordList(keywordsFromDb ?? []);
+    const autoKeywordList = normalizeKeywordList(keywordBundleFromDb?.keywords ?? []);
+    const keywordObjectTerms = normalizeKeywordList(keywordBundleFromDb?.objectTerms ?? []);
     let keywordList = autoKeywordList;
     if (!module2Error && autoKeywordList.length === 0) {
       module2Error = '模块2未生成任何有效关键词，无法进行商品检索';
@@ -1516,6 +1781,7 @@ async function executePipeline(
       sessionId,
       `${sessionId}-module3`,
       keywordList,
+      keywordObjectTerms,
       (msg) => console.log(`[Pipeline ${sessionId}] 模块3进度: ${msg}`),
     );
     module3TaskStatus = module3Task.status === 'accepted' ? 'queued' : module3Task.status;
@@ -2024,14 +2290,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     fileName,
     fileUrl,
     text,
-  }, currentUser);
+  }, currentUser, { pipelineVersion: 'patent-analysis-modules-v1' });
 
   const sessionId = session.id;
+  const cookieHeader = request.headers.get('cookie') || '';
 
   // 后台异步执行分析流水线（不阻塞响应）
   // 使用 setImmediate 确保在当前请求完成后才启动
   setImmediate(() => {
-    executePipeline(sessionId, type, { url, fileKey, fileName, fileUrl, text }).catch((err) => {
+    executeCanonicalPatentAnalysis(
+      sessionId,
+      type,
+      { url, fileKey, fileName, fileUrl, text },
+      cookieHeader,
+    ).catch((err) => {
       console.error(`[Pipeline ${sessionId}] 未捕获异常:`, err);
       void updateSessionStatus(sessionId, 'error');
       void reportPipelineFailure({

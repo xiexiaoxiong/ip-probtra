@@ -1,0 +1,113 @@
+{
+  "case_id": "wireless-earphone-decision-2022215166391",
+  "comparison_reasoning_imported": false,
+  "conclusions_imported": false,
+  "documents": [
+    {
+      "byte_size": 612962,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-01",
+      "file_name": "source_documents/CN216649931U.pdf",
+      "page_count": 9,
+      "publication_date": "2022-05-31",
+      "publication_number": "CN216649931U",
+      "sha256": "bc37d3ccec445cab9710a7df7dc6c667c672c49e9b52ae4ca2db1648ce7e4cb7",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/47/a8/cc/05ae22dfc1d079/CN216649931U.pdf",
+      "text_char_count": 5812,
+      "title": "Earphone structure of rotatory regulation ear-hang"
+    },
+    {
+      "byte_size": 783524,
+      "decision_date_qualified": false,
+      "evidence_label": "evidence-02",
+      "file_name": "source_documents/CN215818549U.pdf",
+      "page_count": 12,
+      "publication_date": "2022-02-11",
+      "publication_number": "CN215818549U",
+      "sha256": "b5ce30c5194beeace624ef6d7b9fd74e89e78f514419c28891f3035ac2ea22c1",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/2a/fd/8b/cf0d5a4f04c041/CN215818549U.pdf",
+      "text_char_count": 7661,
+      "title": "Rotatable open TWS earphone"
+    },
+    {
+      "byte_size": 1073666,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-03",
+      "file_name": "source_documents/CN210781272U.pdf",
+      "page_count": 17,
+      "publication_date": "2020-06-16",
+      "publication_number": "CN210781272U",
+      "sha256": "800c68a91e98e6333253d5961211971ce679784b3bc019d3e4f53e3e4003e320",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/18/11/23/677531deb088dc/CN210781272U.pdf",
+      "text_char_count": 10744,
+      "title": "Earphone set"
+    },
+    {
+      "byte_size": 653057,
+      "decision_date_qualified": false,
+      "evidence_label": "evidence-04",
+      "file_name": "source_documents/CN210274475U.pdf",
+      "page_count": 8,
+      "publication_date": "2020-04-07",
+      "publication_number": "CN210274475U",
+      "sha256": "b44262f24d0be0138d98f8d3d6150948d3ccd390bdbf45a260fe491e4340521e",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/bc/87/e1/56ac2407bd61aa/CN210274475U.pdf",
+      "text_char_count": 5208,
+      "title": "Bluetooth headset's storehouse of charging"
+    },
+    {
+      "byte_size": 534810,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-05",
+      "file_name": "source_documents/CN210431794U.pdf",
+      "page_count": 8,
+      "publication_date": "2020-04-28",
+      "publication_number": "CN210431794U",
+      "sha256": "f662f865186346182070956ad447f2452b0ba26b2b58506ce03db286d0dc1685",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/c0/a5/b5/146715430c70cf/CN210431794U.pdf",
+      "text_char_count": 5311,
+      "title": "Bluetooth headset and Bluetooth headset assembly"
+    },
+    {
+      "byte_size": 274901,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-06",
+      "file_name": "source_documents/CN210042148U.pdf",
+      "page_count": 6,
+      "publication_date": "2020-02-07",
+      "publication_number": "CN210042148U",
+      "sha256": "2b60a256e0c384cdfbee1d71c89908c65b031a3a8f099a6276db1c186b17aa3e",
+      "source_provider": "google_patents_pdf",
+      "source_url": "https://patentimages.storage.googleapis.com/27/49/1e/0599507d6918b8/CN210042148U.pdf",
+      "text_char_count": 2787,
+      "title": "Can dismantle bluetooth headset of adjustable ear-hang"
+    }
+  ],
+  "fixture_version": "decision-benchmark-source-v1",
+  "non_patent_documents": [],
+  "runtime_visibility": "source_inputs_only",
+  "target": {
+    "application_number": "202221516639.1",
+    "publication_number": "CN217770321U",
+    "title": "一种适配于不同耳朵的无线耳机"
+  },
+  "target_document": {
+    "byte_size": 961802,
+    "decision_date_qualified": false,
+    "evidence_label": "target",
+    "file_name": "target_document/CN217770321U.pdf",
+    "page_count": 11,
+    "publication_date": "2022-11-08",
+    "publication_number": "CN217770321U",
+    "sha256": "e2df4b7184c0ea4c2f4d77f075b352c858f450aaa8de5af7fa766065b6ab17d5",
+    "source_provider": "google_patents_pdf",
+    "source_url": "https://patentimages.storage.googleapis.com/df/e6/5c/92e83442c012ad/CN217770321U.pdf",
+    "text_char_count": 4907,
+    "title": "Wireless earphone adapted to different ears"
+  }
+}

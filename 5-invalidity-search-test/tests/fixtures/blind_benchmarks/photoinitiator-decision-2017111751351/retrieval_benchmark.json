@@ -1,0 +1,9 @@
+{
+  "benchmark_version": "blind-retrieval-v2",
+  "case_id": "photoinitiator-decision-2017111751351",
+  "runtime_visibility": "forbidden_until_search_results_frozen",
+  "expected_documents": [
+    {"label": "D1", "publication_number": "CN107272336A", "required": true, "maximum_cumulative_rank": 10},
+    {"label": "supporting-6", "publication_number": "CN102766045A", "required": false, "maximum_cumulative_rank": 10}
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "case_id": "battery-slurry-decision-2014106703299",
+  "comparison_reasoning_imported": false,
+  "conclusions_imported": false,
+  "documents": [
+    {
+      "byte_size": 563448,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-01",
+      "file_name": "source_documents/CN103633269A.pdf",
+      "page_count": 9,
+      "publication_date": "2014-03-12",
+      "publication_number": "CN103633269A",
+      "sha256": "ad67890d659d539cebfe29eb6581a4239f5da96a02bcfaebc146a6696eb214ec",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/103633269/A/fullimage?Range=1-9",
+      "text_char_count": 0,
+      "title": "Yellow ceramic diaphragm for lithium ion battery and application thereof"
+    },
+    {
+      "byte_size": 1712813,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-05",
+      "file_name": "source_documents/CN103915594A.pdf",
+      "page_count": 9,
+      "publication_date": "2014-07-09",
+      "publication_number": "CN103915594A",
+      "sha256": "4743328c32832e39241debe8e2590b05d48b411ea3794dddde17646383aafdce",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/103915594/A/fullimage?Range=1-9",
+      "text_char_count": 0,
+      "title": "Low-ion-impedance high-temperature-resisting lithium battery coating diaphragm"
+    },
+    {
+      "byte_size": 384714,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-06",
+      "file_name": "source_documents/CN103647034A.pdf",
+      "page_count": 7,
+      "publication_date": "2014-03-19",
+      "publication_number": "CN103647034A",
+      "sha256": "ae206a944f44efaf2fb6b0ca1825a0337ce7b6be2c69ff607361e555421e696d",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/103647034/A/fullimage?Range=1-7",
+      "text_char_count": 0,
+      "title": "Method for preparing nitride ceramic coating applied to lithium ion battery"
+    },
+    {
+      "byte_size": 1831934,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-07",
+      "file_name": "source_documents/CN103915595A.pdf",
+      "page_count": 9,
+      "publication_date": "2014-07-09",
+      "publication_number": "CN103915595A",
+      "sha256": "f3dd548440374ebae956f5a85c814ff88f21836aed1f18ff62c3c578df89bf9f",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/103915595/A/fullimage?Range=1-9",
+      "text_char_count": 0,
+      "title": "Aqueous polymer diaphragm and preparation method thereof"
+    },
+    {
+      "byte_size": 531996,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-08",
+      "file_name": "source_documents/CN103396710A.pdf",
+      "page_count": 8,
+      "publication_date": "2013-11-20",
+      "publication_number": "CN103396710A",
+      "sha256": "40daf3402eebfeca201c446d59da860a8953e42a7604df27da289803c4d382be",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/103396710/A/fullimage?Range=1-8",
+      "text_char_count": 0,
+      "title": "Aqueous fireproof coating formula of indoor ultrathin steel structures and preparation technology thereof"
+    },
+    {
+      "byte_size": 1134976,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-09",
+      "file_name": "source_documents/CN103618059A.pdf",
+      "page_count": 8,
+      "publication_date": "2014-03-05",
+      "publication_number": "CN103618059A",
+      "sha256": "055b2932ffc2f18a687ffd95d3200ab11618405844723d006bef9227849f9bfe",
+      "source_provider": "epo_ops",
+      "source_url": "https://ops.epo.org/3.2/rest-services/published-data/images/CN/103618059/A/fullimage?Range=1-8",
+      "text_char_count": 0,
+      "title": "Lithium ion battery diaphragm with polymer inorganic coating and preparation method for lithium ion battery diaphragm"
+    }
+  ],
+  "fixture_version": "decision-benchmark-source-v1",
+  "non_patent_documents": [
+    {
+      "acquisition_status": "missing_external_source",
+      "authors": "焦可伯编著，朱传渠译",
+      "available_for_module5": false,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-02",
+      "pages": "32,46-54,432-434,448（证据10另补目录页）",
+      "publication": "上海科学技术文献出版社",
+      "title": "涂料助剂大全",
+      "year": 2000
+    },
+    {
+      "acquisition_status": "missing_external_source",
+      "authors": "朱万章等",
+      "available_for_module5": false,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-03",
+      "pages": "77-107",
+      "publication": "化学工业出版社",
+      "title": "水性涂料助剂",
+      "year": 2011
+    },
+    {
+      "acquisition_status": "missing_external_source",
+      "authors": "谢筱薇等",
+      "available_for_module5": false,
+      "decision_date_qualified": true,
+      "evidence_label": "evidence-04",
+      "pages": "39-42",
+      "publication": "宁波首届涂料用助剂论坛及应用技术交流会论文集",
+      "title": "水性涂料用增稠剂的选择及研究进展",
+      "year": 2005
+    }
+  ],
+  "runtime_visibility": "source_inputs_only",
+  "target": {
+    "application_number": "201410670329.9",
+    "publication_number": "CN104446515B",
+    "title": "锂离子电池隔膜的高固含量水性陶瓷浆料及其加工方法"
+  },
+  "target_document": {
+    "byte_size": 466801,
+    "decision_date_qualified": false,
+    "evidence_label": "target",
+    "file_name": "target_document/CN104446515B.pdf",
+    "page_count": 7,
+    "publication_date": "2016-06-22",
+    "publication_number": "CN104446515B",
+    "sha256": "ed0e2a10331a18dbbaffc78aa12f9487f24152525d475555406900c1335aebd2",
+    "source_provider": "google_patents_pdf",
+    "source_url": "https://patentimages.storage.googleapis.com/44/73/64/f49a112ade4270/CN104446515B.pdf",
+    "text_char_count": 0,
+    "title": "The high solid content water ceramic size of lithium ion battery separator and processing method thereof"
+  }
+}

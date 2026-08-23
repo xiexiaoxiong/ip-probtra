@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "pn": "US20190300001A1",
+      "claims": [
+        {
+          "lang": "EN",
+          "claim_text": "<div class=\"indep-clm\" num=\"1\">1. An optical sensor comprising a sealed chamber and a switch.</div>",
+          "data_format": "original",
+          "claim_independent_count": 1
+        }
+      ],
+      "patent_id": "718ead9c-4f3c-4674-8f5a-24e126827269",
+      "claim_count": 1
+    }
+  ],
+  "status": true,
+  "error_code": 0
+}

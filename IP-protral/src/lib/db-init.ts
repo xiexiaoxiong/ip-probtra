@@ -42,9 +42,91 @@ async function ensureCoreTables(): Promise<void> {
   `);
 
   await pgQuery(`
+    create table if not exists invalidity_test_resource_owners (
+      resource_kind text not null check (resource_kind in ('investigation', 'module_run')),
+      resource_id text not null,
+      user_id integer not null references users(id) on delete cascade,
+      investigation_id text,
+      created_at timestamptz not null default now(),
+      primary key (resource_kind, resource_id),
+      check (
+        (resource_kind = 'investigation' and investigation_id is null)
+        or (resource_kind = 'module_run' and investigation_id is not null)
+      )
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists invalidity_test_module5_batches (
+      id text primary key,
+      user_id integer not null references users(id) on delete cascade,
+      investigation_id text not null,
+      claim_investigation_id text not null,
+      idempotency_key_sha256 text not null,
+      manifest_sha256 text not null,
+      document_ids jsonb not null,
+      entries jsonb not null default '[]'::jsonb,
+      closest_run_id text,
+      inventive_run_id text,
+      inventive_retry_count integer not null default 0,
+      status text not null default 'creating',
+      last_error text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      completed_at timestamptz,
+      unique (user_id, idempotency_key_sha256)
+    )
+  `);
+  await pgQuery(`
+    alter table invalidity_test_module5_batches
+    add column if not exists inventive_retry_count integer not null default 0
+  `);
+
+  await pgQuery(`
+    create table if not exists invalidity_test_module9_batches (
+      id text primary key,
+      user_id integer not null references users(id) on delete cascade,
+      investigation_id text not null,
+      claim_investigation_id text not null,
+      idempotency_key_sha256 text not null,
+      state jsonb not null default '{}'::jsonb,
+      status text not null default 'running',
+      current_iteration integer not null default 1 check (current_iteration between 1 and 5),
+      last_error text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      completed_at timestamptz,
+      unique (user_id, idempotency_key_sha256)
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists invalidity_upload_receipts (
+      id text primary key,
+      user_id integer not null references users(id) on delete cascade,
+      analysis_session_id text not null,
+      environment text not null check (environment in ('test', 'prod')),
+      purpose text not null check (purpose in ('evidence_import')),
+      file_key text not null,
+      file_name text not null,
+      byte_size bigint not null check (byte_size > 0),
+      sha256 text not null check (sha256 ~ '^[a-f0-9]{64}$'),
+      mime_type text not null,
+      reserved_idempotency_key_sha256 text,
+      consumed_at timestamptz,
+      upstream_action_id text,
+      created_at timestamptz not null default now(),
+      expires_at timestamptz not null,
+      unique (environment, file_key)
+    )
+  `);
+
+  await pgQuery(`
     create table if not exists analysis_sessions (
       id text primary key,
       user_id integer references users(id) on delete cascade,
+      analysis_kind text not null default 'infringement',
+      pipeline_version text,
       status text not null default 'pending',
       input_type text not null,
       input_value text,
@@ -56,6 +138,47 @@ async function ensureCoreTables(): Promise<void> {
       results jsonb not null default '{}'::jsonb,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists patent_agent_conversations (
+      id text primary key,
+      user_id integer not null references users(id) on delete cascade,
+      title text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists patent_agent_messages (
+      id text primary key,
+      conversation_id text not null references patent_agent_conversations(id) on delete cascade,
+      user_id integer not null references users(id) on delete cascade,
+      role text not null check (role in ('user', 'assistant')),
+      content text not null,
+      intent text,
+      attachment jsonb,
+      created_at timestamptz not null default now()
+    )
+  `);
+
+  await pgQuery(`
+    create table if not exists patent_agent_tool_runs (
+      id text primary key,
+      conversation_id text not null references patent_agent_conversations(id) on delete cascade,
+      user_message_id text not null references patent_agent_messages(id) on delete cascade,
+      user_id integer not null references users(id) on delete cascade,
+      tool_kind text not null check (tool_kind in ('infringement', 'invalidity')),
+      tool_version text not null,
+      status text not null default 'queued',
+      analysis_session_id text references analysis_sessions(id) on delete set null,
+      investigation_id text,
+      error_message text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (user_message_id, tool_kind)
     )
   `);
 
@@ -232,6 +355,8 @@ async function ensureCoreTables(): Promise<void> {
   await pgQuery(`alter table claim_compare_results add column if not exists token_units jsonb`);
 
   await pgQuery(`alter table analysis_sessions add column if not exists user_id integer references users(id) on delete cascade`);
+  await pgQuery(`alter table analysis_sessions add column if not exists analysis_kind text not null default 'infringement'`);
+  await pgQuery(`alter table analysis_sessions add column if not exists pipeline_version text`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_title text`);
   await pgQuery(`alter table analysis_sessions add column if not exists patent_number text`);
   await pgQuery(`alter table patent_parse_records add column if not exists abstract_text text`);
@@ -241,12 +366,22 @@ async function ensureCoreTables(): Promise<void> {
   await pgQuery(`create index if not exists idx_users_status on users(status)`);
   await pgQuery(`create index if not exists idx_auth_sessions_user_id on auth_sessions(user_id)`);
   await pgQuery(`create index if not exists idx_auth_sessions_expires_at on auth_sessions(expires_at)`);
+  await pgQuery(`create index if not exists idx_invalidity_test_resource_owners_user on invalidity_test_resource_owners(user_id, resource_kind)`);
+  await pgQuery(`create index if not exists idx_invalidity_test_resource_owners_investigation on invalidity_test_resource_owners(investigation_id) where investigation_id is not null`);
+  await pgQuery(`create index if not exists idx_invalidity_test_module5_batches_owner on invalidity_test_module5_batches(user_id, investigation_id, created_at desc)`);
+  await pgQuery(`create index if not exists idx_invalidity_test_module9_batches_owner on invalidity_test_module9_batches(user_id, investigation_id, created_at desc)`);
+  await pgQuery(`create index if not exists idx_invalidity_upload_receipts_owner on invalidity_upload_receipts(user_id, analysis_session_id, environment)`);
+  await pgQuery(`create index if not exists idx_invalidity_upload_receipts_expiry on invalidity_upload_receipts(expires_at) where consumed_at is null`);
   await pgQuery(`create index if not exists idx_analysis_sessions_user_id on analysis_sessions(user_id)`);
+  await pgQuery(`create index if not exists idx_analysis_sessions_kind on analysis_sessions(analysis_kind)`);
   await pgQuery(`create index if not exists idx_analysis_sessions_status on analysis_sessions(status)`);
   await pgQuery(`create index if not exists idx_analysis_sessions_created_at on analysis_sessions(created_at desc)`);
   await pgQuery(`create index if not exists idx_analysis_steps_session_id on analysis_steps(session_id)`);
   await pgQuery(`create index if not exists idx_error_reports_created_at on error_reports(created_at desc)`);
   await pgQuery(`create index if not exists idx_error_reports_session_id on error_reports(analysis_session_id)`);
+  await pgQuery(`create index if not exists idx_patent_agent_conversations_owner on patent_agent_conversations(user_id, updated_at desc)`);
+  await pgQuery(`create index if not exists idx_patent_agent_messages_conversation on patent_agent_messages(conversation_id, created_at asc)`);
+  await pgQuery(`create index if not exists idx_patent_agent_tool_runs_conversation on patent_agent_tool_runs(conversation_id, created_at asc)`);
 }
 
 async function ensureBootstrapAdmin(): Promise<void> {

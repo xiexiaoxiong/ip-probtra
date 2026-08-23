@@ -52,6 +52,7 @@ def entry_node(
         patent_record_id=state.patent_record_id,
         analysis_session_id=state.analysis_session_id,
         input_keywords=state.input_keywords,
+        input_object_terms=state.input_object_terms,
         product_dataset_id=product_dataset_id,
         retrieval_start_time=retrieval_start_time
     )
@@ -70,13 +71,15 @@ def get_keywords_wrapper(
     input_data = GetKeywordsInput(
         patent_record_id=state.patent_record_id,
         analysis_session_id=state.analysis_session_id,
-        input_keywords=state.input_keywords
+        input_keywords=state.input_keywords,
+        input_object_terms=state.input_object_terms,
     )
 
     result = get_keywords_node(input_data, config, runtime)
 
     return GetKeywordsWrapperOutput(
         keywords=result.keywords,
+        object_terms=result.object_terms,
         error_message=result.error_message
     )
 
@@ -95,6 +98,7 @@ def coze_search_wrapper(
         patent_record_id=state.patent_record_id,
         analysis_session_id=state.analysis_session_id,
         keywords=state.keywords,
+        object_terms=state.object_terms,
         product_dataset_id=state.product_dataset_id,
         retrieval_start_time=state.retrieval_start_time,
         search_run_id=state.search_run_id,

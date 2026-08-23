@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "pn": "US20190300001A1",
+      "patent_id": "718ead9c-4f3c-4674-8f5a-24e126827269",
+      "bibliographic_data": {
+        "abstracts": [
+          {
+            "lang": "EN",
+            "text": "An optical sensor assembly includes a sealed chamber.",
+            "data_format": "original"
+          }
+        ],
+        "invention_title": [
+          {
+            "lang": "EN",
+            "text": "Optical sensor with a sealed switch chamber",
+            "data_format": "original"
+          }
+        ],
+        "priority_claims": [
+          {
+            "date": 20171230,
+            "country": "US",
+            "doc_number": "62/000001"
+          }
+        ],
+        "application_reference": {
+          "date": 20180102,
+          "country": "US",
+          "doc_number": "16/000001"
+        },
+        "publication_reference": {
+          "date": 20191231,
+          "kind": "A1",
+          "country": "US",
+          "doc_number": "20190300001"
+        }
+      }
+    }
+  ],
+  "status": true,
+  "error_code": 0
+}
